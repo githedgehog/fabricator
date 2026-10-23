@@ -81,10 +81,8 @@ func staticExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Deleting ExternalPeering", "name", peeringName)
 		peering := &vpcapi.ExternalPeering{
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name:      peeringName,
-				Namespace: kmetav1.NamespaceDefault,
-			},
+			Name:      peeringName,
+			Namespace: kmetav1.NamespaceDefault,
 		}
 		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, peering)); err != nil {
 			return fmt.Errorf("deleting external peering: %w", err)

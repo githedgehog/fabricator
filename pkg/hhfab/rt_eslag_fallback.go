@@ -100,7 +100,7 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *
 		failures := make([]string, 0)
 		for _, slave := range slaves {
 			ok := 0
-			for i := 0; i < eslagPxeAttemptsPerLeg; i++ {
+			for range eslagPxeAttemptsPerLeg {
 				got := pxeAttempt(ctx, ssh, slave, vlan, eslagPxeDHCPTimeoutSec)
 				if got {
 					ok++
@@ -220,7 +220,7 @@ func restoreServerBond(ctx context.Context, ssh *sshutil.Config, netconfCmd stri
 
 // hasLeasedIPv4 scans hhnet stdout for an "<ip>/<prefix>" success line.
 func hasLeasedIPv4(out string) bool {
-	for _, tok := range strings.Fields(out) {
+	for tok := range strings.FieldsSeq(out) {
 		addr := tok
 		if i := strings.IndexByte(addr, '/'); i >= 0 {
 			addr = addr[:i]

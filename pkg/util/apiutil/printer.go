@@ -41,8 +41,8 @@ func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, o
 			}
 		}
 
-		for idx := 0; idx < itemsLen; idx++ {
-			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
+		for idx := range itemsLen {
+			itemValue, ok := reflect.TypeAssert[kclient.Object](items.Index(idx).Addr())
 			if !ok {
 				return fmt.Errorf("item %d of %T is not an object", idx, objList) //nolint:err113
 			}

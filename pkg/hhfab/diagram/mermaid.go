@@ -482,7 +482,7 @@ func generateMermaid(topo Topology) string {
 
 			connParts := strings.Split(conn, " ---|")
 			sourceID := connParts[0]
-			targetID := strings.Split(strings.Split(connParts[1], "| ")[1], "\n")[0]
+			targetID, _, _ := strings.Cut(strings.Split(connParts[1], "| ")[1], "\n")
 			connectionKey := fmt.Sprintf("%s-%s", sourceID, targetID)
 
 			connType := leafServerTypes[connectionKey]

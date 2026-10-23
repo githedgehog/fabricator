@@ -241,14 +241,14 @@ func dhcpObjects(plan []*dhcpSubnet, pxeURL string) []kclient.Object {
 
 	objs := []kclient.Object{
 		&wiringapi.VLANNamespace{
-			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindVLANNamespace, APIVersion: wiringapi.GroupVersion.String()},
+			Kind: wiringapi.KindVLANNamespace, APIVersion: wiringapi.GroupVersion.String(),
 			ObjectMeta: objMeta(DHCPNamespace, labels),
 			Spec: wiringapi.VLANNamespaceSpec{
 				Ranges: []meta.VLANRange{{From: DHCPVLANFrom, To: DHCPVLANTo}},
 			},
 		},
 		&vpcapi.IPv4Namespace{
-			TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindIPv4Namespace, APIVersion: vpcapi.GroupVersion.String()},
+			Kind: vpcapi.KindIPv4Namespace, APIVersion: vpcapi.GroupVersion.String(),
 			ObjectMeta: objMeta(DHCPNamespace, labels),
 			Spec: vpcapi.IPv4NamespaceSpec{
 				Topology: vpcapi.IPv4NamespaceTopology{Fabric: wiringapi.DefaultFabric},
@@ -261,7 +261,7 @@ func dhcpObjects(plan []*dhcpSubnet, pxeURL string) []kclient.Object {
 	for _, sub := range plan {
 		if vpc == nil || vpc.Name != sub.vpc {
 			vpc = &vpcapi.VPC{
-				TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindVPC, APIVersion: vpcapi.GroupVersion.String()},
+				Kind: vpcapi.KindVPC, APIVersion: vpcapi.GroupVersion.String(),
 				ObjectMeta: objMeta(sub.vpc, labels),
 				Spec: vpcapi.VPCSpec{
 					Mode:          vpcapi.VPCModeL3VNI,

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -190,9 +191,7 @@ func (d *dhcpDemux) replySources() map[netip.Addr]int64 {
 	defer d.mu.Unlock()
 
 	out := make(map[netip.Addr]int64, len(d.sources))
-	for addr, n := range d.sources {
-		out[addr] = n
-	}
+	maps.Copy(out, d.sources)
 
 	return out
 }

@@ -246,40 +246,38 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 		}
 
 		_, err = oras.Copy(ctx, repo, string(version), fs, string(version), oras.CopyOptions{
-			CopyGraphOptions: oras.CopyGraphOptions{
-				Concurrency: 4,
-				PreCopy: func(ctx context.Context, desc ocispec.Descriptor) error {
-					if !slog.Default().Enabled(ctx, slog.LevelInfo) {
-						return nil
-					}
-
-					name := ""
-					if desc.Annotations != nil {
-						name = desc.Annotations["org.opencontainers.image.title"]
-					}
-					if name == "" {
-						return nil
-					}
-
-					name = "Downloading " + name
-
-					bars.Store(desc.Digest.String(), pb.AddSpinner(desc.Size,
-						mpb.PrependDecorators(
-							decor.Name(name, decor.WCSyncSpaceR),
-							decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
-						),
-						mpb.AppendDecorators(
-							// decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30),
-							decor.OnComplete(
-								decor.EwmaETA(decor.ET_STYLE_GO, 30, decor.WCSyncSpace), "done",
-							),
-						)))
-
+			Concurrency: 4,
+			PreCopy: func(ctx context.Context, desc ocispec.Descriptor) error {
+				if !slog.Default().Enabled(ctx, slog.LevelInfo) {
 					return nil
-				},
-				PostCopy:      complete,
-				OnCopySkipped: complete,
+				}
+
+				name := ""
+				if desc.Annotations != nil {
+					name = desc.Annotations["org.opencontainers.image.title"]
+				}
+				if name == "" {
+					return nil
+				}
+
+				name = "Downloading " + name
+
+				bars.Store(desc.Digest.String(), pb.AddSpinner(desc.Size,
+					mpb.PrependDecorators(
+						decor.Name(name, decor.WCSyncSpaceR),
+						decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
+					),
+					mpb.AppendDecorators(
+						// decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30),
+						decor.OnComplete(
+							decor.EwmaETA(decor.ET_STYLE_GO, 30, decor.WCSyncSpace), "done",
+						),
+					)))
+
+				return nil
 			},
+			PostCopy:      complete,
+			OnCopySkipped: complete,
 		})
 		if err != nil {
 			return "", fmt.Errorf("downloading ORAS files from %s: %w", ref, err)

@@ -101,7 +101,7 @@ func InstallFlowControl(_ fabapi.Fabricator) ([]kclient.Object, error) {
 
 	return []kclient.Object{
 		&flowcontrolapi.PriorityLevelConfiguration{
-			ObjectMeta: kmetav1.ObjectMeta{Name: PriorityControl},
+			Name: PriorityControl,
 			Spec: flowcontrolapi.PriorityLevelConfigurationSpec{
 				Type: flowcontrolapi.PriorityLevelEnablementLimited,
 				Limited: &flowcontrolapi.LimitedPriorityLevelConfiguration{
@@ -116,7 +116,7 @@ func InstallFlowControl(_ fabapi.Fabricator) ([]kclient.Object, error) {
 			},
 		},
 		&flowcontrolapi.PriorityLevelConfiguration{
-			ObjectMeta: kmetav1.ObjectMeta{Name: PriorityAgents},
+			Name: PriorityAgents,
 			Spec: flowcontrolapi.PriorityLevelConfigurationSpec{
 				Type: flowcontrolapi.PriorityLevelEnablementLimited,
 				Limited: &flowcontrolapi.LimitedPriorityLevelConfiguration{
@@ -132,7 +132,7 @@ func InstallFlowControl(_ fabapi.Fabricator) ([]kclient.Object, error) {
 			},
 		},
 		&flowcontrolapi.FlowSchema{
-			ObjectMeta: kmetav1.ObjectMeta{Name: SchemaLeaderElection},
+			Name: SchemaLeaderElection,
 			Spec: flowcontrolapi.FlowSchemaSpec{
 				PriorityLevelConfiguration: flowcontrolapi.PriorityLevelConfigurationReference{Name: priorityLeaderElection},
 				MatchingPrecedence:         precedenceLeaderElection,
@@ -149,7 +149,7 @@ func InstallFlowControl(_ fabapi.Fabricator) ([]kclient.Object, error) {
 			},
 		},
 		&flowcontrolapi.FlowSchema{
-			ObjectMeta: kmetav1.ObjectMeta{Name: SchemaControl},
+			Name: SchemaControl,
 			Spec: flowcontrolapi.FlowSchemaSpec{
 				PriorityLevelConfiguration: flowcontrolapi.PriorityLevelConfigurationReference{Name: PriorityControl},
 				MatchingPrecedence:         precedenceControl,
@@ -171,7 +171,7 @@ func InstallFlowControl(_ fabapi.Fabricator) ([]kclient.Object, error) {
 			},
 		},
 		&flowcontrolapi.FlowSchema{
-			ObjectMeta: kmetav1.ObjectMeta{Name: SchemaAgents},
+			Name: SchemaAgents,
 			Spec: flowcontrolapi.FlowSchemaSpec{
 				PriorityLevelConfiguration: flowcontrolapi.PriorityLevelConfigurationReference{Name: PriorityAgents},
 				MatchingPrecedence:         precedenceAgents,

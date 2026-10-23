@@ -314,7 +314,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 				return nil, fmt.Errorf("getting NIC ID for %q: %w", nicName, err)
 			}
 
-			nicType := strings.SplitN(nicConfig, NICTypeSep, 2)[0]
+			nicType, _, _ := strings.Cut(nicConfig, NICTypeSep)
 			if !slices.Contains(NICTypes, nicType) {
 				return nil, fmt.Errorf("invalid NIC type %q for NIC %q of VM %q", nicType, nicName, name) //nolint:err113
 			}

@@ -474,8 +474,8 @@ func init() {
 
 	fabricatorValidate = validator.New()
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
-		if version, ok := field.Interface().(meta.Version); ok {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
+		if version, ok := reflect.TypeAssert[meta.Version](field); ok {
 			_, err := version.Parse()
 			if err != nil {
 				return err //nolint:wrapcheck
@@ -485,8 +485,8 @@ func init() {
 		return nil
 	}, meta.Version(""))
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
-		if addr, ok := field.Interface().(meta.Addr); ok {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
+		if addr, ok := reflect.TypeAssert[meta.Addr](field); ok {
 			_, err := addr.Parse()
 			if err != nil {
 				return err //nolint:wrapcheck
@@ -496,8 +496,8 @@ func init() {
 		return nil
 	}, meta.Addr(""))
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
-		if prefix, ok := field.Interface().(meta.Prefix); ok {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
+		if prefix, ok := reflect.TypeAssert[meta.Prefix](field); ok {
 			_, err := prefix.Parse()
 			if err != nil {
 				return err //nolint:wrapcheck
@@ -633,18 +633,16 @@ func (f *Fabricator) Default() {
 	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets {
 		if _, ok := f.Spec.Config.Observability.Targets.Prometheus[name]; !ok {
 			f.Spec.Config.Observability.Targets.Prometheus[name] = alloy.PrometheusTarget{
-				Target: alloy.Target{
-					URL: target.URL,
-					BasicAuth: &alloy.TargetBasicAuth{
-						Username: target.BasicAuth.Username,
-						Password: target.BasicAuth.Password,
-					},
-					BearerToken:        target.BearerToken,
-					Labels:             target.Labels,
-					InsecureSkipVerify: target.InsecureSkipVerify,
-					CAPEM:              target.CAPEM,
-					CertPEM:            target.CertPEM,
+				URL: target.URL,
+				BasicAuth: &alloy.TargetBasicAuth{
+					Username: target.BasicAuth.Username,
+					Password: target.BasicAuth.Password,
 				},
+				BearerToken:         target.BearerToken,
+				Labels:              target.Labels,
+				InsecureSkipVerify:  target.InsecureSkipVerify,
+				CAPEM:               target.CAPEM,
+				CertPEM:             target.CertPEM,
 				SendIntervalSeconds: target.SendIntervalSeconds,
 			}
 		}
@@ -656,18 +654,16 @@ func (f *Fabricator) Default() {
 	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets {
 		if _, ok := f.Spec.Config.Observability.Targets.Loki[name]; !ok {
 			f.Spec.Config.Observability.Targets.Loki[name] = alloy.LokiTarget{
-				Target: alloy.Target{
-					URL: target.URL,
-					BasicAuth: &alloy.TargetBasicAuth{
-						Username: target.BasicAuth.Username,
-						Password: target.BasicAuth.Password,
-					},
-					BearerToken:        target.BearerToken,
-					Labels:             target.Labels,
-					InsecureSkipVerify: target.InsecureSkipVerify,
-					CAPEM:              target.CAPEM,
-					CertPEM:            target.CertPEM,
+				URL: target.URL,
+				BasicAuth: &alloy.TargetBasicAuth{
+					Username: target.BasicAuth.Username,
+					Password: target.BasicAuth.Password,
 				},
+				BearerToken:        target.BearerToken,
+				Labels:             target.Labels,
+				InsecureSkipVerify: target.InsecureSkipVerify,
+				CAPEM:              target.CAPEM,
+				CertPEM:            target.CertPEM,
 			}
 		}
 	}

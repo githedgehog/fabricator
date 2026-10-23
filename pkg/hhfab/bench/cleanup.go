@@ -148,7 +148,7 @@ func cleanAgents(ctx context.Context, kube kclient.Client, names []string) ([]Cl
 	agentRes := CleanResult{Kind: "Agent"}
 
 	for _, name := range names {
-		agent := &agentapi.Agent{ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}}
+		agent := &agentapi.Agent{Name: name, Namespace: kmetav1.NamespaceDefault}
 
 		deleted, err := deleteIfPresent(ctx, kube, agent)
 		if err != nil {
@@ -171,11 +171,11 @@ func cleanAgents(ctx context.Context, kube kclient.Client, names []string) ([]Cl
 		sa := AgentPrefix + name
 
 		objs := []kclient.Object{
-			&coreapi.Secret{ObjectMeta: kmetav1.ObjectMeta{Name: sa, Namespace: kmetav1.NamespaceDefault}},
-			&coreapi.Secret{ObjectMeta: kmetav1.ObjectMeta{Name: sa + "-satoken", Namespace: kmetav1.NamespaceDefault}},
-			&rbacapi.RoleBinding{ObjectMeta: kmetav1.ObjectMeta{Name: sa, Namespace: kmetav1.NamespaceDefault}},
-			&rbacapi.Role{ObjectMeta: kmetav1.ObjectMeta{Name: sa, Namespace: kmetav1.NamespaceDefault}},
-			&coreapi.ServiceAccount{ObjectMeta: kmetav1.ObjectMeta{Name: sa, Namespace: kmetav1.NamespaceDefault}},
+			&coreapi.Secret{Name: sa, Namespace: kmetav1.NamespaceDefault},
+			&coreapi.Secret{Name: sa + "-satoken", Namespace: kmetav1.NamespaceDefault},
+			&rbacapi.RoleBinding{Name: sa, Namespace: kmetav1.NamespaceDefault},
+			&rbacapi.Role{Name: sa, Namespace: kmetav1.NamespaceDefault},
+			&coreapi.ServiceAccount{Name: sa, Namespace: kmetav1.NamespaceDefault},
 		}
 
 		for _, obj := range objs {

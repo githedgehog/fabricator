@@ -24,7 +24,6 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
@@ -872,36 +871,34 @@ func Run(ctx context.Context) error {
 					}
 
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
-						WorkDir:            workDir,
-						CacheDir:           cacheDir,
-						Repo:               c.String(FlagNameRegistryRepo),
-						Prefix:             c.String(FlagNameRegistryPrefix),
-						ImportConfig:       c.String(FlagNameConfig),
-						Force:              c.Bool(FlagNameForce),
-						Wiring:             c.StringSlice(FlagNameWiring),
-						WiringValues:       c.StringSlice(FlagNameWiringValues),
-						WiringSet:          c.StringSlice(FlagNameWiringSet),
-						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
-						InitConfigInput: fab.InitConfigInput{
-							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
-							TLSSAN:                c.StringSlice(FlagNameTLSSAN),
-							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
-							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
-							Dev:                   c.Bool(FlagNameDev),
-							ExcludeNOSInstallers:  c.Bool(FlagExcludeNOSInstallers),
-							IncludeONIE:           c.Bool(FlagIncludeONIE),
-							IncludeBCM:            c.Bool(FlagIncludeBCM),
-							IncludeCLSP:           c.Bool(FlagIncludeCLSP),
-							IncludeCumulus:        c.Bool(FlagIncludeCumulus),
-							NoPassAuth:            c.Bool(FlagCtrlNoPassAuth),
-							NodeManagementLinks:   mgmtLinks,
-							Gateway:               c.Bool(FlagGateway),
-							Gateways:              c.Int(FlagGateways),
-							JoinToken:             joinToken,
-							SaveJoinToken:         saveJoinToken,
-							O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
-							O11yLabels:            o11yLabels,
-						},
+						WorkDir:               workDir,
+						CacheDir:              cacheDir,
+						Repo:                  c.String(FlagNameRegistryRepo),
+						Prefix:                c.String(FlagNameRegistryPrefix),
+						ImportConfig:          c.String(FlagNameConfig),
+						Force:                 c.Bool(FlagNameForce),
+						Wiring:                c.StringSlice(FlagNameWiring),
+						WiringValues:          c.StringSlice(FlagNameWiringValues),
+						WiringSet:             c.StringSlice(FlagNameWiringSet),
+						ImportHostUpstream:    c.Bool(FlagNameImportHostUpstream),
+						FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
+						TLSSAN:                c.StringSlice(FlagNameTLSSAN),
+						DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
+						DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
+						Dev:                   c.Bool(FlagNameDev),
+						ExcludeNOSInstallers:  c.Bool(FlagExcludeNOSInstallers),
+						IncludeONIE:           c.Bool(FlagIncludeONIE),
+						IncludeBCM:            c.Bool(FlagIncludeBCM),
+						IncludeCLSP:           c.Bool(FlagIncludeCLSP),
+						IncludeCumulus:        c.Bool(FlagIncludeCumulus),
+						NoPassAuth:            c.Bool(FlagCtrlNoPassAuth),
+						NodeManagementLinks:   mgmtLinks,
+						Gateway:               c.Bool(FlagGateway),
+						Gateways:              c.Int(FlagGateways),
+						JoinToken:             joinToken,
+						SaveJoinToken:         saveJoinToken,
+						O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
+						O11yLabels:            o11yLabels,
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)
 					}
@@ -1097,36 +1094,34 @@ func Run(ctx context.Context) error {
 							}
 
 							builder := &hhfab.VLABBuilderDefault{
-								SpinesCount:         uint8(wgSpinesCount),      //nolint:gosec
-								FabricLinksCount:    uint8(wgFabricLinksCount), //nolint:gosec
-								MeshLinksCount:      uint8(wgMeshLinksCount),   //nolint:gosec
-								ESLAGLeafGroups:     wgESLAGLeafGroups,
-								OrphanLeafsCount:    uint8(wgOrphanLeafsCount),  //nolint:gosec
-								ESLAGServers:        uint8(wgESLAGServers),      //nolint:gosec
-								UnbundledServers:    uint8(wgUnbundledServers),  //nolint:gosec
-								BundledServers:      uint8(wgBundledServers),    //nolint:gosec
-								MultiHomedServers:   uint8(wgMultiHomedServers), //nolint:gosec
-								NoSwitches:          wgNoSwitches,
-								GatewayUplinks:      uint8(wgGatewayUplinks), //nolint:gosec
-								GatewayDriver:       wgGatewayDriver,
-								GatewayWorkers:      uint8(wgGatewayWorkers), //nolint:gosec
-								GatewayLogLevel:     c.String(FlagGatewayLogLevel),
-								GatewayTags:         gwTags,
-								ExtBGPCount:         uint8(wgBGPExternals),         //nolint:gosec
-								ExtStaticCount:      uint8(wgStaticExternals),      //nolint:gosec
-								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
-								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
-								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
-								ExtraDomain:         wgExtraDomain,
-								SharedLeafsCount:    uint8(wgSharedLeafsCount), //nolint:gosec
-								ExtraFabric:         wgExtraFabric,
-								InterconnectFabrics: wgInterconnectFabrics,
-								YesFlag:             yes,
-								VLABBuilderBase: hhfab.VLABBuilderBase{
-									DefaultSwitchProfile:   wgDefaultSwitchProfile,
-									SwitchProfileOverrides: overrides,
-									ServerPortBase:         wgServerPortBase,
-								},
+								SpinesCount:            uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:       uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:         uint8(wgMeshLinksCount),   //nolint:gosec
+								ESLAGLeafGroups:        wgESLAGLeafGroups,
+								OrphanLeafsCount:       uint8(wgOrphanLeafsCount),  //nolint:gosec
+								ESLAGServers:           uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:       uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:         uint8(wgBundledServers),    //nolint:gosec
+								MultiHomedServers:      uint8(wgMultiHomedServers), //nolint:gosec
+								NoSwitches:             wgNoSwitches,
+								GatewayUplinks:         uint8(wgGatewayUplinks), //nolint:gosec
+								GatewayDriver:          wgGatewayDriver,
+								GatewayWorkers:         uint8(wgGatewayWorkers), //nolint:gosec
+								GatewayLogLevel:        c.String(FlagGatewayLogLevel),
+								GatewayTags:            gwTags,
+								ExtBGPCount:            uint8(wgBGPExternals),         //nolint:gosec
+								ExtStaticCount:         uint8(wgStaticExternals),      //nolint:gosec
+								ExtStaticProxyCount:    uint8(wgStaticExternalsProxy), //nolint:gosec
+								ExtESLAGConnCount:      uint8(wgExtESLAGConns),        //nolint:gosec
+								ExtOrphanConnCount:     uint8(wgExtOrphanConns),       //nolint:gosec
+								ExtraDomain:            wgExtraDomain,
+								SharedLeafsCount:       uint8(wgSharedLeafsCount), //nolint:gosec
+								ExtraFabric:            wgExtraFabric,
+								InterconnectFabrics:    wgInterconnectFabrics,
+								YesFlag:                yes,
+								DefaultSwitchProfile:   wgDefaultSwitchProfile,
+								SwitchProfileOverrides: overrides,
+								ServerPortBase:         wgServerPortBase,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
@@ -1202,15 +1197,13 @@ func Run(ctx context.Context) error {
 							}
 
 							builder := &hhfab.VLABBuilderGPURail{
-								ScalableUnits:        c.Uint("scalable-units"),
-								VPCs:                 c.Uint("vpcs"),
-								ServersPerVPCPerUnit: c.Uint("servers-per-vpc-per-scalable-unit"),
-								P2P:                  c.Bool("p2p"),
-								VLABBuilderBase: hhfab.VLABBuilderBase{
-									DefaultSwitchProfile:   wgDefaultSwitchProfile,
-									SwitchProfileOverrides: overrides,
-									ServerPortBase:         wgServerPortBase,
-								},
+								ScalableUnits:          c.Uint("scalable-units"),
+								VPCs:                   c.Uint("vpcs"),
+								ServersPerVPCPerUnit:   c.Uint("servers-per-vpc-per-scalable-unit"),
+								P2P:                    c.Bool("p2p"),
+								DefaultSwitchProfile:   wgDefaultSwitchProfile,
+								SwitchProfileOverrides: overrides,
+								ServerPortBase:         wgServerPortBase,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {

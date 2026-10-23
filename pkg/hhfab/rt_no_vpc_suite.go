@@ -42,7 +42,7 @@ type prometheusQueryResponse struct {
 		ResultType string `json:"resultType"`
 		Result     []struct {
 			Metric map[string]string `json:"metric"`
-			Value  []interface{}     `json:"value"`
+			Value  []any             `json:"value"`
 		} `json:"result"`
 	} `json:"data"`
 }
@@ -1090,7 +1090,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			return false, reverts, fmt.Errorf("allocating VLAN for %s: %w", vpcName, err)
 		}
 		hbgp.VPC = &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode:          testCtx.setupOpts.VPCMode,
 				IPv4Namespace: testCtx.setupOpts.IPv4Namespace,
@@ -1187,7 +1187,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			return false, reverts, fmt.Errorf("allocating VLAN for VPC %s: %w", vpcName, err)
 		}
 		regularVPC := &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode:          testCtx.setupOpts.VPCMode,
 				IPv4Namespace: testCtx.setupOpts.IPv4Namespace,
@@ -1255,7 +1255,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 	}
 
 	peeringA := vpcapi.VPCPeering{
-		ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("%s--%s", hbgpVPCAName, regularVPCA.VPC.Name), Namespace: kmetav1.NamespaceDefault},
+		Name: fmt.Sprintf("%s--%s", hbgpVPCAName, regularVPCA.VPC.Name), Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCPeeringSpec{
 			Permit: []map[string]vpcapi.VPCPeer{
 				{
@@ -1273,7 +1273,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 		return false, reverts, fmt.Errorf("creating peering %s: %w", peeringA.Name, err)
 	}
 	peeringB := vpcapi.VPCPeering{
-		ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("%s--%s", hbgpVPCBName, regularVPCB.VPC.Name), Namespace: kmetav1.NamespaceDefault},
+		Name: fmt.Sprintf("%s--%s", hbgpVPCBName, regularVPCB.VPC.Name), Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCPeeringSpec{
 			Permit: []map[string]vpcapi.VPCPeer{
 				{

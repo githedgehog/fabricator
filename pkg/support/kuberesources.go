@@ -263,7 +263,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 
 		itemsLen := items.Len()
 		for idx := range itemsLen {
-			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
+			itemValue, ok := reflect.TypeAssert[kclient.Object](items.Index(idx).Addr())
 			if !ok {
 				return fmt.Errorf("item %d of %s list is not a client object", idx, gvk.String()) //nolint:err113
 			}

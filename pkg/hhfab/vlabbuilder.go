@@ -188,7 +188,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 		totalESLAGLeafs := 0
 		if b.ESLAGLeafGroups != "" {
-			for _, g := range strings.Split(b.ESLAGLeafGroups, ",") {
+			for g := range strings.SplitSeq(b.ESLAGLeafGroups, ",") {
 				if v, err := strconv.Atoi(strings.TrimSpace(g)); err == nil {
 					totalESLAGLeafs += v
 				}
@@ -218,8 +218,8 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	eslagLeafGroups := []uint8{}
 
 	if b.ESLAGLeafGroups != "" {
-		parts := strings.Split(b.ESLAGLeafGroups, ",")
-		for _, part := range parts {
+		parts := strings.SplitSeq(b.ESLAGLeafGroups, ",")
+		for part := range parts {
 			part = strings.TrimSpace(part)
 			leafs, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
@@ -359,13 +359,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindVLANNamespace,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "default",
-		},
+		Kind:       wiringapi.KindVLANNamespace,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       "default",
 		Spec: wiringapi.VLANNamespaceSpec{
 			Ranges: []meta.VLANRange{
 				{From: 1000, To: 2999},
@@ -376,13 +372,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindIPv4Namespace,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "default",
-		},
+		Kind:       vpcapi.KindIPv4Namespace,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       "default",
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Subnets: []string{
 				"10.0.0.0/16",
@@ -460,7 +452,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 		leafs := eslagLeafGroups[eslagID]
 		leafNames := []string{}
-		for eslagLeafID := uint8(0); eslagLeafID < leafs; eslagLeafID++ {
+		for eslagLeafID := range leafs {
 			leafName := fmt.Sprintf("leaf-%02d", leafID+eslagLeafID)
 			leafNames = append(leafNames, leafName)
 			mhESLAGLeaves = append(mhESLAGLeaves, leafName)
@@ -997,13 +989,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindFabric,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: VLABExtraFabric,
-		},
+		Kind:       wiringapi.KindFabric,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       VLABExtraFabric,
 		Spec: wiringapi.FabricSpec{
 			LeafASNStart: 64801,
 			LeafASNEnd:   64899,
@@ -1017,13 +1005,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindIPv4Namespace,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: VLABExtraFabric,
-		},
+		Kind:       vpcapi.KindIPv4Namespace,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       VLABExtraFabric,
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Topology: vpcapi.IPv4NamespaceTopology{Fabric: VLABExtraFabric},
 			Subnets: []string{
@@ -1160,13 +1144,9 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindVLANNamespace,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "default",
-		},
+		Kind:       wiringapi.KindVLANNamespace,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       "default",
 		Spec: wiringapi.VLANNamespaceSpec{
 			Ranges: []meta.VLANRange{
 				{From: startingVLAN, To: 2999},
@@ -1177,13 +1157,9 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindIPv4Namespace,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "default",
-		},
+		Kind:       vpcapi.KindIPv4Namespace,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       "default",
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Subnets: []string{
 				"10.0.0.0/8",
@@ -1379,14 +1355,10 @@ func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabr
 	maps.Copy(spec.Domains, extraDomains)
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindFabric,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: wiringapi.DefaultFabric,
-		},
-		Spec: spec,
+		Kind:       wiringapi.KindFabric,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       wiringapi.DefaultFabric,
+		Spec:       spec,
 	}); err != nil {
 		return fmt.Errorf("creating default fabric: %w", err)
 	}
@@ -1396,15 +1368,11 @@ func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabr
 
 func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
 	sg := &wiringapi.SwitchGroup{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindSwitchGroup,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:   name,
-			Labels: map[string]string{},
-		},
-		Spec: wiringapi.SwitchGroupSpec{},
+		Kind:       wiringapi.KindSwitchGroup,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       name,
+		Labels:     map[string]string{},
+		Spec:       wiringapi.SwitchGroupSpec{},
 	}
 
 	if err := b.data.Add(ctx, sg); err != nil {
@@ -1424,15 +1392,11 @@ func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wi
 	b.switchID++
 
 	sw := &wiringapi.Switch{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindSwitch,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:        name,
-			Annotations: anns,
-		},
-		Spec: spec,
+		Kind:        wiringapi.KindSwitch,
+		APIVersion:  wiringapi.GroupVersion.String(),
+		Name:        name,
+		Annotations: anns,
+		Spec:        spec,
 	}
 
 	if err := b.data.Add(ctx, sw); err != nil {
@@ -1444,14 +1408,10 @@ func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wi
 
 func (b *VLABBuilderBase) createServer(ctx context.Context, name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
 	server := &wiringapi.Server{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindServer,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: spec,
+		Kind:       wiringapi.KindServer,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       name,
+		Spec:       spec,
 	}
 
 	if err := b.data.Add(ctx, server); err != nil {
@@ -1463,15 +1423,11 @@ func (b *VLABBuilderBase) createServer(ctx context.Context, name string, spec wi
 
 func (b *VLABBuilderBase) createGateway(ctx context.Context, name string, spec gwapi.GatewaySpec) (*gwapi.Gateway, error) {
 	gw := &gwapi.Gateway{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "Gateway",
-			APIVersion: gwapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
-		Spec: spec,
+		Kind:       "Gateway",
+		APIVersion: gwapi.GroupVersion.String(),
+		Name:       name,
+		Namespace:  kmetav1.NamespaceDefault,
+		Spec:       spec,
 	}
 
 	if err := b.data.Add(ctx, gw); err != nil {
@@ -1483,14 +1439,10 @@ func (b *VLABBuilderBase) createGateway(ctx context.Context, name string, spec g
 
 func (b *VLABBuilderBase) createGatewayGroup(ctx context.Context, name string) (*gwapi.GatewayGroup, error) {
 	gw := &gwapi.GatewayGroup{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "GatewayGroup",
-			APIVersion: gwapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Kind:       "GatewayGroup",
+		APIVersion: gwapi.GroupVersion.String(),
+		Name:       name,
+		Namespace:  kmetav1.NamespaceDefault,
 	}
 
 	if err := b.data.Add(ctx, gw); err != nil {
@@ -1506,15 +1458,11 @@ func (b *VLABBuilderBase) createConnection(ctx context.Context, spec wiringapi.C
 
 func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name string, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
 	conn := &wiringapi.Connection{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindConnection,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:   name,
-			Labels: map[string]string{},
-		},
-		Spec: spec,
+		Kind:       wiringapi.KindConnection,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       name,
+		Labels:     map[string]string{},
+		Spec:       spec,
 	}
 
 	if err := b.data.Add(ctx, conn); err != nil {
@@ -1526,15 +1474,11 @@ func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name str
 
 func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec, anns map[string]string) (*vpcapi.External, error) {
 	external := &vpcapi.External{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "External",
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:        name,
-			Annotations: anns,
-		},
-		Spec: spec,
+		Kind:        "External",
+		APIVersion:  vpcapi.GroupVersion.String(),
+		Name:        name,
+		Annotations: anns,
+		Spec:        spec,
 	}
 
 	if err := b.data.Add(ctx, external); err != nil {
@@ -1546,14 +1490,10 @@ func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec 
 
 func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) { //nolint:unparam
 	externalAttach := &vpcapi.ExternalAttachment{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "ExternalAttachment",
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: spec,
+		Kind:       "ExternalAttachment",
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       name,
+		Spec:       spec,
 	}
 
 	if err := b.data.Add(ctx, externalAttach); err != nil {
@@ -1565,14 +1505,10 @@ func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string,
 
 func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcapi.VPCSpec) (*vpcapi.VPC, error) {
 	vpc := &vpcapi.VPC{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "VPC",
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: spec,
+		Kind:       "VPC",
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       name,
+		Spec:       spec,
 	}
 
 	if err := b.data.Add(ctx, vpc); err != nil {
@@ -1584,15 +1520,11 @@ func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcap
 
 func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, spec vpcapi.VPCAttachmentSpec, anns map[string]string) (*vpcapi.VPCAttachment, error) {
 	vpc := &vpcapi.VPCAttachment{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       "VPCAttachment",
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:        name,
-			Annotations: anns,
-		},
-		Spec: spec,
+		Kind:        "VPCAttachment",
+		APIVersion:  vpcapi.GroupVersion.String(),
+		Name:        name,
+		Annotations: anns,
+		Spec:        spec,
 	}
 
 	if err := b.data.Add(ctx, vpc); err != nil {

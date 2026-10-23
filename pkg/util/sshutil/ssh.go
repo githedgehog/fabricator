@@ -114,8 +114,7 @@ func (c *Config) Run(ctx context.Context, cmd string) (string, string, error) {
 // returns false for connect/session-setup failures and context
 // cancellation/timeout, where the command may never have run.
 func ExitStatus(err error) (int, bool) {
-	var exitErr *ssh.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*ssh.ExitError](err); ok {
 		return exitErr.ExitStatus(), true
 	}
 
