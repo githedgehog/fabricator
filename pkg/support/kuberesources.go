@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strconv"
 	"strings"
 
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -33,6 +34,7 @@ import (
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,6 +79,7 @@ var kubeResourceGVKs = []schema.GroupVersionKind{
 	appsv1.SchemeGroupVersion.WithKind(""),
 	apiextv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"),
 	metricsapi.SchemeGroupVersion.WithKind(""),
+	helmapi.SchemeGroupVersion.WithKind(""),
 	fabapi.GroupVersion.WithKind(""),
 	wiringapi.GroupVersion.WithKind(""),
 	vpcapi.GroupVersion.WithKind(""),
@@ -103,6 +106,30 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			for k := range cm.Data {
 				cm.Data[k] = RedactedValue
 			}
+		}
+	},
+	// values hold the rendered component configs, e.g. alloy one has the target credentials
+	helmapi.SchemeGroupVersion.WithKind("HelmChart"): func(obj kclient.Object) {
+		chart := obj.(*helmapi.HelmChart)
+
+		if chart.Spec.ValuesContent != "" {
+			chart.Spec.ValuesContent = RedactedValue
+		}
+		if chart.Spec.Values != nil {
+			chart.Spec.Values = redactedJSON()
+		}
+		for k := range chart.Spec.Set {
+			chart.Spec.Set[k] = intstr.FromString(RedactedValue)
+		}
+	},
+	helmapi.SchemeGroupVersion.WithKind("HelmChartConfig"): func(obj kclient.Object) {
+		chartCfg := obj.(*helmapi.HelmChartConfig)
+
+		if chartCfg.Spec.ValuesContent != "" {
+			chartCfg.Spec.ValuesContent = RedactedValue
+		}
+		if chartCfg.Spec.Values != nil {
+			chartCfg.Spec.Values = redactedJSON()
 		}
 	},
 	fabapi.GroupVersion.WithKind(fabapi.KindFabricator): func(obj kclient.Object) {
@@ -148,6 +175,10 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			agent.Spec.Users[name] = user
 		}
 	},
+}
+
+func redactedJSON() *apiextv1.JSON {
+	return &apiextv1.JSON{Raw: []byte(strconv.Quote(RedactedValue))}
 }
 
 func redactAlloyTargets(targets *alloy.Targets) {

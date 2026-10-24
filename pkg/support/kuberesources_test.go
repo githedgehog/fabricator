@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -20,9 +21,11 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/libmeta/pkg/alloy"
 	corev1 "k8s.io/api/core/v1"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -151,6 +154,21 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 			Data: map[string]string{"config.alloy": leakedValue},
 		},
 		&corev1.ConfigMap{Name: "plain", Namespace: comp.FabNamespace, Annotations: copyAnnotations},
+		&helmapi.HelmChart{
+			Name: "alloy-ctrl", Namespace: comp.FabNamespace,
+			Spec: helmapi.HelmChartSpec{
+				ValuesContent: leakedValue,
+				Values:        &apiextv1.JSON{Raw: []byte(`{"password":"` + leakedValue + `"}`)},
+				Set:           map[string]intstr.IntOrString{"password": intstr.FromString(leakedValue)},
+			},
+		},
+		&helmapi.HelmChartConfig{
+			Name: "alloy-ctrl", Namespace: comp.FabNamespace,
+			Spec: helmapi.HelmChartConfigSpec{
+				ValuesContent: leakedValue,
+				Values:        &apiextv1.JSON{Raw: []byte(`{"password":"` + leakedValue + `"}`)},
+			},
+		},
 	}
 
 	scheme := runtime.NewScheme()
