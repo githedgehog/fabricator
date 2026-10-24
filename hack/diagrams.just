@@ -3,6 +3,7 @@
 test-diagram vlab_workdir="" y="": _check-hhfab
   @if [ -n "{{vlab_workdir}}" ]; then mkdir -p test-diagram/live; fi
   @mkdir -p test-diagram/default test-diagram/3spine test-diagram/mesh test-diagram/4eslag2orphan
+  @mkdir -p test-diagram/multidomain test-diagram/multifabric test-diagram/multifabricmesh test-diagram/multifabricdomain
   @echo "==============================================="
   @echo "Diagram generation test - various topologies, formats, and styles"
   @if [ -n "{{vlab_workdir}}" ]; then echo "Live diagrams from vlab workdir: {{vlab_workdir}}"; fi
@@ -89,6 +90,42 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format dot --output test-diagram/4eslag2orphan/4eslag2orphan.dot
   bin/hhfab diagram --format mermaid --output test-diagram/4eslag2orphan/4eslag2orphan.mermaid
 
+  @echo "=== Generating diagrams for multi-domain topology ==="
+  bin/hhfab vlab gen --extra-domain
+
+  bin/hhfab diagram --format drawio --style default --output test-diagram/multidomain/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/multidomain/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/multidomain/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/multidomain/multidomain.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/multidomain/multidomain.mermaid
+
+  @echo "=== Generating diagrams for multi-fabric topology ==="
+  bin/hhfab vlab gen --extra-fabric --interconnect-fabrics
+
+  bin/hhfab diagram --format drawio --style default --output test-diagram/multifabric/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/multifabric/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/multifabric/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/multifabric/multifabric.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/multifabric/multifabric.mermaid
+
+  @echo "=== Generating diagrams for multi-fabric topology with a mesh fabric ==="
+  bin/hhfab vlab gen --mesh-links-count 2 --extra-fabric --interconnect-fabrics
+
+  bin/hhfab diagram --format drawio --style default --output test-diagram/multifabricmesh/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/multifabricmesh/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/multifabricmesh/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/multifabricmesh/multifabricmesh.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/multifabricmesh/multifabricmesh.mermaid
+
+  @echo "=== Generating diagrams for multi-fabric topology with several domains ==="
+  bin/hhfab vlab gen --extra-domain --shared-leafs-count 2 --extra-fabric --interconnect-fabrics
+
+  bin/hhfab diagram --format drawio --style default --output test-diagram/multifabricdomain/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/multifabricdomain/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/multifabricdomain/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/multifabricdomain/multifabricdomain.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/multifabricdomain/multifabricdomain.mermaid
+
   # Convert DRAWIO files to SVG
   @echo "=== Converting DRAWIO files to SVG ==="
   @if command -v drawio >/dev/null 2>&1; then \
@@ -136,6 +173,10 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   @echo "- 3-spine VLAB topology: test-diagram/3spine/"
   @echo "- 4-eslag-2-orphan topology: test-diagram/4eslag2orphan/"
   @echo "- Mesh topology: test-diagram/mesh/"
+  @echo "- Multi-domain topology: test-diagram/multidomain/"
+  @echo "- Multi-fabric topology: test-diagram/multifabric/"
+  @echo "- Multi-fabric topology with a mesh fabric: test-diagram/multifabricmesh/"
+  @echo "- Multi-fabric topology with several domains: test-diagram/multifabricdomain/"
   @if [ -n "{{vlab_workdir}}" ]; then echo "- Live diagrams (if VLAB in {{vlab_workdir}}): test-diagram/live/"; fi
 
   @just _create-html
