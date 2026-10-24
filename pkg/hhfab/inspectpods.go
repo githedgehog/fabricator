@@ -43,7 +43,7 @@ func (c *Config) InspectPods(ctx context.Context, opts InspectPodsOpts) error {
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
+		return err
 	}
 	defer cacheCancel()
 
