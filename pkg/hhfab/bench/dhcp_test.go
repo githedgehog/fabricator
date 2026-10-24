@@ -586,15 +586,15 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 	}
 
 	demux := newDHCPDemux()
-	fake := newFakeDHCPD(demux, plan)
+	dhcpd := newFakeDHCPD(demux, plan)
 	if setup != nil {
-		setup(fake)
+		setup(dhcpd)
 	}
 
 	stats := newDHCPRoundStats(0, 1, layout.Servers)
 	checks := newDHCPChecks()
 	clients := &dhcpClients{
-		send: fake.send, demux: demux, relay: net.ParseIP("172.30.0.38"), stats: stats, checks: checks,
+		send: dhcpd.send, demux: demux, relay: net.ParseIP("172.30.0.38"), stats: stats, checks: checks,
 		osSched: osSchedule, pxeSched: pxeSchedule, repeatSched: repeatSchedule,
 	}
 
@@ -607,7 +607,7 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 	servers := newDHCPServers(plan)
 	took := runDHCPStorm(t.Context(), clients, servers, held, opts, stats)
 
-	return stats.result(0, took, checks, servers, false), servers, fake
+	return stats.result(0, took, checks, servers, false), servers, dhcpd
 }
 
 func failedChecks(res *dhcpRoundResult) map[checkName]int64 {

@@ -509,7 +509,7 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 	gwPeerings := make(map[string]*gwapi.PeeringSpec, len(vpcs.Items))
 
 	// Create loop: VPC0↔VPC1↔VPC2↔...↔VPCn-1↔VPC0
-	for i := 0; i < len(vpcs.Items); i++ {
+	for i := range len(vpcs.Items) {
 		vpc1 := &vpcs.Items[i]
 		vpc2 := &vpcs.Items[(i+1)%len(vpcs.Items)] // wrap around to create loop
 
@@ -592,7 +592,7 @@ func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	gwPeerings := make(map[string]*gwapi.PeeringSpec, 0)
 
 	// Create alternating VPC and Gateway peerings to form a complete loop
-	for i := 0; i < len(vpcs.Items); i++ {
+	for i := range len(vpcs.Items) {
 		vpc1 := &vpcs.Items[i]
 		vpc2 := &vpcs.Items[(i+1)%len(vpcs.Items)] // wrap around to create loop
 

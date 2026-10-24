@@ -682,7 +682,7 @@ func generateDOT(topo Topology) string {
 
 func writeChain(b *strings.Builder, nodes []Node) {
 	if len(nodes) > 1 {
-		for i := 0; i < len(nodes)-1; i++ {
+		for i := range len(nodes) - 1 {
 			b.WriteString(fmt.Sprintf("\t\"%s\" -> \"%s\" [style=invis, weight=100];\n", nodes[i].ID, nodes[i+1].ID))
 		}
 	}

@@ -357,11 +357,11 @@ func TestInstallLogShape(t *testing.T) {
 	lines := installLog(DefaultBootLogLines, total)
 	require.Len(t, lines, DefaultBootLogLines)
 
-	for idx := range len(installLogHead) {
+	for idx := range installLogHead {
 		require.Zero(t, lines[idx].at)
 		require.Equal(t, installLogHead[idx], lines[idx].msg)
 	}
-	for idx := range len(installLogTail) {
+	for idx := range installLogTail {
 		line := lines[len(lines)-len(installLogTail)+idx]
 		require.Equal(t, total, line.at)
 		require.Equal(t, installLogTail[idx], line.msg)

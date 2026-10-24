@@ -444,7 +444,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	mhLeaves := []string{}
 	mhESLAGLeaves := []string{}
 
-	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ { //nolint:gosec
+	for eslagID := range uint8(len(eslagLeafGroups)) { //nolint:gosec
 		sg := fmt.Sprintf("eslag-%d", eslagID+1)
 		if _, err := b.createSwitchGroup(ctx, sg); err != nil {
 			return err
@@ -483,7 +483,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		switchID += leafs
 		leafID += leafs
 
-		for i := 0; i < int(b.ESLAGServers); i++ {
+		for range b.ESLAGServers {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			leafNamesStr := strings.Join(leafNames, " ")
@@ -512,7 +512,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			serverID++
 		}
 
-		for i := 0; i < int(b.UnbundledServers); i++ {
+		for range b.UnbundledServers {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
@@ -536,7 +536,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		}
 
 		if leafs > 1 {
-			for i := 0; i < int(b.BundledServers); i++ {
+			for range b.BundledServers {
 				serverName := fmt.Sprintf("server-%02d", serverID)
 
 				if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
@@ -592,7 +592,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		switchID++
 		leafID++
 
-		for i := 0; i < int(b.UnbundledServers); i++ {
+		for range b.UnbundledServers {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
@@ -615,7 +615,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			serverID++
 		}
 
-		for i := 0; i < int(b.BundledServers); i++ {
+		for range b.BundledServers {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
@@ -719,7 +719,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			}
 
 			links := []wiringapi.FabricLink{}
-			for spinePortID := uint8(0); spinePortID < b.FabricLinksCount; spinePortID++ {
+			for range b.FabricLinksCount {
 				spinePort := b.nextSwitchPort(spineName)
 				leafPort := b.nextSwitchPort(leafName)
 
@@ -776,7 +776,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 				leaf2Name := fmt.Sprintf("leaf-%02d", leaf2ID)
 
 				links := []wiringapi.MeshLink{}
-				for leaf1PortID := uint8(0); leaf1PortID < b.MeshLinksCount; leaf1PortID++ {
+				for range b.MeshLinksCount {
 					leaf1Port := b.nextSwitchPort(leaf1Name)
 					leaf2Port := b.nextSwitchPort(leaf2Name)
 

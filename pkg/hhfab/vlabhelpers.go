@@ -978,17 +978,17 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 	wg.Wait()
 	close(errChan)
 
-	errors := lo.ChannelToSlice(errChan)
+	errs := lo.ChannelToSlice(errChan)
 
 	if successCount.Load() == 0 {
-		return fmt.Errorf("failed to collect any diagnostics: %v", errors) //nolint:err113
+		return fmt.Errorf("failed to collect any diagnostics: %v", errs) //nolint:err113
 	}
 
-	if len(errors) > 0 {
+	if len(errs) > 0 {
 		slog.Warn("Some diagnostics collection failed",
 			"success_count", successCount.Load(),
 			"total_count", len(targets),
-			"errors", errors)
+			"errors", errs)
 	}
 
 	// Collect show-tech from a hardware external SONiC switch.

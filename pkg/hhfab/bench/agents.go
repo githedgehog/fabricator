@@ -341,19 +341,19 @@ func (a *agentSim) run(ctx context.Context, stop <-chan struct{}, opts AgentsOpt
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 
-	// retry is armed whenever there is no watch - because opening one failed or
+	// retryAt is armed whenever there is no watch - because opening one failed or
 	// the apiserver closed it - and reopens it after watchRetryDelay. Without
 	// it a single failed watch would leave the agent heartbeating but never
 	// applying for the rest of the run, and a watch the apiserver keeps closing
 	// would be reopened in a tight loop against the server being measured.
-	var retry <-chan time.Time
+	var retryAt <-chan time.Time
 
 	for {
 		var events <-chan watchEvent
 		if watcher != nil {
 			events = watcher.events
-		} else if retry == nil {
-			retry = time.After(watchRetryDelay)
+		} else if retryAt == nil {
+			retryAt = time.After(watchRetryDelay)
 		}
 
 		select {
@@ -363,8 +363,8 @@ func (a *agentSim) run(ctx context.Context, stop <-chan struct{}, opts AgentsOpt
 			return
 		case <-ticker.C:
 			a.beat(ctx)
-		case <-retry:
-			retry = nil
+		case <-retryAt:
+			retryAt = nil
 			watcher = a.watch(ctx)
 		case ev, ok := <-events:
 			if !ok {

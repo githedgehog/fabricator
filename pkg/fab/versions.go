@@ -121,8 +121,8 @@ var Versions = fabapi.Versions{
 	},
 }
 
-func CleanupFabricNOSVersion(version string) string {
-	return strings.ReplaceAll(version, "_", "-")
+func CleanupFabricNOSVersion(ver string) string {
+	return strings.ReplaceAll(ver, "_", "-")
 }
 
 func ReleaseChannel() (string, error) {
