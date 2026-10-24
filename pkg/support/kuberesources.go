@@ -160,6 +160,11 @@ func redactAlloyTargets(targets *alloy.Targets) {
 		redactAlloyTarget(&target.Target)
 		targets.Loki[name] = target
 	}
+
+	for name, target := range targets.Pyroscope {
+		redactAlloyTarget(&target.Target)
+		targets.Pyroscope[name] = target
+	}
 }
 
 func redactAlloyTarget(target *alloy.Target) {
