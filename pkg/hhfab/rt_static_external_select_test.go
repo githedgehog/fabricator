@@ -30,11 +30,9 @@ type seServer struct {
 // picks its target from.
 func seUnbundledConn(server, sw string) *wiringapi.Connection {
 	return &wiringapi.Connection{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      server + "--unbundled--" + sw,
-			Namespace: kmetav1.NamespaceDefault,
-			Labels:    map[string]string{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled},
-		},
+		Name:      server + "--unbundled--" + sw,
+		Namespace: kmetav1.NamespaceDefault,
+		Labels:    map[string]string{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled},
 		Spec: wiringapi.ConnectionSpec{
 			Unbundled: &wiringapi.ConnUnbundled{
 				Link: wiringapi.ServerToSwitchLink{
@@ -50,11 +48,9 @@ func seUnbundledConn(server, sw string) *wiringapi.Connection {
 // keeps its server attached to a VPC.
 func seBundledConn(server, sw string) *wiringapi.Connection {
 	return &wiringapi.Connection{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      server + "--bundled--" + sw,
-			Namespace: kmetav1.NamespaceDefault,
-			Labels:    map[string]string{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled},
-		},
+		Name:      server + "--bundled--" + sw,
+		Namespace: kmetav1.NamespaceDefault,
+		Labels:    map[string]string{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled},
 		Spec: wiringapi.ConnectionSpec{
 			Bundled: &wiringapi.ConnBundled{
 				Links: []wiringapi.ServerToSwitchLink{
@@ -105,18 +101,16 @@ func seFixture(t *testing.T, servers []seServer, revCandidates, revVPCs bool) (k
 		if !slices.Contains(vpcNames, s.vpc) {
 			vpcNames = append(vpcNames, s.vpc)
 			objs = append(objs, &vpcapi.VPC{
-				ObjectMeta: kmetav1.ObjectMeta{Name: s.vpc, Namespace: kmetav1.NamespaceDefault},
+				Name: s.vpc, Namespace: kmetav1.NamespaceDefault,
 			})
 		}
 
 		objs = append(objs, &vpcapi.VPCAttachment{
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name:      conn.Name + "--" + s.vpc + "--" + s.subnet,
-				Namespace: kmetav1.NamespaceDefault,
-				Labels: map[string]string{
-					wiringapi.LabelConnection: conn.Name,
-					wiringapi.LabelVPC:        s.vpc,
-				},
+			Name:      conn.Name + "--" + s.vpc + "--" + s.subnet,
+			Namespace: kmetav1.NamespaceDefault,
+			Labels: map[string]string{
+				wiringapi.LabelConnection: conn.Name,
+				wiringapi.LabelVPC:        s.vpc,
 			},
 			Spec: vpcapi.VPCAttachmentSpec{
 				Subnet:     s.vpc + "/" + s.subnet,
@@ -128,7 +122,7 @@ func seFixture(t *testing.T, servers []seServer, revCandidates, revVPCs bool) (k
 	vpcList := &vpcapi.VPCList{}
 	for _, name := range vpcNames {
 		vpcList.Items = append(vpcList.Items, vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault},
+			Name: name, Namespace: kmetav1.NamespaceDefault,
 		})
 	}
 

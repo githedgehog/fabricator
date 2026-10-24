@@ -18,7 +18,6 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -159,11 +158,11 @@ func TestGetNICID(t *testing.T) {
 func TestCreateVLABConfigInterconnect(t *testing.T) {
 	l := apiutil.NewLoader()
 	b := &VLABBuilderDefault{
-		ExtBGPCount:         1,
-		ExtOrphanConnCount:  1,
-		ExtraFabric:         true,
-		InterconnectFabrics: true,
-		VLABBuilderBase:     VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+		ExtBGPCount:          1,
+		ExtOrphanConnCount:   1,
+		ExtraFabric:          true,
+		InterconnectFabrics:  true,
+		DefaultSwitchProfile: meta.SwitchProfileVS,
 	}
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()
@@ -173,7 +172,7 @@ func TestCreateVLABConfigInterconnect(t *testing.T) {
 	require.NoError(t, err)
 
 	// leaf-03 is the last leaf of the main fabric, and also has the connection to the virtual external
-	ports := []string{}
+	ports := []string{} //nolint:prealloc
 	for _, name := range []string{"leaf-03--interconnect", "leaf-04--interconnect"} {
 		conn := &wiringapi.Connection{}
 		require.NoError(t, l.GetClient().Get(t.Context(), kclient.ObjectKey{Name: name}, conn))
@@ -217,10 +216,10 @@ func TestVLABSSHKey(t *testing.T) {
 }
 
 func TestCreateVLABConfigHardwareGateway(t *testing.T) {
-	nodes := []fabapi.FabNode{}
+	nodes := []fabapi.FabNode{} //nolint:prealloc
 	for _, name := range []string{"gateway-1", "gateway-2"} {
 		nodes = append(nodes, fabapi.FabNode{
-			ObjectMeta: kmetav1.ObjectMeta{Name: name},
+			Name: name,
 			Spec: fabapi.FabNodeSpec{
 				Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
 				Management: fabapi.ControlNodeManagement{Interface: "enp2s0"},
@@ -230,8 +229,8 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 
 	l := apiutil.NewLoader()
 	b := &VLABBuilderDefault{
-		GatewayLogLevel: "info",
-		VLABBuilderBase: VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+		GatewayLogLevel:      "info",
+		DefaultSwitchProfile: meta.SwitchProfileVS,
 	}
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()

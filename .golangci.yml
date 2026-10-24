@@ -1,20 +1,20 @@
 version: "2"
 
 # Migrated from golangci-lint v1.64.8 keeping the v1 coverage. Everything the upgraded or new checks report on the
-# current code is disabled below with a TODO. Plan to enable them, roughly cheapest first (issue counts as of v2.15.0):
+# current code is disabled below with a TODO. Plan to enable them, roughly cheapest first (issue counts as of v2.15.0
+# on Linux):
 #
 #   1. staticcheck QF* quickfix checks (new in v2): 81 issues, auto-fixable with `just lint-fix`
-#   2. goconst detection in composite literals: 55 issues
-#   3. Linting tests and the release tests helpers: 204 issues, see linters.exclusions.paths
-#   4. Default exclusions inherited from v1, see linters.exclusions.presets
-#   5. nolintlint require-explanation: 766 directives without explanation
-#   6. Linters with issues on the current code: intrange (15), forcetypeassert (16), godoclint (29), perfsprint (217),
+#   2. goconst detection in composite literals: 150 issues
+#   3. Default exclusions inherited from v1, see linters.exclusions.presets
+#   4. nolintlint require-explanation: 942 directives without explanation
+#   5. Linters with issues on the current code: intrange (20), forcetypeassert (22), godoclint (30), perfsprint (286),
 #      forbidigo (23, needs settings as it forbids fmt.Print* by default)
-#   7. Stricter sloglint options: msg-style capitalized (22), static-msg (26), key-naming-case camel (52) or snake
-#      (79), args-on-sep-lines (293), no-raw-keys (671)
-#   8. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
-#   9. More revive rules (from kubebuilder): unused-parameter (11, mostly to be renamed to _), import-shadowing (12,
-#      4 of them are the scoped loggers named slog)
+#   6. Stricter sloglint options: msg-style capitalized (26), static-msg (26), key-naming-case camel (62) or snake
+#      (102), args-on-sep-lines (347), no-raw-keys (790)
+#   7. goconst detection in function call arguments: 659 issues, needs evaluation as it may be too noisy
+#   8. More revive rules (from kubebuilder): unused-parameter (15, mostly to be renamed to _), import-shadowing (16,
+#      3 of them are the scoped loggers named slog)
 #
 # Complexity and line length linters (cyclop, funlen, gocognit, gocyclo, maintidx, nestif, lll, ...) aren't planned.
 # wastedassign isn't planned either as ineffassign already reports the lost values, it only adds the zero value
@@ -97,7 +97,7 @@ linters:
     - revive
     - sloglint
     # Not planned: conflicts with the K8s API conventions (e.g. fabricatorAPI instead of fabricatorApi) and external
-    # APIs field names, 40 issues
+    # APIs field names, 48 issues
     # - tagliatelle
     - unconvert
     - unparam
@@ -113,9 +113,9 @@ linters:
         - mapliteral # renamed from map in v2
     goconst:
       exclude-types:
-        # TODO evaluate detection in function call arguments (v1 and v2 default to skip it): 531 issues
+        # TODO evaluate detection in function call arguments (v1 and v2 default to skip it): 659 issues
         - Call
-        # TODO enable detection in composite literals added in goconst v1.11.0 (v1 had v1.7.1): 55 issues
+        # TODO enable detection in composite literals added in goconst v1.11.0 (v1 had v1.7.1): 150 issues
         - CompositeLit
     gosec:
       excludes:
@@ -144,9 +144,9 @@ linters:
     govet:
       enable-all: true
       disable:
-        # Not planned: optimizes struct memory layout at the cost of readable fields order, 128 issues
+        # Not planned: optimizes struct memory layout at the cost of readable fields order, 159 issues
         - fieldalignment
-        # Not planned: reports the idiomatic err shadowing, 229 of 239 issues are about err
+        # Not planned: reports the idiomatic err shadowing, 271 of 285 issues are about err
         - shadow
     importas:
       no-unaliased: true
@@ -206,6 +206,9 @@ linters:
         # The following rules are recommended https://github.com/mgechev/revive#recommended-configuration
         - name: blank-imports
         - name: context-as-argument
+          arguments:
+            # test helpers take the *testing.T first
+            - allowTypesBefore: "*testing.T"
         - name: context-keys-type
         - name: dot-imports
         - name: error-return
@@ -240,7 +243,7 @@ linters:
       # ST1020, ST1021 and ST1022 (the ones about comments are still excluded by the comments preset)
       checks:
         - all
-        # TODO enable quickfix checks (new in v2): 81 issues, QF1012 x74, QF1003 x6, QF1008 x1
+        # TODO enable quickfix checks (new in v2): 81 issues, QF1012 x71, QF1003 x9, QF1008 x1
         - -QF*
 
   exclusions:
@@ -248,19 +251,16 @@ linters:
     generated: lax
     # Default exclusions in v1 (exclude-use-default: true)
     presets:
-      # TODO enable: 124 issues about missing or malformed doc comments, staticcheck ST1000/ST1020/ST1021/ST1022
+      # TODO enable: 130 issues about missing or malformed doc comments, staticcheck ST1000/ST1020/ST1021/ST1022
       # (also revive exported and package-comments rules that aren't enabled)
       - comments
-      # Not planned: gosec G204 subprocess launched with variable x16 and G304 file inclusion via variable x36 as
+      # Not planned: gosec G204 subprocess launched with variable x16 and G304 file inclusion via variable x43 as
       # running commands and reading/writing the user-provided files is what the installer and CLI do (also G103
       # unsafe calls, no issues)
       - common-false-positives
-      # TODO enable: 154 issues, errcheck on Close, Flush, os.Remove(All), fmt.Print*, os.(Un)Setenv and std streams
+      # TODO enable: 157 issues, errcheck on Close, Flush, os.Remove(All), fmt.Print*, os.(Un)Setenv and std streams
       - std-error-handling
     paths:
-      # TODO remove: matches any path containing test, so the tests (67 issues, usetesting is effectively disabled
-      # until then) and the release tests in pkg/hhfab (129 issues in testing.go, 8 in rt_nat_tests.go) aren't linted
-      - test
       # Not planned: third-party code
       - vendor
 

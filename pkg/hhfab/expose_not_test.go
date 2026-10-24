@@ -129,7 +129,7 @@ func TestExposeEntryWithoutAnyFieldIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error for a malformed expose entry")
 	}
-	if errors.Is(err, reachCheckUnsupported) {
+	if errors.Is(err, errReachCheckUnsupported) {
 		t.Fatalf("expected a plain error, got %v", err)
 	}
 }

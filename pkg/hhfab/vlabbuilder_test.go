@@ -23,13 +23,13 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 
 	for name, builder := range map[string]VLABBuilder{
 		"default": &VLABBuilderDefault{
-			VLABBuilderBase: VLABBuilderBase{DefaultSwitchProfile: fmeta.SwitchProfileVS},
+			DefaultSwitchProfile: fmeta.SwitchProfileVS,
 		},
 		"gpu-rail": &VLABBuilderGPURail{
 			ScalableUnits:        1,
 			VPCs:                 1,
 			ServersPerVPCPerUnit: 1,
-			VLABBuilderBase:      VLABBuilderBase{DefaultSwitchProfile: fmeta.SwitchProfileVS},
+			DefaultSwitchProfile: fmeta.SwitchProfileVS,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

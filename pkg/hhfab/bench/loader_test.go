@@ -26,8 +26,8 @@ func TestApplyStopsAfterAnEmptyRequestedPhase(t *testing.T) {
 	// rather than carrying on and creating the VPC.
 	l := apiutil.NewLoader()
 	require.NoError(t, l.Add(ctx,
-		&wiringapi.Switch{ObjectMeta: kmetav1.ObjectMeta{Name: "sw1", Namespace: kmetav1.NamespaceDefault}},
-		&vpcapi.VPC{ObjectMeta: kmetav1.ObjectMeta{Name: "vpc1", Namespace: kmetav1.NamespaceDefault}},
+		&wiringapi.Switch{Name: "sw1", Namespace: kmetav1.NamespaceDefault},
+		&vpcapi.VPC{Name: "vpc1", Namespace: kmetav1.NamespaceDefault},
 	))
 
 	scheme, err := benchScheme()

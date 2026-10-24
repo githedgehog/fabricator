@@ -403,7 +403,7 @@ func TestGetServerHostBGPCmd(t *testing.T) {
 		}}
 	}
 	bundled := func(ports ...string) *wiringapi.Connection {
-		links := []wiringapi.ServerToSwitchLink{}
+		links := []wiringapi.ServerToSwitchLink{} //nolint:prealloc
 		for _, port := range ports {
 			links = append(links, wiringapi.ServerToSwitchLink{Server: wiringapi.BasePortName{Port: port}})
 		}
@@ -637,7 +637,7 @@ func TestServerTopology(t *testing.T) {
 			l := apiutil.NewLoader()
 			for idx, leaf := range test.leaves {
 				conn := &wiringapi.Connection{
-					ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("conn-%d", idx), Namespace: kmetav1.NamespaceDefault},
+					Name: fmt.Sprintf("conn-%d", idx), Namespace: kmetav1.NamespaceDefault,
 					Spec: wiringapi.ConnectionSpec{Unbundled: &wiringapi.ConnUnbundled{Link: wiringapi.ServerToSwitchLink{
 						Server: wiringapi.BasePortName{Port: fmt.Sprintf("server-01/enp2s%d", idx+1)},
 						Switch: wiringapi.BasePortName{Port: leaf + "/E1/1"},
@@ -647,7 +647,7 @@ func TestServerTopology(t *testing.T) {
 				require.NoError(t, l.Add(t.Context(), conn))
 			}
 
-			server := &wiringapi.Server{ObjectMeta: kmetav1.ObjectMeta{Name: "server-01"}}
+			server := &wiringapi.Server{Name: "server-01"}
 			topology, err := serverTopology(t.Context(), l.GetClient(), server, switches)
 			if test.err != "" {
 				require.ErrorContains(t, err, test.err)

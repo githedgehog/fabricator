@@ -258,7 +258,7 @@ func TestAllocatorDomains(t *testing.T) {
 	require.Equal(t, uint(4), a.Units())
 
 	for domain, want := range []uint{0, 1, 2} {
-		unit, err := a.Unit(0, uint(domain)) //nolint:gosec // tiny
+		unit, err := a.Unit(0, uint(domain)) // tiny
 		require.NoError(t, err)
 		require.Equal(t, want, unit)
 	}

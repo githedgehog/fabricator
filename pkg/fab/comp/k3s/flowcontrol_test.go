@@ -14,7 +14,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	flowcontrolapi "k8s.io/api/flowcontrol/v1"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -150,7 +149,7 @@ func TestServerConfigRaisesInflight(t *testing.T) {
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Spec.Config.Control.VIP = "172.30.0.1/32"
 	control := fabapi.ControlNode{
-		ObjectMeta: kmetav1.ObjectMeta{Name: "control-1"},
+		Name: "control-1",
 		Spec: fabapi.ControlNodeSpec{
 			Management: fabapi.ControlNodeManagement{IP: meta.Prefix("172.30.0.5/21"), Interface: "enp2s1"},
 		},

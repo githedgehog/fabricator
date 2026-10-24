@@ -48,9 +48,7 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 				MatchLabels: labels,
 			},
 			Template: coreapi.PodTemplateSpec{
-				ObjectMeta: kmetav1.ObjectMeta{
-					Labels: labels,
-				},
+				Labels: labels,
 				Spec: coreapi.PodSpec{
 					Affinity: &coreapi.Affinity{
 						NodeAffinity: &coreapi.NodeAffinity{

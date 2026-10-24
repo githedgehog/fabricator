@@ -80,9 +80,10 @@ func TestAnalyzeThrottle(t *testing.T) {
 
 	base := time.Date(2026, 10, 21, 20, 0, 0, 0, time.UTC)
 	at := func(step int, pod, uid, cgroup string, periods, throttled int64, held time.Duration) podCPUAt {
-		return podCPUAt{At: base.Add(time.Duration(step) * 15 * time.Second), PodCPU: PodCPU{
+		return podCPUAt{
+			At:  base.Add(time.Duration(step) * 15 * time.Second),
 			Pod: pod, UID: uid, Cgroup: cgroup, Limit: 1, Periods: periods, Throttled: throttled, ThrottledTime: held,
-		}}
+		}
 	}
 
 	const dhcpd, db = "fabric-dhcpd-68bcdfb48c-ctkzz", "db-0"
@@ -140,9 +141,10 @@ func TestAnalyzeThrottleContainerLimitsOnly(t *testing.T) {
 
 	base := time.Date(2026, 10, 21, 20, 0, 0, 0, time.UTC)
 	row := func(step int, cgroup string, limit float64, periods, throttled int64) podCPUAt {
-		return podCPUAt{At: base.Add(time.Duration(step) * 15 * time.Second), PodCPU: PodCPU{
+		return podCPUAt{
+			At:  base.Add(time.Duration(step) * 15 * time.Second),
 			Pod: "mixed-6bb684d9b5-k9lff", UID: "m", Cgroup: cgroup, Limit: limit, Periods: periods, Throttled: throttled,
-		}}
+		}
 	}
 
 	stats := analyzeThrottle([]podCPUAt{
@@ -199,7 +201,7 @@ func TestThrottleRoundTrip(t *testing.T) {
 	out, err := createCSV(path, throttleHeader)
 	require.NoError(t, err)
 
-	want := []podCPUAt{}
+	want := []podCPUAt{} //nolint:prealloc
 	for _, row := range parsePodCPU(throttleOutput) {
 		want = append(want, podCPUAt{At: at, PodCPU: row})
 		require.NoError(t, out.Write(podCPUAt{At: at, PodCPU: row}.record()))

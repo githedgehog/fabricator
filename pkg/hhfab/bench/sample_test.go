@@ -4,6 +4,7 @@
 package bench
 
 import (
+	"maps"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -207,9 +208,7 @@ func TestParseSampleNothingUsable(t *testing.T) {
 // mk builds a sample from column values.
 func mk(at time.Time, vals map[string]float64) Sample {
 	out := Sample{At: at, Values: map[string]float64{}}
-	for col, val := range vals {
-		out.Values[col] = val
-	}
+	maps.Copy(out.Values, vals)
 
 	return out
 }
@@ -245,9 +244,7 @@ func series(sizes, inUse []int64, compactAt map[int]bool, extra map[string]float
 			"current_rev": float64(current),
 		}
 
-		for col, val := range extra {
-			vals[col] = val
-		}
+		maps.Copy(vals, extra)
 
 		out = append(out, mk(base.Add(time.Duration(idx)*30*time.Second), vals))
 	}
@@ -266,7 +263,7 @@ func reading(t *testing.T, samples []Sample) string {
 	out := []string{}
 	keep := false
 
-	for _, line := range strings.Split(buf.String(), "\n") {
+	for line := range strings.SplitSeq(buf.String(), "\n") {
 		switch {
 		case strings.Contains(line, "reading"):
 			keep = true
@@ -446,9 +443,7 @@ func etcdAt(step int, counters map[string]float64) Sample {
 	vals := map[string]float64{
 		"db_size": 100, "db_in_use": 50, "compact_rev": 1, "current_rev": 2,
 	}
-	for col, val := range counters {
-		vals[col] = val
-	}
+	maps.Copy(vals, counters)
 
 	return mk(time.Date(2026, 9, 29, 12, step, 0, 0, time.UTC), vals)
 }

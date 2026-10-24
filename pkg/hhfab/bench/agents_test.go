@@ -24,7 +24,7 @@ func TestParseSize(t *testing.T) {
 		"1MiB":     1048576,
 		"2K":       2048,
 		"4096B":    4096,
-		" 100KB  ": 100000,
+		" 100KB  ": 100000, //nolint:gocritic // whitespace on purpose to test the trimming
 	} {
 		got, err := bench.ParseSize(value)
 		require.NoError(t, err, "parsing %q", value)

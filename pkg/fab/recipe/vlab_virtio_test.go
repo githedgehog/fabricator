@@ -20,7 +20,6 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ignitionFile returns the decoded contents of the file at path in an
@@ -94,7 +93,7 @@ func TestIgnitionHasVLABVirtioNames(t *testing.T) {
 	control := &ControlInstallBuilder{
 		Fab: testFab(),
 		Control: fabapi.ControlNode{
-			ObjectMeta: kmetav1.ObjectMeta{Name: "control-1"},
+			Name: "control-1",
 			Spec: fabapi.ControlNodeSpec{
 				Management: mgmt,
 				External:   fabapi.ControlNodeExternal{IP: meta.PrefixOrDHCP("dhcp"), Interface: "enp2s0"},
@@ -110,7 +109,7 @@ func TestIgnitionHasVLABVirtioNames(t *testing.T) {
 	node := &NodeInstallBuilder{
 		Fab: testFab(),
 		Node: fabapi.FabNode{
-			ObjectMeta: kmetav1.ObjectMeta{Name: "gateway-1"},
+			Name: "gateway-1",
 			Spec: fabapi.FabNodeSpec{
 				Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
 				Management: mgmt,
