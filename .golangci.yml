@@ -8,8 +8,7 @@ version: "2"
 #   2. goconst detection in composite literals: 150 issues
 #   3. Default exclusions inherited from v1, see linters.exclusions.presets
 #   4. nolintlint require-explanation: 942 directives without explanation
-#   5. Linters with issues on the current code: forcetypeassert (22), godoclint (30), perfsprint (286), forbidigo (23,
-#      needs settings as it forbids fmt.Print* by default)
+#   5. Linters with issues on the current code: forcetypeassert (22), godoclint (30), perfsprint (286)
 #   6. Stricter sloglint options: msg-style capitalized (26), static-msg (26), key-naming-case camel (62) or snake
 #      (102), args-on-sep-lines (347), no-raw-keys (790)
 #   7. goconst detection in function call arguments: 659 issues, needs evaluation as it may be too noisy
@@ -61,6 +60,7 @@ linters:
     - exptostd
     - copyloopvar
     - fatcontext
+    - forbidigo
     - ginkgolinter
     - gocheckcompilerdirectives
     - gochecksumtype
@@ -107,6 +107,16 @@ linters:
     - wrapcheck
 
   settings:
+    forbidigo:
+      # match by the actual package, so aliased imports are caught too
+      analyze-types: true
+      forbid:
+        # the default pattern, replaced by this list: catches the debug prints, the actual output goes to an
+        # explicit writer, e.g. fmt.Fprintln(os.Stdout, ...)
+        - pattern: ^(fmt\.Print(|f|ln)|print|println)$
+        - pattern: ^ptr\.To$
+          pkg: ^k8s\.io/utils/ptr$
+          msg: use new(x)
     exhaustive:
       check:
         - switch
@@ -182,6 +192,10 @@ linters:
               desc: use stdlib slices or samber/lo package
             - pkg: "sort$"
               desc: use stdlib slices package
+            # deprecated in favor of k8s.io/utils/ptr, and new(x) replaces its helpers since Go 1.26 (ptr.To is
+            # forbidden by forbidigo while the rest of k8s.io/utils/ptr is fine)
+            - pkg: "k8s.io/utils/pointer$"
+              desc: use new(x)
             - pkg: gopkg.in/yaml
               desc: use sigs.k8s.io/yaml
             - pkg: go.githedgehog.com/fabric/pkg/agent

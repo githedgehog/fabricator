@@ -343,7 +343,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 		if err != nil {
 			return fmt.Errorf("marshalling versions: %w", err)
 		}
-		fmt.Println(string(data))
+		fmt.Fprintln(os.Stdout, string(data))
 
 		return nil
 	}
@@ -360,7 +360,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 		return fmt.Errorf("marshalling versions: %w", err)
 	}
 
-	fmt.Println(string(data))
+	fmt.Fprintln(os.Stdout, string(data))
 
 	return nil
 }
