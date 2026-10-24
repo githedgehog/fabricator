@@ -43,6 +43,15 @@ const (
 	RedactedValue = "SUPPORT-DUMP-REDACTED"
 )
 
+// redactedAnnotations are removed from every collected object, as they hold a copy of the object's content and so
+// bypass the per-kind redactors: kubectl's one is the plaintext object as last applied, wrangler's one (used by k3s
+// and its helm-controller) is the object with every string cut to 64 characters, so base64 Secret data shorter than
+// that survives in full
+var redactedAnnotations = []string{
+	"kubectl.kubernetes.io/last-applied-configuration",
+	"objectset.rio.cattle.io/applied",
+}
+
 var schemeBuilders = []func(*runtime.Scheme) error{
 	corev1.AddToScheme, appsv1.AddToScheme, rbacv1.AddToScheme, metricsapi.AddToScheme, apiextv1.AddToScheme,
 	helmapi.AddToScheme,
@@ -270,11 +279,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 
 			itemValue.GetObjectKind().SetGroupVersionKind(gvk)
 
-			if redactors != nil {
-				if redactor, ok := redactors[gvk]; ok {
-					redactor(itemValue)
-				}
-			}
+			redactKubeObject(itemValue, redactors[gvk])
 
 			if objs > 0 {
 				if _, err := fmt.Fprintf(w, "---\n"); err != nil {
@@ -292,9 +297,19 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 	return nil
 }
 
+func redactKubeObject(obj kclient.Object, redactor kubeResourceRedactorFunc) {
+	annotations := obj.GetAnnotations()
+	for _, key := range redactedAnnotations {
+		delete(annotations, key)
+	}
+
+	if redactor != nil {
+		redactor(obj)
+	}
+}
+
 func printKubeObject(obj kclient.Object, w io.Writer) error {
 	obj.SetManagedFields(nil)
-	delete(obj.GetAnnotations(), "kubectl.kubernetes.io/last-applied-configuration")
 
 	buf, err := kyaml.Marshal(obj)
 	if err != nil {
