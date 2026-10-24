@@ -244,7 +244,7 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.extName, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -329,7 +329,7 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.extName, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -442,7 +442,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.extName, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -537,7 +537,7 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.extName, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -681,7 +681,7 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.staticExtName, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -766,7 +766,7 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.staticExtName, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -877,7 +877,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.staticExtName, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
@@ -972,7 +972,7 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
-	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+	if err := testCtx.waitForNATPool(ctx, vpc, testCtx.staticExtName, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
