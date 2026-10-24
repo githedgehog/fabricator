@@ -47,11 +47,7 @@ func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 func ExtractOutletID(rawURL string) (int, error) {
 	parts := strings.Split(rawURL, "/")
 
-	// Check if URL has at least 1 part (outlet ID is expected to be the last part)
-	if len(parts) < 1 {
-		return 0, fmt.Errorf("invalid URL format: expected at least one part") //nolint:err113
-	}
-
+	// outlet ID is expected to be the last part, an empty one fails to parse below
 	outletID := parts[len(parts)-1]
 	id, err := strconv.Atoi(outletID)
 	if err != nil {

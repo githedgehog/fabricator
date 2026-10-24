@@ -98,7 +98,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
+		return err
 	}
 	defer cacheCancel()
 
@@ -488,11 +488,11 @@ type ServerAttachState struct {
 }
 
 func getServerAttachState(ctx context.Context, kube kclient.Client, server *wiringapi.Server, checkVPCMode bool) (ServerAttachState, error) {
+	if server == nil {
+		return ServerAttachState{}, fmt.Errorf("server is nil") //nolint:err113
+	}
 	sa := ServerAttachState{
 		ServerName: server.Name,
-	}
-	if server == nil {
-		return sa, fmt.Errorf("server is nil") //nolint:err113
 	}
 
 	conns := &wiringapi.ConnectionList{}
@@ -732,7 +732,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating kube client: %w", err)
+		return nil, nil, err
 	}
 	defer cacheCancel()
 
@@ -1442,7 +1442,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
+		return err
 	}
 	defer cacheCancel()
 
@@ -1652,8 +1652,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	reqNames := map[string]bool{}
 	for _, req := range opts.Requests {
 		parts := strings.Split(req, ":")
-		if len(parts) < 1 {
-			return fmt.Errorf("invalid request %q format", req) //nolint:err113
+		if parts[0] == "" {
+			return fmt.Errorf("invalid request %q format, name should be non-empty", req) //nolint:err113
 		}
 
 		reqName := parts[0]
@@ -2620,7 +2620,7 @@ func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating kube client: %w", err)
+		return nil, nil, nil, err
 	}
 
 	switches := &wiringapi.SwitchList{}
@@ -3430,7 +3430,7 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 			return stdout, stderr, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, stderr)
 		}
 
-		return stdout, stderr, fmt.Errorf("running remote command: %w", err)
+		return stdout, stderr, err //nolint:wrapcheck // sshutil already wraps it as "running command"
 	}
 
 	return stdout, stderr, nil
@@ -4253,7 +4253,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
+		return err
 	}
 	defer cacheCancel()
 
