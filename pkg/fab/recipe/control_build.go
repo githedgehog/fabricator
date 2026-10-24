@@ -85,8 +85,8 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	})
 }
 
-func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, installDir string) error {
-	slog.Info("Adding k3s and tools to installer")
+func (b *ControlInstallBuilder) addPayload(ctx context.Context, l *slog.Logger, installDir string) error {
+	l.Info("Adding k3s and tools to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, k3s.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: k3s.BinName,
@@ -102,7 +102,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading k3s: %w", err)
 	}
 
-	slog.Info("Adding toolbox to installer")
+	l.Info("Adding toolbox to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxArchiveRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
 		{
 			Name: flatcar.ToolboxArchiveBin,
@@ -119,7 +119,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading k9s: %w", err)
 	}
 
-	slog.Info("Adding zot to installer")
+	l.Info("Adding zot to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, zot.AirgapRef, zot.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: zot.AirgapImageName,
@@ -131,7 +131,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading zot: %w", err)
 	}
 
-	slog.Info("Adding flatcar upgrade bin to installer")
+	l.Info("Adding flatcar upgrade bin to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.UpdateRef, flatcar.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: flatcar.UpdateBinName,
@@ -140,7 +140,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading flatcar-update: %w", err)
 	}
 
-	slog.Info("Adding cert-manager to installer")
+	l.Info("Adding cert-manager to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, certmanager.AirgapRef, certmanager.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: certmanager.AirgapImageName,
@@ -152,7 +152,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading cert-manager: %w", err)
 	}
 
-	slog.Info("Adding bash-completion to installer", "control", b.Control.Name)
+	l.Info("Adding bash-completion to installer", "control", b.Control.Name)
 
 	bashCompletionDir := filepath.Join(installDir, "bash-completion")
 	if err := os.MkdirAll(bashCompletionDir, 0o755); err != nil {
@@ -176,7 +176,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading bash-completion: %w", err)
 	}
 
-	slog.Info("Adding config and wiring files to installer")
+	l.Info("Adding config and wiring files to installer")
 	fabF, err := os.Create(filepath.Join(installDir, FabName))
 	if err != nil {
 		return fmt.Errorf("creating fab file: %w", err)
@@ -197,7 +197,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("printing include: %w", err)
 	}
 
-	slog.Info("Adding CLIs to installer")
+	l.Info("Adding CLIs to installer")
 	// TODO remove if it'll be managed by control agent?
 	if err := b.Downloader.FromORAS(ctx, installDir, fabric.CtlRef, b.Fab.Status.Versions.Fabric.Ctl, []artificer.ORASFile{
 		{
@@ -217,7 +217,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	}
 
 	if b.Fab.Spec.Config.Registry.IsAirgap() {
-		slog.Info("Adding airgap artifacts to installer")
+		l.Info("Adding airgap artifacts to installer")
 
 		arts := slices.Clone(AirgapArtifactsBase)
 		if b.Fab.Spec.Config.Gateway.Enable {
@@ -228,8 +228,8 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 			return fmt.Errorf("collecting airgap artifacts: %w", err)
 		}
 
-		for ref, version := range airgapArts {
-			if err := b.Downloader.GetOCI(ctx, ref, version, installDir); err != nil {
+		for ref, ver := range airgapArts {
+			if err := b.Downloader.GetOCI(ctx, ref, ver, installDir); err != nil {
 				return fmt.Errorf("downloading airgap artifact %q: %w", ref, err)
 			}
 		}

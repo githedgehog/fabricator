@@ -44,8 +44,8 @@ func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 	return outlets, lo.Keys(ipSet), nil
 }
 
-func ExtractOutletID(url string) (int, error) {
-	parts := strings.Split(url, "/")
+func ExtractOutletID(rawURL string) (int, error) {
+	parts := strings.Split(rawURL, "/")
 
 	// Check if URL has at least 1 part (outlet ID is expected to be the last part)
 	if len(parts) < 1 {
@@ -61,8 +61,8 @@ func ExtractOutletID(url string) (int, error) {
 	return id, nil
 }
 
-func GetPDUIPFromURL(url string) (string, error) {
-	parts := strings.Split(url, "/")
+func GetPDUIPFromURL(rawURL string) (string, error) {
+	parts := strings.Split(rawURL, "/")
 
 	// URL must have at least 3 parts: http://PDUIP/outlet/PORT
 	if len(parts) < 3 {

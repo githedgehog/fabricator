@@ -233,7 +233,7 @@ func processFilesParallel(fileMap map[string][]string, outputDirectory string) (
 	resultChan := make(chan FileProcessingResult, 100)
 
 	var wg sync.WaitGroup
-	for i := 0; i < MaxWorkers; i++ {
+	for range MaxWorkers {
 		wg.Add(1)
 		go worker(workChan, resultChan, &wg, outputDirectory)
 	}

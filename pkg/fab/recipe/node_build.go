@@ -64,8 +64,8 @@ func (b *NodeInstallBuilder) Build(ctx context.Context) error {
 	})
 }
 
-func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, installDir string) error {
-	slog.Info("Adding k3s to installer")
+func (b *NodeInstallBuilder) addPayload(ctx context.Context, l *slog.Logger, installDir string) error {
+	l.Info("Adding k3s to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, k3s.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: k3s.BinName,
@@ -81,7 +81,7 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 		return fmt.Errorf("downloading k3s: %w", err)
 	}
 
-	slog.Info("Adding toolbox to installer")
+	l.Info("Adding toolbox to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxArchiveRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
 		{
 			Name: flatcar.ToolboxArchiveBin,
@@ -90,7 +90,7 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 		return fmt.Errorf("downloading toolbox: %w", err)
 	}
 
-	slog.Info("Adding flatcar upgrade bin to installer")
+	l.Info("Adding flatcar upgrade bin to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.UpdateRef, flatcar.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: flatcar.UpdateBinName,
@@ -99,7 +99,7 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 		return fmt.Errorf("downloading flatcar-update: %w", err)
 	}
 
-	slog.Info("Adding config files to installer")
+	l.Info("Adding config files to installer")
 	fabF, err := os.Create(filepath.Join(installDir, FabName))
 	if err != nil {
 		return fmt.Errorf("creating fab file: %w", err)
@@ -110,7 +110,7 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 		return fmt.Errorf("printing fab: %w", err)
 	}
 
-	slog.Info("Adding node config to installer")
+	l.Info("Adding node config to installer")
 	if err := b.Downloader.GetOCI(ctx, f8r.NodeConfigRef, b.Fab.Status.Versions.Fabricator.NodeConfig, installDir); err != nil {
 		return fmt.Errorf("downloading node config: %w", err)
 	}

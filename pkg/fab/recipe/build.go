@@ -93,7 +93,7 @@ type buildInstallOpts struct {
 	Type                  Type
 	Mode                  BuildMode
 	Hash                  string
-	AddPayload            func(ctx context.Context, slog *slog.Logger, installDir string) error
+	AddPayload            func(ctx context.Context, l *slog.Logger, installDir string) error
 	BuildIgnition         func() ([]byte, error)
 	Downloader            *artificer.Downloader
 	FlatcarUSBRootVersion meta.Version
@@ -104,7 +104,7 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("invalid build mode %q", opts.Mode) //nolint:err113
 	}
 
-	slog := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
+	l := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
 
 	fullName := string(opts.Type) + Separator + opts.Name + Separator
 	installDir := filepath.Join(opts.WorkDir, fullName+InstallSuffix)
@@ -124,7 +124,7 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 			files = []string{installDir, installISOImage}
 		}
 		if string(existingHash) == opts.Hash && isPresent(files...) {
-			slog.Info("Using existing installer")
+			l.Info("Using existing installer")
 
 			return nil
 		}
@@ -157,9 +157,9 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("creating install dir: %w", err)
 	}
 
-	slog.Info("Building installer")
+	l.Info("Building installer")
 
-	slog.Info("Adding recipe bin and config to installer")
+	l.Info("Adding recipe bin and config to installer")
 	recipeBin, err := recipebin.Bytes()
 	if err != nil {
 		return fmt.Errorf("getting recipe bin: %w", err)
@@ -172,18 +172,18 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("saving recipe config: %w", err)
 	}
 
-	if err := opts.AddPayload(ctx, slog, installDir); err != nil {
+	if err := opts.AddPayload(ctx, l, installDir); err != nil {
 		return fmt.Errorf("adding payload: %w", err)
 	}
 
 	switch opts.Mode {
 	case BuildModeManual:
-		slog.Debug("Archiving installer", "path", installArchive)
+		l.Debug("Archiving installer", "path", installArchive)
 		if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
 			return fmt.Errorf("archiving install: %w", err)
 		}
 
-		slog.Debug("Creating ignition", "path", installIgnition)
+		l.Debug("Creating ignition", "path", installIgnition)
 		ign, err := opts.BuildIgnition()
 		if err != nil {
 			return fmt.Errorf("creating ignition: %w", err)
@@ -193,7 +193,7 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 			return fmt.Errorf("writing ignition: %w", err)
 		}
 
-		slog.Info("Installer build completed", "ignition", installIgnition, "archive", installArchive)
+		l.Info("Installer build completed", "ignition", installIgnition, "archive", installArchive)
 	case BuildModeUSB, BuildModeISO:
 		if err := buildUSBImage(ctx, opts); err != nil {
 			return fmt.Errorf("building USB image: %w", err)
@@ -229,9 +229,9 @@ const (
 )
 
 func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
-	slog := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
+	l := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
 
-	slog.Info("Building installer image, may take up to 5-10 minutes")
+	l.Info("Building installer image, may take up to 5-10 minutes")
 
 	fullName := string(opts.Type) + Separator + opts.Name + Separator
 	installUSBImage := filepath.Join(opts.WorkDir, fullName+InstallUSBImageSuffix)
@@ -342,47 +342,47 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:err113
 	}
 
-	slog.Info("Adding /EFI to image", "fs", fs1.Label())
+	l.Info("Adding /EFI to image", "fs", fs1.Label())
 	if err := diskFSCopyTree(tempDir, "/EFI", fs1); err != nil {
 		return fmt.Errorf("adding EFI dir: %w", err)
 	}
 
-	slog.Info("Adding /boot to image", "fs", fs1.Label())
+	l.Info("Adding /boot to image", "fs", fs1.Label())
 	if err := diskFSCopyTree(tempDir, "/boot", fs1); err != nil {
 		return fmt.Errorf("adding boot dir: %w", err)
 	}
 
-	slog.Info("Adding /images to image", "fs", fs1.Label())
+	l.Info("Adding /images to image", "fs", fs1.Label())
 	if err := diskFSCopyTree(tempDir, "/images", fs1); err != nil {
 		return fmt.Errorf("adding images dir: %w", err)
 	}
 
-	slog.Info("Adding flatcar.cpio.gz to image", "fs", fs1.Label())
+	l.Info("Adding flatcar.cpio.gz to image", "fs", fs1.Label())
 	if err := diskFSCopyFile("/", filepath.Join(tempDir, "flatcar_production_pxe_image.cpio.gz"), fs1); err != nil {
 		return fmt.Errorf("adding flatcar cpio: %w", err)
 	}
 
-	slog.Info("Adding oem.cpio.gz to image", "fs", fs1.Label())
+	l.Info("Adding oem.cpio.gz to image", "fs", fs1.Label())
 	if err := diskFSCopyFile("/", filepath.Join(tempDir, "oem.cpio.gz"), fs1); err != nil {
 		return fmt.Errorf("adding oem cpio: %w", err)
 	}
 
-	slog.Info("Adding flatcar.vmlinuz to image", "fs", fs1.Label())
+	l.Info("Adding flatcar.vmlinuz to image", "fs", fs1.Label())
 	if err := diskFSCopyFile("/", filepath.Join(tempDir, "flatcar_production_pxe.vmlinuz"), fs1); err != nil {
 		return fmt.Errorf("adding flatcar vmlinuz: %w", err)
 	}
 
-	slog.Info("Adding flatcar.bin to image", "fs", fs2.Label())
+	l.Info("Adding flatcar.bin to image", "fs", fs2.Label())
 	if err := diskFSCopyFile("/", filepath.Join(tempDir, "/flatcar_production_image.bin.bz2"), fs2); err != nil {
 		return fmt.Errorf("adding flatcar image: %w", err)
 	}
 
-	slog.Info("Adding install bundle to image", "fs", fs2.Label())
+	l.Info("Adding install bundle to image", "fs", fs2.Label())
 	if err := diskFSCopyTree(opts.WorkDir, fullName+InstallSuffix, fs2); err != nil {
 		return fmt.Errorf("adding install: %w", err)
 	}
 
-	slog.Info("Adding ignition to image", "fs", fs2.Label())
+	l.Info("Adding ignition to image", "fs", fs2.Label())
 	ign, err := opts.BuildIgnition()
 	if err != nil {
 		return fmt.Errorf("building ignition: %w", err)
@@ -397,7 +397,7 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("writing ignition: %w", err)
 	}
 
-	slog.Info("Finalizing image")
+	l.Info("Finalizing image")
 
 	if opts.Mode == BuildModeUSB {
 		if err := fs1.(*fat32.FileSystem).Commit(); err != nil {
@@ -430,7 +430,7 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("removing install usb image workdir: %w", err)
 	}
 
-	slog.Info("Installer image completed", "path", diskImgPath)
+	l.Info("Installer image completed", "path", diskImgPath)
 
 	return nil
 }

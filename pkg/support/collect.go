@@ -44,11 +44,11 @@ func Collect(ctx context.Context, name, kubeconfigPath string, quiet bool) (*Dum
 
 	username := ""
 	{
-		user, err := user.Current()
+		current, err := user.Current()
 		if err != nil {
 			slog.Warn("Can't get current user, skipping", "err", err)
 		} else {
-			username = user.Username
+			username = current.Username
 		}
 	}
 

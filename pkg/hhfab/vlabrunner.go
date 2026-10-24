@@ -1255,8 +1255,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	return nil
 }
 
-func sshReadMarker(sftp *sftp.Client) (string, error) {
-	f, err := sftp.Open(recipe.InstallMarkerFile)
+func sshReadMarker(client *sftp.Client) (string, error) {
+	f, err := client.Open(recipe.InstallMarkerFile)
 	if err != nil {
 		return "", fmt.Errorf("checking for install marker: %w", err)
 	}

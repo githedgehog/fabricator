@@ -8,13 +8,12 @@ version: "2"
 #   2. goconst detection in composite literals: 150 issues
 #   3. Default exclusions inherited from v1, see linters.exclusions.presets
 #   4. nolintlint require-explanation: 942 directives without explanation
-#   5. Linters with issues on the current code: intrange (20), forcetypeassert (22), godoclint (30), perfsprint (286),
-#      forbidigo (23, needs settings as it forbids fmt.Print* by default)
+#   5. Linters with issues on the current code: forcetypeassert (22), godoclint (30), perfsprint (286), forbidigo (23,
+#      needs settings as it forbids fmt.Print* by default)
 #   6. Stricter sloglint options: msg-style capitalized (26), static-msg (26), key-naming-case camel (62) or snake
 #      (102), args-on-sep-lines (347), no-raw-keys (790)
 #   7. goconst detection in function call arguments: 659 issues, needs evaluation as it may be too noisy
-#   8. More revive rules (from kubebuilder): unused-parameter (15, mostly to be renamed to _), import-shadowing (16,
-#      3 of them are the scoped loggers named slog)
+#   8. revive unused-parameter rule (from kubebuilder): 15 issues, mostly to be renamed to _
 #
 # Complexity and line length linters (cyclop, funlen, gocognit, gocyclo, maintidx, nestif, lll, ...) aren't planned.
 # wastedassign isn't planned either as ineffassign already reports the lost values, it only adds the zero value
@@ -73,6 +72,7 @@ linters:
     - gosec
     - iface
     - importas
+    - intrange
     - iotamixing
     - loggercheck
     - makezero
@@ -235,6 +235,7 @@ linters:
         - name: constant-logical-expr
         - name: empty-block
         - name: comment-spacings
+        - name: import-shadowing
     sloglint:
       # key-value pairs only, no slog.Attr, as it's what's used everywhere
       kv-only: true

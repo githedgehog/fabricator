@@ -3436,7 +3436,7 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
+func checkPing(ctx context.Context, pingCount int, sem *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
 	if pingCount <= 0 {
 		return nil
 	}
@@ -3447,13 +3447,13 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		Why:         expectationWhy(expected),
 	}
 
-	if semaphore != nil {
-		if err := semaphore.Acquire(ctx, 1); err != nil {
+	if sem != nil {
+		if err := sem.Acquire(ctx, 1); err != nil {
 			pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
 
 			return pe
 		}
-		defer semaphore.Release(1)
+		defer sem.Release(1)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
@@ -4063,7 +4063,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
 
-	for idx := 0; idx < opts.CurlsCount; idx++ {
+	for range opts.CurlsCount {
 		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent http://%s", toIP)
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		ce.Output = stdout
@@ -4275,7 +4275,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	const lldpRetryDelay = 30 * time.Second
 
-	for attempt := 0; attempt < opts.Attempts; attempt++ {
+	for attempt := range opts.Attempts {
 		if attempt > 0 {
 			slog.Info("LLDP inspect retry attempt", "number", attempt+1)
 			select {
@@ -4322,7 +4322,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	const bgpRetryDelay = 10 * time.Second
 
-	for attempt := 0; attempt < opts.Attempts; attempt++ {
+	for attempt := range opts.Attempts {
 		if attempt > 0 {
 			slog.Info("BGP inspect retry attempt", "number", attempt+1)
 			retryTimer := time.NewTimer(bgpRetryDelay)

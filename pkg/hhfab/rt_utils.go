@@ -89,7 +89,7 @@ func populateFullMeshVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 	if err := kube.List(ctx, vpcs); err != nil {
 		return fmt.Errorf("listing VPCs: %w", err)
 	}
-	for i := 0; i < len(vpcs.Items); i++ {
+	for i := range len(vpcs.Items) {
 		for j := i + 1; j < len(vpcs.Items); j++ {
 			appendVpcPeeringSpec(vpcPeerings, i+1, j+1, []string{}, []string{})
 		}
@@ -105,7 +105,7 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 	if err := kube.List(ctx, vpcs); err != nil {
 		return fmt.Errorf("listing VPCs: %w", err)
 	}
-	for i := 0; i < len(vpcs.Items); i++ {
+	for i := range len(vpcs.Items) {
 		appendVpcPeeringSpec(vpcPeerings, i+1, (i+1)%len(vpcs.Items)+1, []string{}, []string{})
 	}
 

@@ -1667,7 +1667,7 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 			isWellAligned := true
 			if len(yCoords) > 1 {
 				maxYDiff := 0.0
-				for i := 0; i < len(yCoords); i++ {
+				for i := range yCoords {
 					for j := i + 1; j < len(yCoords); j++ {
 						diff := yCoords[i] - yCoords[j]
 						if diff < 0 {
