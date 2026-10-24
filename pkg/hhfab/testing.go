@@ -41,12 +41,10 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -61,7 +59,7 @@ const (
 	HashPolicyVLANAndSrcMAC = "vlan+srcmac"
 )
 
-var reachCheckUnsupported = errors.New("reachability check unsupported for this type of peering")
+var errReachCheckUnsupported = errors.New("reachability check unsupported for this type of peering")
 
 var HashPolicies = []string{
 	HashPolicyL2,
@@ -83,10 +81,15 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 	coreapi.AddToScheme,
 }
 
-func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
+func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, kclient.Client, error) {
 	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
 
-	return kubeutil.NewClientWithCache(ctx, kubeconfig, schemeBuilders...)
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, schemeBuilders...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating kube client: %w", err)
+	}
+
+	return cacheCancel, kube, nil
 }
 
 func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
@@ -113,7 +116,7 @@ type WaitReadyOpts struct {
 	PrintEvery   int
 }
 
-func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
+func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) error {
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -202,21 +205,16 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		slog.Info("Expected gateways", "dataplane", expectedDpV, "gateways", expectedGateways)
 	}
 
-	swNotReady := []string{}
-	gwNotReady := []string{}
-	swNotUpdated := []string{}
-	gwNotUpdated := []string{}
-
 	for idx := 0; ; idx++ {
-		swNotReady = []string{}
-		gwNotReady = []string{}
-		swNotUpdated = []string{}
-		gwNotUpdated = []string{}
+		swNotReady := []string{}
+		gwNotReady := []string{}
+		swNotUpdated := []string{}
+		gwNotUpdated := []string{}
 
 		for _, swName := range expectedSwitches {
 			ag := &agentapi.Agent{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: metav1.NamespaceDefault}, ag); err != nil {
-				if apierrors.IsNotFound(err) {
+			if err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, ag); err != nil {
+				if kapierrors.IsNotFound(err) {
 					slog.Warn("Switch agent not found", "name", swName)
 				} else {
 					slog.Warn("Failed to get switch agent", "name", swName, "error", err.Error())
@@ -258,8 +256,8 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 		for _, gwName := range expectedGateways {
 			gwag := &gwintapi.GatewayAgent{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: kmetav1.NamespaceDefault}, gwag); err != nil {
-				if apierrors.IsNotFound(err) {
+			if err := kube.Get(ctx, kclient.ObjectKey{Name: gwName, Namespace: kmetav1.NamespaceDefault}, gwag); err != nil {
+				if kapierrors.IsNotFound(err) {
 					slog.Warn("Gateway agent not found", "name", gwName)
 				} else {
 					slog.Warn("Failed to get gateway agent", "name", gwName, "error", err.Error())
@@ -270,10 +268,8 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 				continue
 			}
 
-			ready := true
-
 			// should be empty for agentless
-			ready = gwag.Spec.AgentVersion == ""
+			ready := gwag.Spec.AgentVersion == ""
 
 			// make sure last applied generation is the same as current generation
 			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
@@ -334,9 +330,9 @@ type SetupVPCsOpts struct {
 	P2P               bool
 }
 
-func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
+func CreateOrUpdateVpc(ctx context.Context, kube kclient.Client, vpc *vpcapi.VPC) (bool, error) {
 	var changed bool
-	some := &vpcapi.VPC{ObjectMeta: metav1.ObjectMeta{Name: vpc.Name, Namespace: vpc.Namespace}}
+	some := &vpcapi.VPC{Name: vpc.Name, Namespace: vpc.Namespace}
 	res, err := ctrlutil.CreateOrUpdate(ctx, kube, some, func() error {
 		some.Spec = vpc.Spec
 		some.Default()
@@ -347,7 +343,7 @@ func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC)
 		return changed, fmt.Errorf("creating or updating VPC %q: %w", vpc.Name, err)
 	}
 
-	switch res {
+	switch res { //nolint:exhaustive // only the changes are reported
 	case ctrlutil.OperationResultCreated:
 		slog.Info("Created", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
 		changed = true
@@ -368,18 +364,18 @@ type ServerNetconfOpts struct {
 
 func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (string, error) {
 	if conn == nil {
-		return "", fmt.Errorf("connection is nil")
+		return "", fmt.Errorf("connection is nil") //nolint:err113
 	}
 
 	if opts.P2P != "" {
 		if opts.VLAN != 0 || opts.HashPolicy != "" {
-			return "", fmt.Errorf("p2p option cannot be used with VLAN or HashPolicy")
+			return "", fmt.Errorf("p2p option cannot be used with VLAN or HashPolicy") //nolint:err113
 		}
 		if opts.MTU != 0 {
-			return "", fmt.Errorf("p2p option does not support MTU configuration")
+			return "", fmt.Errorf("p2p option does not support MTU configuration") //nolint:err113
 		}
 		if conn.Spec.Unbundled == nil {
-			return "", fmt.Errorf("p2p option cannot be used with connections other than unbundled")
+			return "", fmt.Errorf("p2p option cannot be used with connections other than unbundled") //nolint:err113
 		}
 	}
 
@@ -392,7 +388,7 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 			return "", fmt.Errorf("invalid p2p prefix: %w", err)
 		}
 		if !p2p.IsValid() || !p2p.Addr().Is4() || p2p.Bits() != 31 {
-			return "", fmt.Errorf("p2p prefix must be a valid /31 IPv4 prefix: %s", opts.P2P)
+			return "", fmt.Errorf("p2p prefix must be a valid /31 IPv4 prefix: %s", opts.P2P) //nolint:err113
 		}
 
 		localIP := p2p.Masked().String()
@@ -406,16 +402,17 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	default:
 		netconfCmd = fmt.Sprintf("bond %d %s", opts.VLAN, opts.HashPolicy)
 
-		if conn.Spec.Bundled != nil {
+		switch {
+		case conn.Spec.Bundled != nil:
 			for _, link := range conn.Spec.Bundled.Links {
 				netconfCmd += " " + link.Server.LocalPortName()
 			}
-		} else if conn.Spec.ESLAG != nil {
+		case conn.Spec.ESLAG != nil:
 			for _, link := range conn.Spec.ESLAG.Links {
 				netconfCmd += " " + link.Server.LocalPortName()
 			}
-		} else {
-			return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+		default:
+			return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name) //nolint:err113
 		}
 
 		if opts.MTU > 0 {
@@ -436,21 +433,21 @@ type HostBGPParams struct {
 
 func getServerHostBGPCmd(params []HostBGPParams) (string, error) {
 	if len(params) == 0 {
-		return "", fmt.Errorf("no params provided")
+		return "", fmt.Errorf("no params provided") //nolint:err113
 	}
 
-	cmd := ""
+	var cmd strings.Builder
 	for i, param := range params {
 		if i > 0 {
-			cmd += " "
+			cmd.WriteString(" ")
 		}
 		if len(param.Connections) == 0 {
-			return "", fmt.Errorf("no connections provided")
+			return "", fmt.Errorf("no connections provided") //nolint:err113
 		}
 		interfaces := []string{}
 		for _, conn := range param.Connections {
 			if conn == nil {
-				return "", fmt.Errorf("connection is nil")
+				return "", fmt.Errorf("connection is nil") //nolint:err113
 			}
 			switch {
 			case conn.Spec.Unbundled != nil:
@@ -464,23 +461,23 @@ func getServerHostBGPCmd(params []HostBGPParams) (string, error) {
 					interfaces = append(interfaces, link.Server.LocalPortName())
 				}
 			default:
-				return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+				return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name) //nolint:err113
 			}
 		}
 
-		cmd += fmt.Sprintf("%s:v=%d:i=", param.VPCLabel, param.VLAN)
-		cmd += strings.Join(interfaces, ":i=")
+		fmt.Fprintf(&cmd, "%s:v=%d:i=", param.VPCLabel, param.VLAN)
+		cmd.WriteString(strings.Join(interfaces, ":i="))
 		addr := param.Subnet.Addr()
 		for range param.ServerOffset {
 			addr = addr.Next()
 		}
 		if !addr.IsValid() {
-			return "", fmt.Errorf("failed to get IP address from subnet %s", param.Subnet.String())
+			return "", fmt.Errorf("failed to get IP address from subnet %s", param.Subnet.String()) //nolint:err113
 		}
-		cmd += ":a=" + addr.String() + "/32"
+		cmd.WriteString(":a=" + addr.String() + "/32")
 	}
 
-	return cmd, nil
+	return cmd.String(), nil
 }
 
 type ServerAttachState struct {
@@ -490,12 +487,12 @@ type ServerAttachState struct {
 	L3VNI      bool
 }
 
-func getServerAttachState(ctx context.Context, kube client.Client, server *wiringapi.Server, checkVPCMode bool) (ServerAttachState, error) {
+func getServerAttachState(ctx context.Context, kube kclient.Client, server *wiringapi.Server, checkVPCMode bool) (ServerAttachState, error) {
 	sa := ServerAttachState{
 		ServerName: server.Name,
 	}
 	if server == nil {
-		return sa, fmt.Errorf("server is nil")
+		return sa, fmt.Errorf("server is nil") //nolint:err113
 	}
 
 	conns := &wiringapi.ConnectionList{}
@@ -504,7 +501,7 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 	}
 
 	if len(conns.Items) == 0 {
-		return sa, fmt.Errorf("no connections for server %q", server.Name)
+		return sa, fmt.Errorf("no connections for server %q", server.Name) //nolint:err113
 	}
 
 	for _, conn := range conns.Items {
@@ -520,14 +517,14 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 		if numAttaches == 0 {
 			continue
 		} else if numAttaches > 1 {
-			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
+			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches) //nolint:err113
 		}
 		sa.Attached = true
 		if checkVPCMode {
 			attach := attaches.Items[0]
 			vpcName := attach.Spec.VPCName()
 			vpc := &vpcapi.VPC{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+			if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
 				return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
 			}
 			if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
@@ -582,7 +579,7 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 		return nil
 	}
 
-	opts.InterfaceMTU = uint16(fabcomp.ServerFacingMTU) //nolint:gosec
+	opts.InterfaceMTU = uint16(fabcomp.ServerFacingMTU)
 	slog.Info("Auto-configuring server interface MTU", "mtu", opts.InterfaceMTU)
 
 	return nil
@@ -676,7 +673,7 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 		return vpcapi.VPCTopology{}, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
 	}
 	if len(conns.Items) == 0 {
-		return vpcapi.VPCTopology{}, fmt.Errorf("no connections for server %q", server.Name)
+		return vpcapi.VPCTopology{}, fmt.Errorf("no connections for server %q", server.Name) //nolint:err113
 	}
 
 	topology := vpcapi.VPCTopology{}
@@ -688,7 +685,7 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 		for _, swName := range switches {
 			sw := switchByName[swName]
 			if sw == nil {
-				return vpcapi.VPCTopology{}, fmt.Errorf("switch %q of server %q not found", swName, server.Name)
+				return vpcapi.VPCTopology{}, fmt.Errorf("switch %q of server %q not found", swName, server.Name) //nolint:err113
 			}
 			fabric := sw.Spec.Topology.Fabric
 			domains := sw.Spec.Topology.Domains
@@ -699,7 +696,7 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 				continue
 			}
 			if topology.Fabric != fabric {
-				return vpcapi.VPCTopology{}, fmt.Errorf("server %q is attached to fabrics %s and %s", server.Name, topology.Fabric, fabric)
+				return vpcapi.VPCTopology{}, fmt.Errorf("server %q is attached to fabrics %s and %s", server.Name, topology.Fabric, fabric) //nolint:err113
 			}
 			topology.Domains = slices.DeleteFunc(topology.Domains, func(domain string) bool { return !slices.Contains(domains, domain) })
 		}
@@ -719,18 +716,18 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	start := time.Now()
 
 	if opts.ServersPerSubnet <= 0 {
-		return nil, nil, fmt.Errorf("servers per subnet must be positive")
+		return nil, nil, fmt.Errorf("servers per subnet must be positive") //nolint:err113
 	}
 	if opts.SubnetsPerVPC <= 0 {
-		return nil, nil, fmt.Errorf("subnets per VPC must be positive")
+		return nil, nil, fmt.Errorf("subnets per VPC must be positive") //nolint:err113
 	}
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
-		return nil, nil, fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
+		return nil, nil, fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies) //nolint:err113
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
 		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
 	}
 	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
-		return nil, nil, fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
+		return nil, nil, fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes) //nolint:err113
 	}
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
@@ -765,7 +762,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 	if opts.P2P && !allCumulus {
-		return nil, nil, fmt.Errorf("P2P mode requires all switches to be cumulus")
+		return nil, nil, fmt.Errorf("P2P mode requires all switches to be cumulus") //nolint:err113
 	}
 	if !opts.P2P && allCumulus {
 		opts.P2P = true
@@ -795,29 +792,27 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
-		if sshCfg, err := c.SSHVM(ctx, vlab, vm); err != nil {
+		sshCfg, err := c.SSHVM(ctx, vlab, vm)
+		if err != nil {
 			return nil, nil, fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
-		} else {
-			sshConfigs[vm.Name] = sshCfg
 		}
+		sshConfigs[vm.Name] = sshCfg
 	}
 
 	if !opts.KeepPeerings {
 		slog.Info("Removing all peerings (VPC, External and Gateway)")
-		delAllOpts := client.DeleteAllOfOptions{
-			ListOptions: client.ListOptions{
-				Namespace: kmetav1.NamespaceDefault,
-			},
+		delAllOpts := kclient.DeleteAllOfOptions{
+			Namespace: kmetav1.NamespaceDefault,
 		}
 
-		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{}, &delAllOpts)); err != nil {
+		if err := kclient.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{}, &delAllOpts)); err != nil {
 			return nil, nil, fmt.Errorf("cleaning up vpc peerings: %w", err)
 		}
-		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{}, &delAllOpts)); err != nil {
+		if err := kclient.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{}, &delAllOpts)); err != nil {
 			return nil, nil, fmt.Errorf("cleaning up external peerings: %w", err)
 		}
 		if c.Fab.Spec.Config.Gateway.Enable {
-			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.GatewayPeering{}, &delAllOpts)); err != nil {
+			if err := kclient.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.GatewayPeering{}, &delAllOpts)); err != nil {
 				return nil, nil, fmt.Errorf("cleaning up gateway peerings: %w", err)
 			}
 		}
@@ -831,7 +826,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	serverIDs := map[string]uint64{}
 	for _, server := range servers.Items {
 		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
-			return nil, nil, fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
+			return nil, nil, fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix) //nolint:err113
 		}
 
 		serverID, err := strconv.ParseUint(server.Name[len(ServerNamePrefix):], 10, 64)
@@ -854,7 +849,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	// order, so vpc-01 inherits the mode of the lowest-numbered server.
 	serverModes := make(map[string]vpcapi.VPCMode, len(servers.Items))
 	modeOrder := []vpcapi.VPCMode{}
-	seenMode := map[vpcapi.VPCMode]bool{}
+	seenMode := map[vpcapi.VPCMode]bool{} //nolint:exhaustive // filled below
 	derivedAwayServers := []string{}
 	// every VPC must be homogeneous in mode, fabric and domains, so servers are grouped by all three
 	serverTopologies := make(map[string]vpcapi.VPCTopology, len(servers.Items))
@@ -916,7 +911,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	vlanNS := &wiringapi.VLANNamespace{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: opts.VLANNamespace, Namespace: metav1.NamespaceDefault}, vlanNS); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: opts.VLANNamespace, Namespace: kmetav1.NamespaceDefault}, vlanNS); err != nil {
 		return nil, nil, fmt.Errorf("getting VLAN namespace %s: %w", opts.VLANNamespace, err)
 	}
 	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
@@ -936,7 +931,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				fabricIPNS[fabric] = &ns
 			}
 		case fabricIPNS[fabric] != nil:
-			return nil, nil, fmt.Errorf("fabric %s has more than one IPv4 namespace", fabric)
+			return nil, nil, fmt.Errorf("fabric %s has more than one IPv4 namespace", fabric) //nolint:err113
 		default:
 			fabricIPNS[fabric] = &ns
 		}
@@ -1025,12 +1020,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil, nil, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
 		}
 		if len(conns.Items) == 0 {
-			return nil, nil, fmt.Errorf("no connections for server %q", server.Name)
+			return nil, nil, fmt.Errorf("no connections for server %q", server.Name) //nolint:err113
 		}
 		if len(conns.Items) > 1 {
 			for _, c := range conns.Items {
 				if c.Spec.Unbundled == nil {
-					return nil, nil, fmt.Errorf("multiple connections for server %q of which some are not unbundled", server.Name)
+					return nil, nil, fmt.Errorf("multiple connections for server %q of which some are not unbundled", server.Name) //nolint:err113
 				}
 			}
 			multihomed = true
@@ -1065,15 +1060,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		} else {
 			ipns := fabricIPNS[serverTopo.Fabric]
 			if ipns == nil && serverTopo.Fabric == wiringapi.DefaultFabric {
-				return nil, nil, fmt.Errorf("IPv4 namespace %s not found in fabric %s", opts.IPv4Namespace, wiringapi.DefaultFabric)
+				return nil, nil, fmt.Errorf("IPv4 namespace %s not found in fabric %s", opts.IPv4Namespace, wiringapi.DefaultFabric) //nolint:err113
 			} else if ipns == nil {
-				return nil, nil, fmt.Errorf("no IPv4 namespace in fabric %s for server %q", serverTopo.Fabric, server.Name)
+				return nil, nil, fmt.Errorf("no IPv4 namespace in fabric %s for server %q", serverTopo.Fabric, server.Name) //nolint:err113
 			}
 			vpc = &vpcapi.VPC{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      vpcName,
-					Namespace: metav1.NamespaceDefault,
-				},
+				Name:      vpcName,
+				Namespace: kmetav1.NamespaceDefault,
 				Spec: vpcapi.VPCSpec{
 					Mode:          serverMode,
 					Topology:      serverTopo,
@@ -1087,7 +1080,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if vpc.Spec.Subnets[subnetName] == nil {
 			subnet, ok := nextPrefixes[serverTopo.Fabric]()
 			if !ok {
-				return nil, nil, fmt.Errorf("no more subnets available")
+				return nil, nil, fmt.Errorf("no more subnets available") //nolint:err113
 			}
 
 			var dhcpOpts *vpcapi.VPCDHCPOptions
@@ -1101,7 +1094,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 			vlan, ok := nextVLAN()
 			if !ok {
-				return nil, nil, fmt.Errorf("no more vlans available")
+				return nil, nil, fmt.Errorf("no more vlans available") //nolint:err113
 			}
 			dhcp := vpcapi.VPCDHCP{}
 			if !hostBGP && !opts.P2P {
@@ -1126,7 +1119,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 			b := subnet.Masked().Addr().As4()
 			v := binary.BigEndian.Uint32(b[:])
-			v += 2 * uint32(serverInSubnet)
+			v += 2 * uint32(serverInSubnet) //nolint:gosec // a server index within a subnet
 			binary.BigEndian.PutUint32(b[:], v)
 			p2p = netip.PrefixFrom(netip.AddrFrom4(b), 31)
 		}
@@ -1164,11 +1157,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			}
 
 			attaches = append(attaches, &vpcapi.VPCAttachment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        attachName,
-					Namespace:   metav1.NamespaceDefault,
-					Annotations: attachAnns,
-				},
+				Name:        attachName,
+				Namespace:   kmetav1.NamespaceDefault,
+				Annotations: attachAnns,
 				Spec: vpcapi.VPCAttachmentSpec{
 					Topology:   vpcapi.VPCAttachmentTopology{Fabric: serverTopo.Fabric},
 					Connection: ac.Name,
@@ -1184,7 +1175,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		var confCmd string
 		var confErr error
 
-		if hostBGP {
+		switch {
+		case hostBGP:
 			confCmd, confErr = getServerHostBGPCmd([]HostBGPParams{
 				{
 					VPCLabel:     vpcName,
@@ -1194,11 +1186,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					ServerOffset: serverInSubnet,
 				},
 			})
-		} else if useP2P {
+		case useP2P:
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
 			})
-		} else {
+		default:
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				VLAN:       vlan,
 				HashPolicy: opts.HashPolicy,
@@ -1231,7 +1223,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			if want.Name == vpc.Name && !opts.ForceCleanup &&
 				(vpc.Spec.Topology.Fabric != want.Spec.Topology.Fabric ||
 					!slices.Equal(vpc.Spec.Topology.Domains, want.Spec.Topology.Domains)) {
-				return nil, nil, fmt.Errorf("VPC %q is in a different fabric or domains than needed now, use --force-cleanup", vpc.Name)
+				return nil, nil, fmt.Errorf("VPC %q is in a different fabric or domains than needed now, use --force-cleanup", vpc.Name) //nolint:err113
 			}
 		}
 	}
@@ -1285,7 +1277,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	for _, attach := range attaches {
-		some := &vpcapi.VPCAttachment{ObjectMeta: metav1.ObjectMeta{Name: attach.Name, Namespace: attach.Namespace}}
+		some := &vpcapi.VPCAttachment{Name: attach.Name, Namespace: attach.Namespace}
 		res, err := ctrlutil.CreateOrUpdate(ctx, kube, some, func() error {
 			some.Annotations = attach.Annotations
 			some.Spec = attach.Spec
@@ -1297,7 +1289,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil, nil, fmt.Errorf("creating or updating vpc attachment %q: %w", attach.Name, err)
 		}
 
-		switch res {
+		switch res { //nolint:exhaustive // only the changes are reported
 		case ctrlutil.OperationResultCreated:
 			slog.Info("Created", "vpcattachment", attach.Name)
 			changed = true
@@ -1334,7 +1326,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			if err := func() error {
 				sshCfg, ok := sshConfigs[server.Name]
 				if !ok {
-					return fmt.Errorf("no ssh config for server %q", server.Name)
+					return fmt.Errorf("no ssh config for server %q", server.Name) //nolint:err113
 				}
 
 				stdout, stderr, err := sshCfg.Run(ctx, "toolbox -q hostname")
@@ -1343,7 +1335,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 				hostname := strings.TrimSpace(stdout)
 				if hostname != server.Name {
-					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
+					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name) //nolint:err113
 				}
 
 				_, isHostBGP := hostBGPServers[server.Name]
@@ -1395,25 +1387,21 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 
 				expectedSubnet := expectedSubnets[server.Name]
-				// for hostBGP or non-l2vni subnets we expect a /32, else the same prefix lenght of the subnet
+				// for hostBGP or non-l2vni subnets we expect a /32, else the same prefix length of the subnet
 				expectedBits := 32
 				if serverModes[server.Name] == vpcapi.VPCModeL2VNI && !isHostBGP {
 					expectedBits = expectedSubnet.Bits()
 				}
 				if !expectedSubnet.Contains(prefix.Addr()) {
-					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
+					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String()) //nolint:err113
 				}
 				if prefix.Bits() != expectedBits {
-					return fmt.Errorf("unexpected acquired address %q, expected prefix length %d", prefix.String(), expectedBits)
+					return fmt.Errorf("unexpected acquired address %q, expected prefix length %d", prefix.String(), expectedBits) //nolint:err113
 				}
 
 				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
 
-				if err := ensureIperf3Daemon(ctx, sshCfg, server.Name); err != nil {
-					return err
-				}
-
-				return nil
+				return ensureIperf3Daemon(ctx, sshCfg, server.Name)
 			}(); err != nil {
 				return fmt.Errorf("configuring server %q: %w", server.Name, err)
 			}
@@ -1524,8 +1512,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			}
 
 			as := gwapi.PeeringEntryAs{}
-			if strings.HasPrefix(item, "!") {
-				asStr := strings.TrimPrefix(item, "!")
+			if asStr, ok := strings.CutPrefix(item, "!"); ok {
 				_, err := netip.ParsePrefix(asStr)
 				if err != nil {
 					return nil, fmt.Errorf("invalid as not prefix at index %d: %w", idx, err)
@@ -1541,6 +1528,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 			out = append(out, as)
 		}
+
 		return out, nil
 	}
 
@@ -1612,6 +1600,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 			out = append(out, entry)
 		}
+
 		return out, nil
 	}
 
@@ -1635,7 +1624,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 
 		expose.NAT = &gwapi.PeeringNAT{}
-		switch nat {
+		switch nat { //nolint:exhaustive // none is replaced with static above
 		case natTypeStatic:
 			expose.NAT.Static = &gwapi.PeeringNATStatic{}
 		case natTypeMasquerade:
@@ -1664,12 +1653,12 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	for _, req := range opts.Requests {
 		parts := strings.Split(req, ":")
 		if len(parts) < 1 {
-			return fmt.Errorf("invalid request %q format", req)
+			return fmt.Errorf("invalid request %q format", req) //nolint:err113
 		}
 
 		reqName := parts[0]
 		if reqNames[reqName] {
-			return fmt.Errorf("duplicate request %q name %s", req, reqName)
+			return fmt.Errorf("duplicate request %q name %s", req, reqName) //nolint:err113
 		}
 		reqNames[reqName] = true
 
@@ -1678,10 +1667,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		vpMark := strings.Contains(reqName, "+")
 		epMark := strings.Contains(reqName, "~")
 
-		if vpMark && !epMark {
+		switch {
+		case vpMark && !epMark:
 			reqNameParts := strings.Split(reqName, "+")
 			if len(reqNameParts) != 2 {
-				return fmt.Errorf("invalid VPC peering request %s", reqName)
+				return fmt.Errorf("invalid VPC peering request %s", reqName) //nolint:err113
 			}
 
 			slices.Sort(reqNameParts)
@@ -1690,7 +1680,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			vpc2 := reqNameParts[1]
 
 			if vpc1 == "" || vpc2 == "" {
-				return fmt.Errorf("invalid VPC peering request %s, both VPCs should be non-empty", reqName)
+				return fmt.Errorf("invalid VPC peering request %s, both VPCs should be non-empty", reqName) //nolint:err113
 			}
 
 			if !strings.HasPrefix(vpc1, "vpc-") {
@@ -1709,10 +1699,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			}
 
 			if _, ok := vpcs[vpc1]; !ok {
-				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName)
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName) //nolint:err113
 			}
 			if _, ok := vpcs[vpc2]; !ok {
-				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName)
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName) //nolint:err113
 			}
 
 			gw := false
@@ -1730,29 +1720,30 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					optValue = parts[1]
 				}
 
-				if optName == "gw" || optName == "gateway" {
+				switch optName {
+				case "gw", "gateway":
 					gw = true
-				} else if optName == "vpc1" || optName == "vpc1-subnets" {
+				case "vpc1", "vpc1-subnets":
 					vpc1Subnets = strings.Split(optValue, ",")
-				} else if optName == "vpc2" || optName == "vpc2-subnets" {
+				case "vpc2", "vpc2-subnets":
 					vpc2Subnets = strings.Split(optValue, ",")
-				} else if optName == "vpc1-as" || optName == "as1" {
+				case "vpc1-as", "as1":
 					if optValue == "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as should be non-empty", idx, option)
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as should be non-empty", idx, option) //nolint:err113
 					}
 					if vpc1Nat.asRaw != "" {
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as already specified", idx, option) //nolint:err113
 					}
 					vpc1Nat.asRaw = optValue
-				} else if optName == "vpc2-as" || optName == "as2" {
+				case "vpc2-as", "as2":
 					if optValue == "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as should be non-empty", idx, option)
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as should be non-empty", idx, option) //nolint:err113
 					}
 					if vpc2Nat.asRaw != "" {
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as already specified", idx, option) //nolint:err113
 					}
 					vpc2Nat.asRaw = optValue
-				} else if optName == "vpc1-nat" || optName == "nat1" {
+				case "vpc1-nat", "nat1":
 					n, err := parseNatType(optValue)
 					if err != nil {
 						return fmt.Errorf("invalid VPC peering option #%d %s, %w", idx, option, err)
@@ -1761,7 +1752,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc1 (%s and %s)", idx, option, vpc1Nat.nat, n) //nolint:err113
 					}
 					vpc1Nat.nat = n
-				} else if optName == "vpc2-nat" || optName == "nat2" {
+				case "vpc2-nat", "nat2":
 					n, err := parseNatType(optValue)
 					if err != nil {
 						return fmt.Errorf("invalid VPC peering option #%d %s, %w", idx, option, err)
@@ -1770,26 +1761,26 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc2 (%s and %s)", idx, option, vpc2Nat.nat, n) //nolint:err113
 					}
 					vpc2Nat.nat = n
-				} else if optName == "vpc1-pf" || optName == "pf1" {
+				case "vpc1-pf", "pf1":
 					if optValue == "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules should be non-empty", idx, option)
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules should be non-empty", idx, option) //nolint:err113
 					}
 					if vpc1Nat.pfRaw != "" {
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules already specified", idx, option) //nolint:err113
 					}
 					vpc1Nat.pfRaw = optValue
-				} else if optName == "vpc2-pf" || optName == "pf2" {
+				case "vpc2-pf", "pf2":
 					if optValue == "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules should be non-empty", idx, option)
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules should be non-empty", idx, option) //nolint:err113
 					}
 					if vpc2Nat.pfRaw != "" {
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules already specified", idx, option) //nolint:err113
 					}
 					vpc2Nat.pfRaw = optValue
-				} else if optName == "nat" || optName == "nat-type" || optName == "pf" || optName == "port-forward" {
+				case "nat", "nat-type", "pf", "port-forward":
 					return fmt.Errorf("invalid VPC peering option #%d %s, use per-side NAT options (vpc1-nat/nat1, vpc2-nat/nat2, vpc1-pf/pf1, vpc2-pf/pf2)", idx, option) //nolint:err113
-				} else {
-					return fmt.Errorf("invalid peering option #%d %s", idx, option)
+				default:
+					return fmt.Errorf("invalid peering option #%d %s", idx, option) //nolint:err113
 				}
 			}
 
@@ -1871,23 +1862,23 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					},
 				}
 			}
-		} else if !vpMark && epMark {
+		case !vpMark && epMark:
 			reqNameParts := strings.Split(reqName, "~")
 			if len(reqNameParts) != 2 {
-				return fmt.Errorf("invalid external peering request %s", reqName)
+				return fmt.Errorf("invalid external peering request %s", reqName) //nolint:err113
 			}
 
 			vpc := reqNameParts[0]
 			ext := reqNameParts[1]
 
 			if vpc == "" {
-				return fmt.Errorf("invalid external peering request %s, VPC should be non-empty", reqName)
+				return fmt.Errorf("invalid external peering request %s, VPC should be non-empty", reqName) //nolint:err113
 			}
 			if ext == "" {
-				return fmt.Errorf("invalid external peering request %s, external should be non-empty", reqName)
+				return fmt.Errorf("invalid external peering request %s, external should be non-empty", reqName) //nolint:err113
 			}
 			if _, ok := externals[ext]; !ok {
-				return fmt.Errorf("external %s not found for external peering", ext)
+				return fmt.Errorf("external %s not found for external peering", ext) //nolint:err113
 			}
 
 			if !strings.HasPrefix(vpc, "vpc-") {
@@ -1899,7 +1890,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			}
 
 			if _, ok := vpcs[vpc]; !ok {
-				return fmt.Errorf("VPC %s not found for external peering %s", vpc, reqName)
+				return fmt.Errorf("VPC %s not found for external peering %s", vpc, reqName) //nolint:err113
 			}
 
 			gw := false
@@ -1922,17 +1913,17 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					gw = true
 				case "vpc-subnets", "subnets", "s":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, VPC subnet names should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, VPC subnet names should be non-empty", idx, option) //nolint:err113
 					}
 					vpcSubnets = strings.Split(optValue, ",")
 				case "ext-prefixes", "prefixes", "p":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, external prefixes should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, external prefixes should be non-empty", idx, option) //nolint:err113
 					}
 					extPrefixes = strings.Split(optValue, ",")
 				case "vpc-as", "as-vpc":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, vpc-as should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, vpc-as should be non-empty", idx, option) //nolint:err113
 					}
 					if vpcNat.asRaw != "" {
 						return fmt.Errorf("invalid external peering option #%d %s, vpc-as already specified", idx, option) //nolint:err113
@@ -1940,7 +1931,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					vpcNat.asRaw = optValue
 				case "ext-as", "as-ext":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, ext-as should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, ext-as should be non-empty", idx, option) //nolint:err113
 					}
 					if extNat.asRaw != "" {
 						return fmt.Errorf("invalid external peering option #%d %s, ext-as already specified", idx, option) //nolint:err113
@@ -1966,7 +1957,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					extNat.nat = n
 				case "vpc-pf", "pf-vpc":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules should be non-empty", idx, option) //nolint:err113
 					}
 					if vpcNat.pfRaw != "" {
 						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules already specified", idx, option) //nolint:err113
@@ -1974,7 +1965,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					vpcNat.pfRaw = optValue
 				case "ext-pf", "pf-ext":
 					if optValue == "" {
-						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules should be non-empty", idx, option)
+						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules should be non-empty", idx, option) //nolint:err113
 					}
 					if extNat.pfRaw != "" {
 						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules already specified", idx, option) //nolint:err113
@@ -1983,7 +1974,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				case "nat", "nat-type", "pf", "port-forward", "port-forward-rules":
 					return fmt.Errorf("invalid external peering option #%d %s, use per-side NAT options (vpc-nat/ext-nat and vpc-pf/ext-pf)", idx, option) //nolint:err113
 				default:
-					return fmt.Errorf("invalid peering option #%d %s", idx, option)
+					return fmt.Errorf("invalid peering option #%d %s", idx, option) //nolint:err113
 				}
 			}
 
@@ -2012,7 +2003,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					if strings.Contains(rawPrefix, "_") {
 						prefixParts := strings.Split(rawPrefix, "_")
 						if len(prefixParts) > 1 {
-							return fmt.Errorf("invalid external peering option #%d, external prefix should be in format 1.2.3.4/24 (found %s)", idx, rawPrefix)
+							return fmt.Errorf("invalid external peering option #%d, external prefix should be in format 1.2.3.4/24 (found %s)", idx, rawPrefix) //nolint:err113
 						}
 
 						prefix.Prefix = prefixParts[0]
@@ -2109,8 +2100,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					},
 				}
 			}
-		} else {
-			return fmt.Errorf("invalid request name %s", reqName)
+		default:
+			return fmt.Errorf("invalid request name %s", reqName) //nolint:err113
 		}
 	}
 
@@ -2176,7 +2167,7 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 				}
 				r, err := IsServerReachable(ctx, kube, src.Server.Name, dst.Server.Name, gatewayEnabled)
 				if err != nil {
-					if errors.Is(err, reachCheckUnsupported) {
+					if errors.Is(err, errReachCheckUnsupported) {
 						m.Add(ConnectivityExpectation{
 							Pair:    EndpointPair{Source: src, Destination: dst},
 							Verdict: VerdictUnknown,
@@ -2200,7 +2191,7 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 				for _, prefix := range dst.External.Prefixes {
 					r, err := IsExternalSubnetReachable(ctx, kube, src.Server.Name, prefix.String(), gatewayEnabled)
 					if err != nil {
-						if errors.Is(err, reachCheckUnsupported) {
+						if errors.Is(err, errReachCheckUnsupported) {
 							m.Add(ConnectivityExpectation{
 								Pair:    EndpointPair{Source: src, Destination: dst},
 								Verdict: VerdictUnknown,
@@ -2253,7 +2244,7 @@ func endpointVerdict(r Reachability, src, dst *Endpoint) ConnectivityVerdict {
 func peeredFabric(ctx context.Context, kube kclient.Reader, name string) (string, error) {
 	if ext, isExt := strings.CutPrefix(name, gwapi.VPCInfoExtPrefix); isExt {
 		external := &vpcapi.External{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Name: ext, Namespace: metav1.NamespaceDefault}, external); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: ext, Namespace: kmetav1.NamespaceDefault}, external); err != nil {
 			return "", fmt.Errorf("getting external %s: %w", ext, err)
 		}
 
@@ -2261,14 +2252,14 @@ func peeredFabric(ctx context.Context, kube kclient.Reader, name string) (string
 	}
 
 	vpc := &vpcapi.VPC{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
 		return "", fmt.Errorf("getting vpc %s: %w", name, err)
 	}
 
 	return vpc.Spec.Topology.Fabric, nil
 }
 
-func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
+func DoSetupPeerings(ctx context.Context, kube kclient.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
 	externalPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec,
 	waitReady bool,
 ) error {
@@ -2278,7 +2269,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 	}
 
 	if !f.Spec.Config.Gateway.Enable && len(gwPeerings) > 0 {
-		return fmt.Errorf("gateway peerings are not supported when gateway is not enabled")
+		return fmt.Errorf("gateway peerings are not supported when gateway is not enabled") //nolint:err113
 	}
 
 	var changed bool
@@ -2295,7 +2286,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		slog.Info("Deleting VPCPeering", "name", peering.Name)
 		changed = true
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+		if err := kclient.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
 			return fmt.Errorf("deleting VPC peering %s: %w", peering.Name, err)
 		}
 	}
@@ -2312,7 +2303,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		slog.Info("Deleting ExternalPeering", "name", peering.Name)
 		changed = true
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+		if err := kclient.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
 			return fmt.Errorf("deleting external peering %s: %w", peering.Name, err)
 		}
 	}
@@ -2330,7 +2321,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 			slog.Info("Deleting GatewayPeering", "name", peering.Name)
 			changed = true
 
-			if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+			if err := kclient.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
 				return fmt.Errorf("deleting gateway peering %s: %w", peering.Name, err)
 			}
 		}
@@ -2346,10 +2337,8 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 			"vpc1", vpc1, "vpc2", vpc2)
 
 		vpcPeering := &vpcapi.VPCPeering{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: metav1.NamespaceDefault,
-			},
+			Name:      name,
+			Namespace: kmetav1.NamespaceDefault,
 		}
 		if vpcPeeringSpec.Topology.Fabric == "" {
 			if vpcPeeringSpec.Topology.Fabric, err = peeredFabric(ctx, kube, vpc1); err != nil {
@@ -2380,10 +2369,8 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 			"external", extPeeringSpec.Permit.External.Name, "externalPrefixes", extPeeringSpec.Permit.External.Prefixes)
 
 		extPeering := &vpcapi.ExternalPeering{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: metav1.NamespaceDefault,
-			},
+			Name:      name,
+			Namespace: kmetav1.NamespaceDefault,
 		}
 		if extPeeringSpec.Topology.Fabric == "" {
 			fabric, err := peeredFabric(ctx, kube, extPeeringSpec.Permit.VPC.Name)
@@ -2413,16 +2400,14 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 	for name, gwPeeringSpec := range gwPeerings {
 		vpcs := lo.Keys(gwPeeringSpec.Peering)
 		if len(vpcs) != 2 {
-			return fmt.Errorf("invalid GatewayPeering %s: expected 2 VPCs, got %d", name, len(vpcs))
+			return fmt.Errorf("invalid GatewayPeering %s: expected 2 VPCs, got %d", name, len(vpcs)) //nolint:err113
 		}
 
 		slog.Info("Enforcing GatewayPeering", "name", name, "vpc1", vpcs[0], "vpc2", vpcs[1])
 
 		gwPeering := &gwapi.GatewayPeering{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: metav1.NamespaceDefault,
-			},
+			Name:      name,
+			Namespace: kmetav1.NamespaceDefault,
 		}
 		if gwPeeringSpec.Topology.Fabric == "" {
 			fabric, err := peeredFabric(ctx, kube, vpcs[0])
@@ -2502,11 +2487,11 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 		if !strings.Contains(l, "bytes from") {
 			continue
 		}
-		i := strings.Index(l, "icmp_seq=")
-		if i < 0 {
+		_, after, ok := strings.Cut(l, "icmp_seq=")
+		if !ok {
 			continue
 		}
-		fields := strings.Fields(l[i+len("icmp_seq="):])
+		fields := strings.Fields(after)
 		if len(fields) == 0 {
 			continue
 		}
@@ -2623,8 +2608,8 @@ type TestConnectivityOpts struct {
 	RequireAllServers bool
 }
 
-func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *TestConnectivityOpts) (sshConfigs map[string]*sshutil.Config, kube kclient.Client, cleanup func(), err error) {
-	sshConfigs = map[string]*sshutil.Config{}
+func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *TestConnectivityOpts) (map[string]*sshutil.Config, kclient.Client, func(), error) {
+	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
 		sshCfg, err := c.SSHVM(ctx, vlab, vm)
 		if err != nil {
@@ -2736,7 +2721,7 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
-		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
+		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:err113
 	}
 	start := time.Now()
 
@@ -2775,7 +2760,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			return fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
 		} else if !sa.Attached {
 			if opts.RequireAllServers {
-				return fmt.Errorf("server %q is not attached, but RequireAllServers is set", server.Name)
+				return fmt.Errorf("server %q is not attached, but RequireAllServers is set", server.Name) //nolint:err113
 			}
 			slog.Debug("Skipping non-attached server", "server", server.Name)
 
@@ -2787,7 +2772,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		}
 
 		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
-			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
+			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix) //nolint:err113
 		}
 
 		serverID, err := strconv.ParseUint(server.Name[len(ServerNamePrefix):], 10, 64)
@@ -2799,7 +2784,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
-		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
+		return cmp.Compare(serverIDs[a.Name], serverIDs[b.Name])
 	})
 
 	slog.Info("Discovering server IPs", "servers", len(servers.Items))
@@ -2815,7 +2800,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 			sshConfig, ok := sshConfigs[server]
 			if !ok {
-				return fmt.Errorf("missing ssh config for %q", server)
+				return fmt.Errorf("missing ssh config for %q", server) //nolint:err113
 			}
 			sshs.Store(server, sshConfig)
 
@@ -2901,7 +2886,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					ipAR, ok := ips.Load(serverA)
 					if !ok {
-						errChan <- fmt.Errorf("missing IP for %q", serverA)
+						errChan <- fmt.Errorf("missing IP for %q", serverA) //nolint:err113
 
 						return
 					}
@@ -2909,7 +2894,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					ipBR, ok := ips.Load(serverB)
 					if !ok {
-						errChan <- fmt.Errorf("missing IP for %q", serverB)
+						errChan <- fmt.Errorf("missing IP for %q", serverB) //nolint:err113
 
 						return
 					}
@@ -2919,7 +2904,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					clientAR, ok := sshs.Load(serverA)
 					if !ok {
-						errChan <- fmt.Errorf("missing ssh client for %q", serverA)
+						errChan <- fmt.Errorf("missing ssh client for %q", serverA) //nolint:err113
 
 						return
 					}
@@ -3000,6 +2985,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
 					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable); ce != nil {
+						// only when non-nil, as a nil *CurlError would become a non-nil error
 						return ce
 					}
 
@@ -3016,12 +3002,17 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	err = nil
 	var numPingErrs, numIperfErrs, numCurlErrs int
 	for e := range errChan {
-		switch e.(type) {
-		case *PingError:
+		var (
+			pingErr  *PingError
+			iperfErr *IperfError
+			curlErr  *CurlError
+		)
+		switch {
+		case errors.As(e, &pingErr):
 			numPingErrs++
-		case *IperfError:
+		case errors.As(e, &iperfErr):
 			numIperfErrs++
-		case *CurlError:
+		case errors.As(e, &curlErr):
 			numCurlErrs++
 		}
 		err = errors.Join(err, e)
@@ -3122,7 +3113,7 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 
 	for sourceSubnetName := range sourceSubnets {
 		if !strings.Contains(sourceSubnetName, "/") {
-			return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+			return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)") //nolint:err113
 		}
 		sourceParts := strings.SplitN(sourceSubnetName, "/", 2)
 		sourceVPC, sourceSubnet := sourceParts[0], sourceParts[1]
@@ -3164,11 +3155,11 @@ func IsServerReachable(ctx context.Context, kube kclient.Reader, sourceServer, d
 
 func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest string, checkGateway bool) (Reachability, error) {
 	if !strings.Contains(source, "/") {
-		return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+		return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)") //nolint:err113
 	}
 
 	if !strings.Contains(dest, "/") {
-		return Reachability{}, fmt.Errorf("dest must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+		return Reachability{}, fmt.Errorf("dest must be full VPC subnet name (<vpc-name>/<subnet-name>)") //nolint:err113
 	}
 
 	sourceParts := strings.SplitN(source, "/", 2)
@@ -3213,7 +3204,7 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 
 func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader, vpc1Name, vpc1Subnet, vpc2Name, vpc2Subnet string) (Reachability, error) {
 	if vpc1Name == vpc2Name {
-		return Reachability{}, fmt.Errorf("VPCs %s and %s are the same", vpc1Name, vpc2Name)
+		return Reachability{}, fmt.Errorf("VPCs %s and %s are the same", vpc1Name, vpc2Name) //nolint:err113
 	}
 
 	vpc1 := vpcapi.VPC{}
@@ -3233,10 +3224,10 @@ func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader
 	}
 
 	if vpc1.Spec.Subnets[vpc1Subnet] == nil {
-		return Reachability{}, fmt.Errorf("source subnet %s not found in VPC %s", vpc1Subnet, vpc1Name)
+		return Reachability{}, fmt.Errorf("source subnet %s not found in VPC %s", vpc1Subnet, vpc1Name) //nolint:err113
 	}
 	if vpc2.Spec.Subnets[vpc2Subnet] == nil {
-		return Reachability{}, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name)
+		return Reachability{}, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name) //nolint:err113
 	}
 
 	vpcPeerings := vpcapi.VPCPeeringList{}
@@ -3282,7 +3273,7 @@ func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader
 // It's just a temporary function for simple check only supporting whole VPC subnet CIDRs
 func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reader, vpc1Name, vpc1Subnet, vpc2Name, vpc2Subnet string) (Reachability, error) {
 	if vpc1Name == vpc2Name {
-		return Reachability{}, fmt.Errorf("VPCs %s and %s are the same", vpc1Name, vpc2Name)
+		return Reachability{}, fmt.Errorf("VPCs %s and %s are the same", vpc1Name, vpc2Name) //nolint:err113
 	}
 
 	vpc1 := gwapi.VPCInfo{}
@@ -3302,10 +3293,10 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 	}
 
 	if vpc1.Spec.Subnets[vpc1Subnet] == nil {
-		return Reachability{}, fmt.Errorf("source subnet %s not found in VPC %s", vpc1Subnet, vpc1Name)
+		return Reachability{}, fmt.Errorf("source subnet %s not found in VPC %s", vpc1Subnet, vpc1Name) //nolint:err113
 	}
 	if vpc2.Spec.Subnets[vpc2Subnet] == nil {
-		return Reachability{}, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name)
+		return Reachability{}, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name) //nolint:err113
 	}
 
 	peerings := gwapi.GatewayPeeringList{}
@@ -3367,7 +3358,7 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 		}
 
 		if len(expose.As) > 0 {
-			return false, nil, fmt.Errorf("%w: gw peering with non-empty expose 'As' %v", reachCheckUnsupported, expose.As)
+			return false, nil, fmt.Errorf("%w: gw peering with non-empty expose 'As' %v", errReachCheckUnsupported, expose.As)
 		}
 
 		found := false
@@ -3379,7 +3370,7 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 			switch {
 			case exposeEntry.VPCSubnet != "":
 				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; !ok {
-					return false, nil, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName)
+					return false, nil, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName) //nolint:err113
 				}
 				exposeSubnetName = exposeEntry.VPCSubnet
 			case exposeEntry.CIDR != "":
@@ -3416,7 +3407,7 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target string) (string, string, error) {
 	var stdout, stderr string
 	if ssh == nil {
-		return stdout, stderr, fmt.Errorf("ssh client is nil")
+		return stdout, stderr, fmt.Errorf("ssh client is nil") //nolint:err113
 	}
 	maxRetries := 3
 	var err error
@@ -3429,17 +3420,17 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "stderr", stderr)
 			if retries < maxRetries-1 {
 				// random wait in [1, 5] seconds range
-				waitTime := time.Duration(1000+rand.IntN(4000)) * time.Millisecond
+				waitTime := time.Duration(1000+rand.IntN(4000)) * time.Millisecond //nolint:gosec // weak random is fine for the retry jitter
 				slog.Debug("Retrying after random wait time (between 1 and 5 seconds)", "waitTime", waitTime)
 				time.Sleep(waitTime)
 
 				continue
-			} else {
-				return stdout, stderr, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, stderr)
 			}
-		} else {
-			return stdout, stderr, err
+
+			return stdout, stderr, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, stderr)
 		}
+
+		return stdout, stderr, fmt.Errorf("running remote command: %w", err)
 	}
 
 	return stdout, stderr, nil
@@ -3814,7 +3805,7 @@ func isReportableIperfError(ie *IperfError) bool {
 const ncProbeMarker = "NCRC="
 
 func parseNCReturnCode(stdout string) (int, bool) {
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		rest, found := strings.CutPrefix(strings.TrimSpace(line), ncProbeMarker)
 		if !found {
 			continue
@@ -4373,7 +4364,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if fail {
 		slog.Error("Failed to inspect fabric", "took", time.Since(start))
 
-		return fmt.Errorf("failed to inspect fabric")
+		return fmt.Errorf("failed to inspect fabric") //nolint:err113
 	}
 
 	slog.Info("Inspect completed", "took", time.Since(start))
@@ -4398,12 +4389,12 @@ type ReleaseTestOpts struct {
 
 func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpts) error {
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
-		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
+		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies) //nolint:err113
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
 		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
 	}
 	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
-		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
+		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes) //nolint:err113
 	}
 
 	return RunReleaseTestSuites(ctx, c, vlab, opts)

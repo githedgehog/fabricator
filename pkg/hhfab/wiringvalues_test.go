@@ -12,7 +12,6 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestLoadWiringValues(t *testing.T) {
@@ -461,14 +460,14 @@ spec:
 	// deliberately out of order, to prove range iterates in key order
 	tmplData.setNodes(
 		[]fabapi.ControlNode{
-			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-2"}},
-			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-1"}, Spec: fabapi.ControlNodeSpec{
+			{Name: "control-2"},
+			{Name: "control-1", Spec: fabapi.ControlNodeSpec{
 				Bootstrap: fabapi.ControlNodeBootstrap{Disk: "/dev/sda"},
 			}},
 		},
 		[]fabapi.FabNode{
-			{ObjectMeta: kmetav1.ObjectMeta{Name: "node-b"}},
-			{ObjectMeta: kmetav1.ObjectMeta{Name: "node-a"}},
+			{Name: "node-b"},
+			{Name: "node-a"},
 		},
 	)
 

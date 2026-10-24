@@ -49,7 +49,7 @@ func TestSocketDropsCounted(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, recv.SetReadDeadline(time.Now().Add(time.Second)))
-	_, oobn, _, _, err := recv.ReadMsgUDPAddrPort(buf, oob)
+	_, oobn, _, _, err := recv.ReadMsgUDPAddrPort(buf, oob) //nolint:dogsled // only the control message length is needed
 	require.NoError(t, err)
 
 	drops, ok := socketDrops(oob[:oobn])

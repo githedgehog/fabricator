@@ -158,7 +158,7 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 	}
 
 	slices.Sort(leafASNs)
-	want := []uint32{}
+	want := []uint32{} //nolint:prealloc
 	for idx := range uint32(5) {
 		want = append(want, cfg.LeafASNStart+idx)
 	}
@@ -166,9 +166,9 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 
 	// what the controller creates on the release that introduces Fabric objects
 	require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
-		TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String()},
-		ObjectMeta: kmetav1.ObjectMeta{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault},
-		Spec:       wiringapi.DefaultFabricSpec(cfg),
+		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
+		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
+		Spec: wiringapi.DefaultFabricSpec(cfg),
 	}))
 
 	// Defaulted and stored as the new release's webhooks would on create, since
@@ -541,7 +541,7 @@ func TestLeafBreakouts(t *testing.T) {
 	require.NoError(t, l.List(ctx, switches))
 
 	for _, sw := range switches.Items {
-		switch sw.Spec.Role {
+		switch sw.Spec.Role { //nolint:exhaustive // all leaves are checked the same way
 		case wiringapi.SwitchRoleSpine:
 			require.Empty(t, sw.Spec.PortBreakouts, "spine %s has breakouts", sw.Name)
 			require.Empty(t, sw.Spec.VTEPIP, "spine %s has a VTEP IP", sw.Name)

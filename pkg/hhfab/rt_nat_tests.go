@@ -632,14 +632,10 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
 	// Create the new IPv4Namespace with the same subnet range as the existing VPC's namespace
 	overlapNS := &vpcapi.IPv4Namespace{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindIPv4Namespace,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      overlapNSName,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Kind:       vpcapi.KindIPv4Namespace,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       overlapNSName,
+		Namespace:  kmetav1.NamespaceDefault,
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Subnets: []string{namespaceSubnet}, // Same range as the existing VPC's namespace
 		},
@@ -664,14 +660,10 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 
 	// Create the new VPC in the overlap namespace with the SAME subnet CIDR as existingVPC
 	overlapVPC := &vpcapi.VPC{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindVPC,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      overlapVPCName,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Kind:       vpcapi.KindVPC,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       overlapVPCName,
+		Namespace:  kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCSpec{
 			Mode:          existingVPC.Spec.Mode, // Use same VPC mode as existing VPCs
 			IPv4Namespace: overlapNSName,
@@ -723,14 +715,10 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		}
 		// Restore the original attachment
 		restoredAttachment := &vpcapi.VPCAttachment{
-			TypeMeta: kmetav1.TypeMeta{
-				Kind:       vpcapi.KindVPCAttachment,
-				APIVersion: vpcapi.GroupVersion.String(),
-			},
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name:      originalAttachmentName,
-				Namespace: kmetav1.NamespaceDefault,
-			},
+			Kind:       vpcapi.KindVPCAttachment,
+			APIVersion: vpcapi.GroupVersion.String(),
+			Name:       originalAttachmentName,
+			Namespace:  kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCAttachmentSpec{
 				Connection: originalConnection,
 				Subnet:     originalSubnet,
@@ -775,14 +763,10 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 
 	// Create new attachment to the overlap VPC
 	newAttachment := &vpcapi.VPCAttachment{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       vpcapi.KindVPCAttachment,
-			APIVersion: vpcapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      originalAttachmentName,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Kind:       vpcapi.KindVPCAttachment,
+		APIVersion: vpcapi.GroupVersion.String(),
+		Name:       originalAttachmentName,
+		Namespace:  kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCAttachmentSpec{
 			Connection: originalConnection,
 			Subnet:     overlapVPCName + "/" + overlapSubnet,

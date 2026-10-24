@@ -87,8 +87,8 @@ func (f *fakeBoot) serveONIE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mac, serial := r.Header.Get("ONIE-ETH-ADDR"), r.Header.Get("ONIE-SERIAL-NUMBER")
-	if r.Header.Get("ONIE-OPERATION") != "os-install" || r.Header.Get("ONIE-ARCH") != "x86_64" || mac == "" || serial == "" {
+	mac, serial := r.Header.Get("Onie-Eth-Addr"), r.Header.Get("Onie-Serial-Number")
+	if r.Header.Get("Onie-Operation") != "os-install" || r.Header.Get("Onie-Arch") != "x86_64" || mac == "" || serial == "" {
 		w.WriteHeader(http.StatusBadRequest)
 
 		return
@@ -154,19 +154,17 @@ func bootSwitches(t *testing.T, n int) (kclient.Client, map[string]string) {
 	require.NoError(t, err)
 
 	known := map[string]string{}
-	objs := []kclient.Object{&wiringapi.Switch{ObjectMeta: kmetav1.ObjectMeta{Name: "not-bench", Namespace: kmetav1.NamespaceDefault}}}
+	objs := []kclient.Object{&wiringapi.Switch{Name: "not-bench", Namespace: kmetav1.NamespaceDefault}} //nolint:prealloc
 
 	for idx := range n {
 		boot := wiringapi.SwitchBoot{Serial: fmt.Sprintf(BootSerialFmt, idx), MAC: fmt.Sprintf("02:b0:00:00:00:%02x", idx)}
 		known[boot.MAC] = boot.Serial
 
 		objs = append(objs, &wiringapi.Switch{
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name:      fmt.Sprintf("f1-leaf-%02d", idx+1),
-				Namespace: kmetav1.NamespaceDefault,
-				Labels:    map[string]string{LabelFabric: "f1"},
-			},
-			Spec: wiringapi.SwitchSpec{Boot: boot},
+			Name:      fmt.Sprintf("f1-leaf-%02d", idx+1),
+			Namespace: kmetav1.NamespaceDefault,
+			Labels:    map[string]string{LabelFabric: "f1"},
+			Spec:      wiringapi.SwitchSpec{Boot: boot},
 		})
 	}
 
@@ -282,7 +280,7 @@ func TestBootsRefusesSwitchesWithoutBootIdentifiers(t *testing.T) {
 	require.NoError(t, err)
 
 	admin := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&wiringapi.Switch{
-		ObjectMeta: kmetav1.ObjectMeta{Name: "f1-leaf-01", Namespace: kmetav1.NamespaceDefault, Labels: map[string]string{LabelFabric: "f1"}},
+		Name: "f1-leaf-01", Namespace: kmetav1.NamespaceDefault, Labels: map[string]string{LabelFabric: "f1"},
 	}).Build()
 
 	err = RunBoots(t.Context(), admin, bootOpts("http://127.0.0.1:1"))
@@ -298,7 +296,7 @@ func TestBootsOnlyMatchingSwitches(t *testing.T) {
 	targets, err := discoverBootTargets(t.Context(), admin, []string{"f1-leaf-1"})
 	require.NoError(t, err)
 
-	names := []string{}
+	names := []string{} //nolint:prealloc
 	for _, target := range targets {
 		names = append(names, target.name)
 	}
@@ -369,7 +367,7 @@ func TestInstallLogShape(t *testing.T) {
 		require.Equal(t, installLogTail[idx], line.msg)
 	}
 
-	at := map[time.Duration]int{}
+	at := map[time.Duration]int{} //nolint:exhaustive // filled below
 	for idx, line := range lines {
 		require.NotEmpty(t, line.msg)
 		require.LessOrEqual(t, line.at, total)

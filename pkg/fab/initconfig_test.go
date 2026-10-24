@@ -14,7 +14,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestInitConfig(t *testing.T) {
@@ -38,10 +37,8 @@ func TestInitConfig(t *testing.T) {
 				Dev: true,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -76,10 +73,8 @@ func TestInitConfig(t *testing.T) {
 				DefaultAuthorizedKeys: []string{"baz"},
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -115,10 +110,8 @@ func TestInitConfig(t *testing.T) {
 				Dev:                   true,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -163,10 +156,8 @@ func TestInitConfig(t *testing.T) {
 				NoPassAuth:            true,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -211,10 +202,8 @@ func TestInitConfig(t *testing.T) {
 				NoPassAuth: true,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -257,10 +246,8 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Registry: fabapi.RegistryConfig{
@@ -306,10 +293,8 @@ func TestInitConfig(t *testing.T) {
 				DefaultAuthorizedKeys: []string{"baz"},
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -347,10 +332,8 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -384,10 +367,8 @@ func TestInitConfig(t *testing.T) {
 				Gateway: true,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -424,10 +405,8 @@ func TestInitConfig(t *testing.T) {
 				Gateways: 2,
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -469,10 +448,8 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
@@ -506,10 +483,8 @@ func TestInitConfig(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			expectedControls := []fabapi.ControlNode{
 				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "control-1",
-						Namespace: comp.FabNamespace,
-					},
+					Name:      "control-1",
+					Namespace: comp.FabNamespace,
 					Spec: fabapi.ControlNodeSpec{
 						Bootstrap: fabapi.ControlNodeBootstrap{
 							Disk: "/dev/sda",
@@ -531,10 +506,8 @@ func TestInitConfig(t *testing.T) {
 
 				for idx := range test.in.Gateways {
 					expectedNodes = append(expectedNodes, fabapi.FabNode{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      fmt.Sprintf("gateway-%d", idx+1),
-							Namespace: comp.FabNamespace,
-						},
+						Name:      fmt.Sprintf("gateway-%d", idx+1),
+						Namespace: comp.FabNamespace,
 						Spec: fabapi.FabNodeSpec{
 							Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
 							Bootstrap: fabapi.ControlNodeBootstrap{

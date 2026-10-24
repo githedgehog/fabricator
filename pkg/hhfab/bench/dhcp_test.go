@@ -336,9 +336,9 @@ func TestDHCPObjectsValidate(t *testing.T) {
 
 		l := apiutil.NewLoader()
 		require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
-			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String()},
-			ObjectMeta: kmetav1.ObjectMeta{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault},
-			Spec:       wiringapi.DefaultFabricSpec(cfg),
+			Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
+			Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
+			Spec: wiringapi.DefaultFabricSpec(cfg),
 		}))
 
 		plan, err := planDHCP(DHCPLayout{Servers: 6000, Subnets: MaxDHCPSubnetsPerVPC, VPCs: 3})
@@ -611,7 +611,7 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 }
 
 func failedChecks(res *dhcpRoundResult) map[checkName]int64 {
-	out := map[checkName]int64{}
+	out := map[checkName]int64{} //nolint:exhaustive // filled below
 	for _, name := range checkOrder {
 		if n := res.checks.count(name); n > 0 {
 			out[name] = n
@@ -657,7 +657,7 @@ func TestDHCPStormZeroReplyRetransmits(t *testing.T) {
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.zeroOffer)
 		require.Zero(t, res.zeroAck)
-		require.Equal(t, map[checkName]int64{checkZeroOffer: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkZeroOffer: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 
 		for _, srv := range servers {
 			require.Equal(t, 1, srv.retransmits)
@@ -676,7 +676,7 @@ func TestDHCPStormZeroAckRetransmits(t *testing.T) {
 		require.Equal(t, int64(3), res.bound)
 		require.Zero(t, res.zeroOffer)
 		require.Equal(t, int64(3), res.zeroAck)
-		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 
 		for _, srv := range servers {
 			require.Equal(t, 1, srv.retransmits)
@@ -694,7 +694,7 @@ func TestDHCPStormNakRestarts(t *testing.T) {
 
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.nakDORA)
-		require.Equal(t, map[checkName]int64{checkOfferNaked: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkOfferNaked: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 
 		for mac, n := range fake.discovers {
 			require.Equal(t, 2, n, "%s started over once", mac)
@@ -760,7 +760,7 @@ func TestDHCPStormPXEAborts(t *testing.T) {
 
 				require.Equal(t, int64(2), res.pxeDead)
 				require.Zero(t, res.bound)
-				require.Equal(t, map[checkName]int64{tc.check: 2, checkUnbound: 2}, failedChecks(res))
+				require.Equal(t, map[checkName]int64{tc.check: 2, checkUnbound: 2}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 				for _, srv := range servers {
 					require.True(t, srv.pxeDead)
 				}
@@ -864,7 +864,7 @@ func TestDHCPStormTakenNotNaked(t *testing.T) {
 				res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second}, setup)
 
 				require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
-				require.Equal(t, map[checkName]int64{checkTakenNotNaked: 4}, failedChecks(res))
+				require.Equal(t, map[checkName]int64{checkTakenNotNaked: 4}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 			})
 		})
 	}
@@ -880,7 +880,7 @@ func TestDHCPStormRenewalNaked(t *testing.T) {
 
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.nakRenewal)
-		require.Equal(t, map[checkName]int64{checkLeaseNaked: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkLeaseNaked: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 
 		require.Len(t, res.doraLat, 6)
 		for _, lat := range res.doraLat {
@@ -922,7 +922,7 @@ func TestDHCPStormTakenWithoutPeers(t *testing.T) {
 		require.Equal(t, int64(1), res.bound)
 		require.Equal(t, int64(2), res.repeats[repeatOwn][outcomeAckSame])
 		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
-		require.Equal(t, map[checkName]int64{checkUnbound: 1}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkUnbound: 1}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 	})
 }
 
@@ -939,7 +939,7 @@ func TestDHCPStormRepeatUnanswered(t *testing.T) {
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeNoReply])
 		require.Equal(t, int64(3), res.repeats[repeatTaken][outcomeNoReply])
-		require.Equal(t, map[checkName]int64{checkRepeatUnanswered: 6}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkRepeatUnanswered: 6}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 	})
 }
 
@@ -1070,7 +1070,7 @@ func TestDHCPStormCutOffByRoundTimeout(t *testing.T) {
 
 		require.Equal(t, int64(3), res.bound)
 		require.Zero(t, res.timedOut)
-		require.Equal(t, map[checkName]int64{checkCutOff: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkCutOff: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 		for _, srv := range servers {
 			require.False(t, srv.finished)
 		}
@@ -1094,11 +1094,11 @@ func TestDHCPRoundResultInterrupted(t *testing.T) {
 	res := stats.result(0, time.Minute, checks, servers, true)
 	require.True(t, res.interrupted)
 	require.Zero(t, res.timedOut)
-	require.Equal(t, map[checkName]int64{checkOverlap: 1}, failedChecks(res))
+	require.Equal(t, map[checkName]int64{checkOverlap: 1}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 
 	res = stats.result(0, time.Minute, newDHCPChecks(), servers, false)
 	require.Equal(t, 2, res.timedOut)
-	require.Equal(t, map[checkName]int64{checkUnbound: 2}, failedChecks(res))
+	require.Equal(t, map[checkName]int64{checkUnbound: 2}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 }
 
 // Repeat latency is how fast dhcpd answered: a repeat that got nothing or only
@@ -1129,7 +1129,7 @@ func TestDHCPStormZeroAckRepeat(t *testing.T) {
 
 		require.Equal(t, int64(3), res.zeroAck)
 		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeAckSame])
-		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res)) //nolint:exhaustive // only the failed checks
 	})
 }
 

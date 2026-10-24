@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -22,7 +21,7 @@ import (
 func genEvent(gen int64) watch.Event {
 	return watch.Event{
 		Type:   watch.Modified,
-		Object: &agentapi.Agent{ObjectMeta: kmetav1.ObjectMeta{Generation: gen}},
+		Object: &agentapi.Agent{Generation: gen},
 	}
 }
 

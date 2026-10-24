@@ -23,7 +23,7 @@ func TestUpgradeFromWithoutFabric(t *testing.T) {
 		"26.03.1":  true,
 		"26.04":    true,
 		"v26.04.2": true,
-		" 26.04 ":  true,
+		" 26.04 ":  true, //nolint:gocritic // whitespace on purpose to test the trimming
 		"26.02":    false,
 		"26.05":    false,
 		"26.05.1":  false,
@@ -93,9 +93,9 @@ func TestInjectUpgradeDefaultFabricKeepsDefined(t *testing.T) {
 
 	l := apiutil.NewLoader()
 	require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
-		TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String()},
-		ObjectMeta: kmetav1.ObjectMeta{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault},
-		Spec:       spec,
+		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
+		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
+		Spec: spec,
 	}))
 
 	require.NoError(t, injectUpgradeDefaultFabric(ctx, l, f, "26.03"))

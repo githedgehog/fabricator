@@ -31,7 +31,7 @@ func TestHealthListsAgentsOnce(t *testing.T) {
 
 	kube := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(&agentapi.Agent{ObjectMeta: kmetav1.ObjectMeta{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault}}).
+		WithObjects(&agentapi.Agent{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault}).
 		WithInterceptorFuncs(interceptor.Funcs{
 			List: func(ctx context.Context, c kclient.WithWatch, list kclient.ObjectList, opts ...kclient.ListOption) error {
 				if _, ok := list.(*agentapi.AgentList); ok {
@@ -55,7 +55,7 @@ func TestDeleteIfPresentCountsOnlyRealDeletions(t *testing.T) {
 	scheme, err := benchScheme()
 	require.NoError(t, err)
 
-	present := &coreapi.ServiceAccount{ObjectMeta: kmetav1.ObjectMeta{Name: "agent--leaf-1", Namespace: kmetav1.NamespaceDefault}}
+	present := &coreapi.ServiceAccount{Name: "agent--leaf-1", Namespace: kmetav1.NamespaceDefault}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(present).Build()
 
 	deleted, err := deleteIfPresent(t.Context(), kube, present.DeepCopy())
