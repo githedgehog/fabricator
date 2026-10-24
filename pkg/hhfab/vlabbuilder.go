@@ -21,6 +21,7 @@ import (
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const VLABExtraDomain = "domain-b"
@@ -31,6 +32,48 @@ const (
 	VLABExtraFabric            = "fabric-b"
 	VLABInterconnectAnnotation = "hhfab.githedgehog.com/interconnect"
 )
+
+// interconnectPair describes the k-th (1-based) interconnect pair. Its Externals are named
+// after the Fabric on the other side, short with the number from the second pair on, and each
+// side presents its own local ASN, as leaf ASNs are only known after hydration.
+type interconnectPair struct {
+	MainExt, ExtraExt   string
+	MainASN, ExtraASN   uint32
+	MainIP, ExtraIP     string // attachment addresses on the switch
+	MainPeer, ExtraPeer string // addresses of the neighbor
+	ConnSuffix          string
+}
+
+func newInterconnectPair(k uint8) interconnectPair {
+	mainExt, extraExt, connSuffix := "to-"+VLABExtraFabric, "to-"+wiringapi.DefaultFabric, ""
+	if k > 1 {
+		// External names are limited to 11 characters
+		mainExt, extraExt, connSuffix = fmt.Sprintf("to-fb-%d", k), fmt.Sprintf("to-def-%d", k), fmt.Sprintf("-%d", k)
+	}
+	base := fmt.Sprintf("100.64.%d", k-1)
+
+	return interconnectPair{
+		MainExt:    mainExt,
+		ExtraExt:   extraExt,
+		MainASN:    64910 + 2*uint32(k-1),
+		ExtraASN:   64911 + 2*uint32(k-1),
+		MainIP:     base + ".1/30",
+		ExtraIP:    base + ".2/30",
+		MainPeer:   base + ".2",
+		ExtraPeer:  base + ".1",
+		ConnSuffix: connSuffix,
+	}
+}
+
+// interconnectPairs returns the pairs to build, at least one
+func (b *VLABBuilderDefault) interconnectPairs() []interconnectPair {
+	pairs := []interconnectPair{}
+	for k := uint8(1); k <= max(b.InterconnectLinks, 1); k++ {
+		pairs = append(pairs, newInterconnectPair(k))
+	}
+
+	return pairs
+}
 
 const (
 	GatewayDriverKernel = "kernel"
@@ -82,6 +125,8 @@ type VLABBuilderDefault struct {
 	SharedLeafsCount    uint8             // number of orphan leaves in both domains, the last ones (default 1 with ExtraDomain)
 	ExtraFabric         bool              // generate a second fabric of two mesh leaves with a server each
 	InterconnectFabrics bool              // connect a leaf of each fabric with an External on both sides
+	InterconnectLinks   uint8             // number of independent interconnect pairs on those leaves, one port each (default 1, needs InterconnectFabrics)
+	AddFabric           bool              // generate the extra fabric but leave it out of the install, it is added later by add-fabric (implies ExtraFabric)
 	YesFlag             bool
 
 	VLABBuilderBase
@@ -265,6 +310,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	icLeafID := totalESLAGLeafs + b.OrphanLeafsCount
 	if b.ExtraDomain {
 		icLeafID = totalESLAGLeafs
+	}
+	if b.InterconnectLinks > 1 && !b.InterconnectFabrics {
+		return fmt.Errorf("more than one interconnect link requires interconnecting fabrics") //nolint:err113
 	}
 	if b.InterconnectFabrics {
 		if !b.ExtraFabric {
@@ -957,34 +1005,32 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		return nil
 	}
 
-	// each side presents its own local ASN, as leaf ASNs are only known after hydration
-	const mainICASN, extraICASN = 64910, 64911
-	mainICExt := "to-" + VLABExtraFabric
-	extraICExt := "to-" + wiringapi.DefaultFabric
 	if b.InterconnectFabrics {
 		icLeafName := fmt.Sprintf("leaf-%02d", icLeafID)
-		// named apart from <leaf>--external, which the leaf may already have
-		icConn, err := b.createConnectionWithName(ctx, icLeafName+"--interconnect", wiringapi.ConnectionSpec{
-			External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(icLeafName)}}},
-		})
-		if err != nil {
-			return err
-		}
-		if _, err := b.createExternal(ctx, mainICExt, vpcapi.ExternalSpec{
-			IPv4Namespace:     "default",
-			InboundCommunity:  fmt.Sprintf("%d:100", extraICASN),
-			OutboundCommunity: fmt.Sprintf("%d:100", mainICASN),
-			LocalASN:          mainICASN,
-		}, map[string]string{VLABInterconnectAnnotation: extraICExt}); err != nil {
-			return err
-		}
-		if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", icLeafName, mainICExt), vpcapi.ExternalAttachmentSpec{
-			External:   mainICExt,
-			Connection: icConn.Name,
-			Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.1/30"},
-			Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: extraICASN, IP: "100.64.0.2"},
-		}); err != nil {
-			return err
+		for _, pair := range b.interconnectPairs() {
+			// named apart from <leaf>--external, which the leaf may already have
+			icConn, err := b.createConnectionWithName(ctx, icLeafName+"--interconnect"+pair.ConnSuffix, wiringapi.ConnectionSpec{
+				External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(icLeafName)}}},
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := b.createExternal(ctx, pair.MainExt, vpcapi.ExternalSpec{
+				IPv4Namespace:     "default",
+				InboundCommunity:  fmt.Sprintf("%d:100", pair.ExtraASN),
+				OutboundCommunity: fmt.Sprintf("%d:100", pair.MainASN),
+				LocalASN:          pair.MainASN,
+			}, map[string]string{VLABInterconnectAnnotation: pair.ExtraExt}); err != nil {
+				return err
+			}
+			if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", icLeafName, pair.MainExt), vpcapi.ExternalAttachmentSpec{
+				External:   pair.MainExt,
+				Connection: icConn.Name,
+				Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: pair.MainIP},
+				Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: pair.ExtraASN, IP: pair.MainPeer},
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1076,30 +1122,32 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		return nil
 	}
 
-	icConn, err := b.createConnectionWithName(ctx, extraLeafs[0]+"--interconnect", wiringapi.ConnectionSpec{
-		Topology: wiringapi.ConnectionTopology{Fabric: VLABExtraFabric},
-		External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}}},
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := b.createExternal(ctx, extraICExt, vpcapi.ExternalSpec{
-		Topology:          vpcapi.ExternalTopology{Fabric: VLABExtraFabric},
-		IPv4Namespace:     VLABExtraFabric,
-		InboundCommunity:  fmt.Sprintf("%d:100", mainICASN),
-		OutboundCommunity: fmt.Sprintf("%d:100", extraICASN),
-		LocalASN:          extraICASN,
-	}, map[string]string{VLABInterconnectAnnotation: mainICExt}); err != nil {
-		return err
-	}
-	if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", extraLeafs[0], extraICExt), vpcapi.ExternalAttachmentSpec{
-		Topology:   vpcapi.ExternalAttachmentTopology{Fabric: VLABExtraFabric},
-		External:   extraICExt,
-		Connection: icConn.Name,
-		Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.2/30"},
-		Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: mainICASN, IP: "100.64.0.1"},
-	}); err != nil {
-		return err
+	for _, pair := range b.interconnectPairs() {
+		icConn, err := b.createConnectionWithName(ctx, extraLeafs[0]+"--interconnect"+pair.ConnSuffix, wiringapi.ConnectionSpec{
+			Topology: wiringapi.ConnectionTopology{Fabric: VLABExtraFabric},
+			External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}}},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := b.createExternal(ctx, pair.ExtraExt, vpcapi.ExternalSpec{
+			Topology:          vpcapi.ExternalTopology{Fabric: VLABExtraFabric},
+			IPv4Namespace:     VLABExtraFabric,
+			InboundCommunity:  fmt.Sprintf("%d:100", pair.MainASN),
+			OutboundCommunity: fmt.Sprintf("%d:100", pair.ExtraASN),
+			LocalASN:          pair.ExtraASN,
+		}, map[string]string{VLABInterconnectAnnotation: pair.MainExt}); err != nil {
+			return err
+		}
+		if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", extraLeafs[0], pair.ExtraExt), vpcapi.ExternalAttachmentSpec{
+			Topology:   vpcapi.ExternalAttachmentTopology{Fabric: VLABExtraFabric},
+			External:   pair.ExtraExt,
+			Connection: icConn.Name,
+			Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: pair.ExtraIP},
+			Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: pair.MainASN, IP: pair.ExtraPeer},
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1532,4 +1580,111 @@ func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, 
 	}
 
 	return vpc, nil
+}
+
+// VLABStager is implemented by builders that can leave part of the wiring they generate out of the install
+type VLABStager interface {
+	MarkStaged(ctx context.Context, l *apiutil.Loader) error
+}
+
+var _ VLABStager = (*VLABBuilderDefault)(nil)
+
+// MarkStaged annotates everything of the extra fabric, plus what connects it to the default one, as staged.
+// The VLAB still gets the VMs and links of all of it, only the installer leaves the objects out.
+func (b *VLABBuilderDefault) MarkStaged(ctx context.Context, l *apiutil.Loader) error {
+	if !b.AddFabric {
+		return nil
+	}
+	if !b.ExtraFabric {
+		return fmt.Errorf("add-fabric requires the extra fabric") //nolint:err113
+	}
+
+	kube := l.GetClient()
+	objs, err := apiutil.ListWiring(ctx, kube)
+	if err != nil {
+		return fmt.Errorf("listing wiring: %w", err)
+	}
+
+	fabricOf := func(obj kclient.Object) string {
+		switch o := obj.(type) {
+		case *wiringapi.Fabric:
+			return o.Name
+		case *wiringapi.Switch:
+			return o.Spec.Topology.Fabric
+		case *wiringapi.Connection:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.IPv4Namespace:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.External:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.ExternalAttachment:
+			return o.Spec.Topology.Fabric
+		}
+
+		return ""
+	}
+
+	held := map[kclient.Object]bool{}
+	heldExternals := map[string]bool{}
+	for _, obj := range objs {
+		_, interconnect := obj.GetAnnotations()[VLABInterconnectAnnotation]
+		if conn, ok := obj.(*wiringapi.Connection); ok && strings.Contains(conn.Name, "--interconnect") {
+			interconnect = true
+		}
+		if fabricOf(obj) == VLABExtraFabric || interconnect {
+			held[obj] = true
+			if ext, ok := obj.(*vpcapi.External); ok {
+				heldExternals[ext.Name] = true
+			}
+		}
+	}
+
+	// attachments of held back externals, and servers that are only connected through held back connections
+	serverConns := map[string][]bool{}
+	for _, obj := range objs {
+		switch o := obj.(type) {
+		case *vpcapi.ExternalAttachment:
+			if heldExternals[o.Spec.External] {
+				held[obj] = true
+			}
+		case *wiringapi.Connection:
+			_, servers, _, _, err := o.Spec.Endpoints()
+			if err != nil {
+				return fmt.Errorf("getting endpoints of connection %s: %w", o.Name, err)
+			}
+			for _, server := range servers {
+				serverConns[server] = append(serverConns[server], held[obj])
+			}
+		}
+	}
+	for _, obj := range objs {
+		if server, ok := obj.(*wiringapi.Server); ok && len(serverConns[server.Name]) > 0 && !slices.Contains(serverConns[server.Name], false) {
+			held[obj] = true
+		}
+	}
+
+	if len(held) == 0 {
+		return fmt.Errorf("nothing to stage") //nolint:err113
+	}
+
+	for _, obj := range objs {
+		if !held[obj] {
+			continue
+		}
+
+		anns := obj.GetAnnotations()
+		if anns == nil {
+			anns = map[string]string{}
+		}
+		anns[apiutil.StagedAnnotation] = "true"
+		obj.SetAnnotations(anns)
+
+		if err := kube.Update(ctx, obj); err != nil {
+			return fmt.Errorf("annotating %T %s: %w", obj, obj.GetName(), err)
+		}
+	}
+
+	slog.Info("Staged objects", "objects", len(held))
+
+	return nil
 }

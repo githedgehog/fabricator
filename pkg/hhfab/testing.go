@@ -1439,6 +1439,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 type SetupPeeringsOpts struct {
 	WaitSwitchesReady bool
 	Requests          []string
+	// GatewayPeerings are created as they are, next to the ones Requests describe
+	GatewayPeerings map[string]*gwapi.PeeringSpec
 }
 
 // SetupPeerings creates/updates peerings per opts.Requests. It is matrix-
@@ -2114,6 +2116,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 	}
 
+	for name, spec := range opts.GatewayPeerings {
+		if _, exists := gwPeerings[name]; exists {
+			return fmt.Errorf("gateway peering %s is both requested and given", name) //nolint:err113
+		}
+		gwPeerings[name] = spec
+	}
+
 	if err := DoSetupPeerings(ctx, kube, vpcPeerings, externalPeerings, gwPeerings, opts.WaitSwitchesReady); err != nil {
 		return err
 	}
@@ -2128,9 +2137,14 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 // use in test.
 // SourceIP is left empty; callers that need to model external-originated
 // traffic must populate it manually.
+// Interconnect Externals are paths to another Fabric with nothing behind them to probe, so
+// they get no endpoint.
 func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 	names := make([]string, 0, len(externals))
 	for _, ext := range externals {
+		if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+			continue
+		}
 		names = append(names, ext.Name)
 	}
 	slices.Sort(names)
@@ -3084,10 +3098,13 @@ const (
 	ReachabilityReasonIntraVPC       ReachabilityReason = "intra-vpc"
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
+	ReachabilityReasonInterconnect   ReachabilityReason = "interconnect"
+	// ReachabilityReasonInterconnectGateway is an External of another Fabric reached through its gateway
+	ReachabilityReasonInterconnectGateway ReachabilityReason = "interconnect-gateway"
 )
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
-	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
+	switchPeeringReachable, err := isExternalSubnetReachableViaPeering(ctx, kube, sourceServer, destSubnet)
 	if err != nil {
 		return Reachability{}, fmt.Errorf("checking if external subnet %s is reachable from server %s: %w", destSubnet, sourceServer, err)
 	}
@@ -3132,6 +3149,18 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 			} else if r.Reachable {
 				return r, nil
 			}
+		}
+	}
+
+	// an External of another Fabric, reached through the gateway of that Fabric
+	for _, ext := range externals.Items {
+		if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+			continue
+		}
+		if r, err := IsExternalReachableOverInterconnect(ctx, kube, sourceServer, ext.Name, []string{destSubnet}); err != nil {
+			return Reachability{}, err
+		} else if r.Reachable {
+			return r, nil
 		}
 	}
 
@@ -3192,6 +3221,14 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 	r, err := IsSubnetReachableWithSwitchPeering(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
 	if err != nil {
 		return Reachability{}, fmt.Errorf("checking if subnets %s and %s are reachable through fabric: %w", source, dest, err)
+	}
+	if r.Reachable {
+		return r, nil
+	}
+
+	r, err = IsSubnetReachableOverInterconnect(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("checking if subnets %s and %s are reachable over the interconnect: %w", source, dest, err)
 	}
 	if r.Reachable {
 		return r, nil

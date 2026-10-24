@@ -121,6 +121,7 @@ type OnReady string
 
 const (
 	OnReadyExit             OnReady = "exit"
+	OnReadyAddFabric        OnReady = "add-fabric"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
 	OnReadySetupPeerings    OnReady = "setup-peerings"
 	OnReadySwitchReinstall  OnReady = "switch-reinstall"
@@ -133,6 +134,7 @@ const (
 
 var AllOnReady = []OnReady{
 	OnReadyExit,
+	OnReadyAddFabric,
 	OnReadySetupVPCs,
 	OnReadySetupPeerings,
 	OnReadySwitchReinstall,
@@ -721,6 +723,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.VLABSwitchReinstall(ctx, reinstallOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
+				case OnReadyAddFabric:
+					if err := c.AddFabric(ctx, vlab); err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("adding fabric: %w", err))
+					}
 				case OnReadySetupVPCs:
 					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,
@@ -734,20 +740,29 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						VPCMode:           opts.VPCMode,
 						InterfaceMTU:      opts.InterfaceMTU,
 					}
+					// each interconnect pair is peered with a VPC of its own in every Fabric, so a group
+					// of servers needs a VPC per pair and the VPCs get a subnet each
+					pairs, err := c.interconnectPairs(ctx)
+					if err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("counting interconnect pairs: %w", err))
+					}
+					if pairs > 1 {
+						setupVPCsOpts.SubnetsPerVPC = 1
+					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
 					if _, _, err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
-					// TODO make it configurable
-					peerings := []string{"1+2"}
-					if c.Fab.Spec.Config.Gateway.Enable {
-						peerings = append(peerings, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
+					peerings, err := c.onReadyPeerings(ctx)
+					if err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("building peerings: %w", err))
 					}
 
 					setupPeeringsOpts := SetupPeeringsOpts{
 						WaitSwitchesReady: true,
-						Requests:          peerings,
+						Requests:          peerings.Requests,
+						GatewayPeerings:   peerings.Gateway,
 					}
 					slog.Debug("Running setup-peerings", "opts", setupPeeringsOpts)
 					if err := c.SetupPeerings(ctx, vlab, setupPeeringsOpts); err != nil {

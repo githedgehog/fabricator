@@ -112,8 +112,27 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 	return nil
 }
 
+// externalPeerableWithVPC is whether the fabric accepts an External peering of the VPC with the
+// External: same Fabric, the External's domain is one of the VPC's, and it is not an interconnect
+// External, which only carries traffic to another Fabric and is peered on purpose
+func externalPeerableWithVPC(ext *vpcapi.External, vpc *vpcapi.VPC) bool {
+	if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+		return false
+	}
+	if fabricOrDefault(ext.Spec.Topology.Fabric) != fabricOrDefault(vpc.Spec.Topology.Fabric) {
+		return false
+	}
+
+	domain := externalDomain(ext)
+	if len(vpc.Spec.Topology.Domains) == 0 {
+		return domain == defaultDomain
+	}
+
+	return slices.Contains(vpc.Spec.Topology.Domains, domain)
+}
+
 // populate the externalPeerings map with all possible external VPC peering combinations, skipping proxy static externals
-// as they require gateway peerings with NAT to work
+// as they require gateway peerings with NAT to work, and Externals the VPC can not be peered with
 func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -139,7 +158,7 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 			if ext.Spec.Static != nil && proxyExts[ext.Name] {
 				continue
 			}
-			if ext.Spec.IPv4Namespace == vpc.Spec.IPv4Namespace {
+			if ext.Spec.IPv4Namespace == vpc.Spec.IPv4Namespace && externalPeerableWithVPC(&ext, &vpc) {
 				subnets := slices.Collect(maps.Keys(vpc.Spec.Subnets))
 				appendExtPeeringSpec(extPeerings, i+1, ext.Name, subnets, AllZeroPrefix)
 			}

@@ -144,6 +144,16 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	return testCtx
 }
 
+// isMultiTopology is whether there are several Fabrics or a Fabric with several domains, which the
+// peerings and the reachability checks of the suites that assume a single one can not handle
+func isMultiTopology(fabrics []wiringapi.Fabric) bool {
+	if len(fabrics) > 1 {
+		return true
+	}
+
+	return slices.ContainsFunc(fabrics, func(fabric wiringapi.Fabric) bool { return len(fabric.Spec.Domains) > 1 })
+}
+
 // findExternals finds a viable BGP external and a viable static external, returning (bgpExtName, staticExtName).
 // Three passes ensure hardware externals always win regardless of API response order: pass 1 selects
 // hardware externals, pass 2 accepts virtual externals whose attachments all go through hardware
@@ -151,6 +161,13 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 // attachments, needed in pure VLAB where both the switch and the external are virtual.
 func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.ExternalList, extAttachList *vpcapi.ExternalAttachmentList) (string, string) {
 	bgpExt, staticExt := "", ""
+
+	// an interconnect External carries traffic to another Fabric, there is no external system behind it
+	candidates := slices.DeleteFunc(slices.Clone(extList.Items), func(ext vpcapi.External) bool {
+		_, interconnect := ext.Annotations[VLABInterconnectAnnotation]
+
+		return interconnect
+	})
 
 	hasAttachment := func(extName string) bool {
 		for _, attach := range extAttachList.Items {
@@ -214,7 +231,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// First pass: prefer hardware externals
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !isHardware(&ext) || !hasAttachment(ext.Name) {
 			continue
 		}
@@ -231,7 +248,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// Second pass: virtual externals with all-hardware attachments
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
 			continue
 		}
@@ -248,7 +265,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// Third pass: any external with attachments (pure VLAB: both switch and external are virtual)
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !hasAttachment(ext.Name) {
 			continue
 		}
@@ -281,6 +298,10 @@ type JUnitTestSuite struct {
 	Time      float64         `xml:"time,attr"`
 	TimeHuman time.Duration   `xml:"-"`
 	TestCases []JUnitTestCase `xml:"testcase"`
+
+	// MultiTopology is set by the suites that work with several Fabrics or domains in the cluster,
+	// the others skip when there are
+	MultiTopology bool `xml:"-"`
 }
 
 type SkipFlags struct {
@@ -296,6 +317,7 @@ type SkipFlags struct {
 	NoLoki            bool `xml:"-"` // skip if Loki is not configured or available
 	NoProm            bool `xml:"-"` // skip if Prometheus is not configured or available
 	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
+	MultiTopology     bool `xml:"-"` // skip, unless the suite supports it, if there are several Fabrics or a Fabric with several domains
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when attaching External on a VLAN - we'll create a subinterface for it, but if no VLAN specified we'll configure on the interface itself
@@ -334,6 +356,9 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoServers {
 		parts = append(parts, "NoSrvs")
+	}
+	if sf.MultiTopology {
+		parts = append(parts, "MultiTopo")
 	}
 	if sf.NoLoki {
 		parts = append(parts, "NoLoki")
@@ -660,6 +685,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		if test.Skipped != nil {
 			continue
 		}
+		if skipFlags.MultiTopology && !suite.MultiTopology {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are several Fabrics or domains and the suite does not support them",
+			}
+			suite.Skipped++
+
+			continue
+		}
 		if test.SkipFlags.ExtendedOnly && !skipFlags.ExtendedOnly {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "Extended tests are not enabled",
@@ -924,6 +957,15 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 			slog.Info("No gateways found, gateway tests will be skipped")
 			skipFlags.NoGateway = true
 		}
+	}
+
+	fabrics := &wiringapi.FabricList{}
+	if err := kube.List(ctx, fabrics); err != nil {
+		return fmt.Errorf("listing fabrics: %w", err)
+	}
+	if isMultiTopology(fabrics.Items) {
+		slog.Info("Several Fabrics or domains found, suites that do not support them will be skipped")
+		skipFlags.MultiTopology = true
 	}
 
 	swList := &wiringapi.SwitchList{}
