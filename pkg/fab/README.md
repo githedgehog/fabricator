@@ -164,7 +164,7 @@ skopeo copy --all docker://cturra/ntp@${UPSTREAM_SHA} docker://ghcr.io/githedgeh
 Run `gzip -dk sonic-vs.img.gz` if needed.
 
 ```bash
-export BCM_SONIC_VERSION="v4.5.2"
+export BCM_SONIC_VERSION="v4.6.0"
 
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-advanced:${BCM_SONIC_VERSION} sonic-broadcom-enterprise-advanced.bin
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-campus:${BCM_SONIC_VERSION} sonic-broadcom-campus.bin
