@@ -632,22 +632,22 @@ func processFilesSequential(fileMap map[string][]string, outputDirectory string)
 }
 
 func printSummary(outputPath string, data *ViewerData) {
-	fmt.Printf("Enhanced HTML viewer created: %s\n", outputPath)
-	fmt.Printf("Found %d unique topologies\n", data.DiagramCount)
-	fmt.Printf("Found %d Mermaid SVG files\n", len(data.ProcessedData.MermaidFiles))
+	fmt.Fprintf(os.Stdout, "Enhanced HTML viewer created: %s\n", outputPath)
+	fmt.Fprintf(os.Stdout, "Found %d unique topologies\n", data.DiagramCount)
+	fmt.Fprintf(os.Stdout, "Found %d Mermaid SVG files\n", len(data.ProcessedData.MermaidFiles))
 
 	drawioCount := 0
 	for style, diagrams := range data.ProcessedData.DrawIOFiles {
 		count := len(diagrams)
 		if count > 0 {
-			fmt.Printf("Found %d %s DrawIO SVG files\n", count, style)
+			fmt.Fprintf(os.Stdout, "Found %d %s DrawIO SVG files\n", count, style)
 		}
 		drawioCount += count
 	}
 	if drawioCount > 0 {
-		fmt.Printf("Found %d total DrawIO SVG files\n", drawioCount)
+		fmt.Fprintf(os.Stdout, "Found %d total DrawIO SVG files\n", drawioCount)
 	}
-	fmt.Printf("Found %d Graphviz SVG files\n", len(data.ProcessedData.GraphvizFiles))
+	fmt.Fprintf(os.Stdout, "Found %d Graphviz SVG files\n", len(data.ProcessedData.GraphvizFiles))
 }
 
 func main() {

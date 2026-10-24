@@ -2538,20 +2538,20 @@ to have it re-run itself under sudo.`,
 									password := c.String("switch-password")
 									if mode == string(hhfab.ReinstallModeReboot) {
 										if username == "" {
-											fmt.Print("Enter username: ")
+											fmt.Fprint(os.Stdout, "Enter username: ")
 											if _, err := fmt.Scanln(&username); err != nil {
 												return fmt.Errorf("failed to read username: %w", err)
 											}
 										}
 
 										if password == "" {
-											fmt.Print("Enter password: ")
+											fmt.Fprint(os.Stdout, "Enter password: ")
 											bytePassword, err := term.ReadPassword(syscall.Stdin)
 											if err != nil {
 												return fmt.Errorf("failed to read password: %w", err)
 											}
 											password = string(bytePassword)
-											fmt.Println()
+											fmt.Fprintln(os.Stdout)
 										}
 
 										if username == "" || password == "" {

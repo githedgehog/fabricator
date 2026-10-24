@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -66,9 +67,9 @@ func Generate(ctx context.Context, workDir, resultDir string, client kclient.Rea
 		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated draw.io diagram", "file", displayPath, "style", style)
-		fmt.Printf("To use this diagram:\n")
-		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
-		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
+		fmt.Fprintf(os.Stdout, "To use this diagram:\n")
+		fmt.Fprintf(os.Stdout, "1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
+		fmt.Fprintf(os.Stdout, "2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
 	case FormatDot:
 		if err := GenerateDOT(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
@@ -82,11 +83,11 @@ func Generate(ctx context.Context, workDir, resultDir string, client kclient.Rea
 		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated graphviz diagram", "file", displayPath)
-		fmt.Printf("To render this diagram with Graphviz:\n")
-		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
-		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o diagram.png\n", displayPath)
-		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", displayPath)
-		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", displayPath)
+		fmt.Fprintf(os.Stdout, "To render this diagram with Graphviz:\n")
+		fmt.Fprintf(os.Stdout, "1. Install Graphviz: https://graphviz.org/download/\n")
+		fmt.Fprintf(os.Stdout, "2. Convert to PNG: dot -Tpng %s -o diagram.png\n", displayPath)
+		fmt.Fprintf(os.Stdout, "3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", displayPath)
+		fmt.Fprintf(os.Stdout, "4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", displayPath)
 	case FormatMermaid:
 		if err := GenerateMermaid(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating Mermaid diagram: %w", err)
@@ -100,9 +101,9 @@ func Generate(ctx context.Context, workDir, resultDir string, client kclient.Rea
 		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated Mermaid diagram", "file", displayPath)
-		fmt.Printf("To render this diagram with Mermaid:\n")
-		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
-		fmt.Printf("2. Copy the contents of %s into the editor\n", displayPath)
+		fmt.Fprintf(os.Stdout, "To render this diagram with Mermaid:\n")
+		fmt.Fprintf(os.Stdout, "1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
+		fmt.Fprintf(os.Stdout, "2. Copy the contents of %s into the editor\n", displayPath)
 	default:
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:err113
 	}
