@@ -136,78 +136,136 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			chartCfg.Spec.Values = redactedJSON()
 		}
 	},
-	fabapi.GroupVersion.WithKind(fabapi.KindFabricator): func(obj kclient.Object) {
-		fab := obj.(*fabapi.Fabricator)
-
-		if fab.Spec.Config.Registry.Upstream != nil {
-			fab.Spec.Config.Registry.Upstream.Password = RedactedValue
-		}
-
-		fab.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
-		redactAlloyTargets(&fab.Spec.Config.Observability.Targets)
-
-		fab.Spec.Config.Control.DefaultUser.PasswordHash = RedactedValue
-		fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = lo.Map(fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, func(_ string, _ int) string {
-			return RedactedValue
-		})
-
-		for name, user := range fab.Spec.Config.Fabric.DefaultSwitchUsers {
-			user.PasswordHash = RedactedValue
-			user.AuthorizedKeys = lo.Map(user.AuthorizedKeys, func(_ string, _ int) string {
-				return RedactedValue
-			})
-			fab.Spec.Config.Fabric.DefaultSwitchUsers[name] = user
-		}
-
-		if fab.Spec.Config.Control.JoinToken != "" {
-			fab.Spec.Config.Control.JoinToken = RedactedValue
-		}
-	},
-	agentapi.GroupVersion.WithKind(agentapi.KindAgent): func(obj kclient.Object) {
-		agent := obj.(*agentapi.Agent)
-
-		agent.Spec.Version.Password = RedactedValue
-		agent.Spec.Alloy = fmeta.AlloyConfig{}
-
-		redactAlloyTargets(&agent.Spec.Config.Alloy.Targets)
-
-		for name, user := range agent.Spec.Users {
-			user.Password = RedactedValue
-			user.SSHKeys = lo.Map(user.SSHKeys, func(_ string, _ int) string {
-				return RedactedValue
-			})
-			agent.Spec.Users[name] = user
-		}
-	},
 }
 
 func redactedJSON() *apiextv1.JSON {
 	return &apiextv1.JSON{Raw: []byte(strconv.Quote(RedactedValue))}
 }
 
-func redactAlloyTargets(targets *alloy.Targets) {
-	for name, target := range targets.Prometheus {
-		redactAlloyTarget(&target.Target)
-		targets.Prometheus[name] = target
-	}
+type typeRedactor struct {
+	typ    reflect.Type
+	redact func(reflect.Value)
+}
 
-	for name, target := range targets.Loki {
-		redactAlloyTarget(&target.Target)
-		targets.Loki[name] = target
-	}
-
-	for name, target := range targets.Pyroscope {
-		redactAlloyTarget(&target.Target)
-		targets.Pyroscope[name] = target
+func redactType[T any](redact func(*T)) typeRedactor {
+	return typeRedactor{
+		typ: reflect.TypeFor[T](),
+		redact: func(v reflect.Value) {
+			if val, ok := reflect.TypeAssert[*T](v); ok {
+				redact(val)
+			}
+		},
 	}
 }
 
-func redactAlloyTarget(target *alloy.Target) {
-	if target.BasicAuth != nil && target.BasicAuth.Password != "" {
-		target.BasicAuth.Password = RedactedValue
+// typeRedactors redact the types holding credentials wherever they show up in a collected object, as most of them
+// are copied around, e.g. the alloy config goes from the Fabricator through the fabric controller config into every
+// Agent. Empty values are kept as is, so it's still visible whether a credential is set.
+var typeRedactors = lo.SliceToMap([]typeRedactor{
+	redactType(func(target *alloy.Target) {
+		if target.BasicAuth != nil {
+			redactString(&target.BasicAuth.Password)
+		}
+		redactString(&target.BearerToken)
+	}),
+	redactType(func(scrape *alloy.Scrape) {
+		for k := range scrape.HTTPHeaders {
+			scrape.HTTPHeaders[k] = RedactedValue
+		}
+	}),
+	redactType(func(target *fmeta.AlloyTarget) {
+		redactString(&target.BasicAuth.Password)
+		redactString(&target.BearerToken)
+	}),
+	redactType(func(user *fmeta.UserCreds) {
+		redactString(&user.Password)
+		redactStrings(user.SSHKeys)
+	}),
+	redactType(func(cfg *fabapi.ControlConfig) {
+		redactString(&cfg.JoinToken)
+	}),
+	redactType(func(user *fabapi.ControlUser) {
+		redactString(&user.PasswordHash)
+		redactStrings(user.AuthorizedKeys)
+	}),
+	redactType(func(user *fabapi.SwitchUser) {
+		redactString(&user.PasswordHash)
+		redactStrings(user.AuthorizedKeys)
+	}),
+	redactType(func(upstream *fabapi.ControlConfigRegistryUpstream) {
+		redactString(&upstream.Password)
+	}),
+	redactType(func(version *agentapi.AgentVersion) {
+		redactString(&version.Password)
+	}),
+	redactType(func(user *agentapi.UserCreds) {
+		redactString(&user.Password)
+		redactStrings(user.SSHKeys)
+	}),
+}, func(r typeRedactor) (reflect.Type, func(reflect.Value)) {
+	return r.typ, r.redact
+})
+
+func redactString(value *string) {
+	if *value != "" {
+		*value = RedactedValue
 	}
-	if target.BearerToken != "" {
-		target.BearerToken = RedactedValue
+}
+
+func redactStrings(values []string) {
+	for idx := range values {
+		redactString(&values[idx])
+	}
+}
+
+// mayHoldStruct reports whether a value of the type can have a struct inside. The ones that can't, e.g. Secret data
+// bytes or labels, are skipped by the walk, as there is nothing to redact in them and going through them value by
+// value is slow.
+func mayHoldStruct(typ reflect.Type) bool {
+	switch typ.Kind() { //nolint:exhaustive // the rest are basic values
+	case reflect.Struct, reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		return true
+	default:
+		return false
+	}
+}
+
+// redactTypes runs the type redactors on v and on everything reachable from it through exported fields, pointers,
+// slices, arrays and map values
+func redactTypes(v reflect.Value) {
+	switch v.Kind() { //nolint:exhaustive // only the kinds that can hold a struct
+	case reflect.Pointer:
+		if !v.IsNil() {
+			redactTypes(v.Elem())
+		}
+	case reflect.Struct:
+		if redact, ok := typeRedactors[v.Type()]; ok && v.CanAddr() {
+			redact(v.Addr())
+		}
+		for idx := range v.NumField() {
+			if v.Type().Field(idx).IsExported() {
+				redactTypes(v.Field(idx))
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		if !mayHoldStruct(v.Type().Elem()) {
+			return
+		}
+		for idx := range v.Len() {
+			redactTypes(v.Index(idx))
+		}
+	case reflect.Map:
+		if !mayHoldStruct(v.Type().Elem()) {
+			return
+		}
+		// map values can't be changed in place, so they're redacted as a copy put back under the same key
+		iter := v.MapRange()
+		for iter.Next() {
+			val := reflect.New(v.Type().Elem()).Elem()
+			val.Set(iter.Value())
+			redactTypes(val)
+			v.SetMapIndex(iter.Key(), val)
+		}
 	}
 }
 
@@ -218,8 +276,7 @@ func (c collector) collectKubeResources(ctx context.Context, dump *Dump) error {
 	}
 
 	resources := &bytes.Buffer{}
-	if err := c.collectKubeObjects(ctx, kube, kube.Scheme(),
-		kubeResourceGVKs, kubeResourceRedactors, resources); err != nil {
+	if err := c.collectKubeObjects(ctx, kube, kube.Scheme(), kubeResourceGVKs, resources); err != nil {
 		return fmt.Errorf("collecting kube objects: %w", err)
 	}
 
@@ -243,8 +300,7 @@ func matchesGVK(gvk schema.GroupVersionKind, withGVKs []schema.GroupVersionKind)
 }
 
 func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtime.Scheme,
-	withGVKs []schema.GroupVersionKind, redactors map[schema.GroupVersionKind]kubeResourceRedactorFunc,
-	w io.Writer,
+	withGVKs []schema.GroupVersionKind, w io.Writer,
 ) error {
 	kubeObjListType := reflect.TypeFor[kclient.ObjectList]()
 	objs := 0
@@ -317,7 +373,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 
 			itemValue.GetObjectKind().SetGroupVersionKind(gvk)
 
-			redactKubeObject(itemValue, redactors[gvk])
+			redactKubeObject(itemValue, gvk)
 
 			if objs > 0 {
 				if _, err := fmt.Fprintf(w, "---\n"); err != nil {
@@ -335,13 +391,15 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 	return nil
 }
 
-func redactKubeObject(obj kclient.Object, redactor kubeResourceRedactorFunc) {
+func redactKubeObject(obj kclient.Object, gvk schema.GroupVersionKind) {
 	annotations := obj.GetAnnotations()
 	for _, key := range redactedAnnotations {
 		delete(annotations, key)
 	}
 
-	if redactor != nil {
+	redactTypes(reflect.ValueOf(obj))
+
+	if redactor, ok := kubeResourceRedactors[gvk]; ok {
 		redactor(obj)
 	}
 }

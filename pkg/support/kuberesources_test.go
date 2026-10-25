@@ -134,7 +134,7 @@ func TestRedactAlloyTargets(t *testing.T) {
 	fillStrings(reflect.ValueOf(&targets).Elem())
 	require.NotEmpty(t, leakedFields(t, targets, alloyNotSecret...), "targets should have credentials before redaction")
 
-	redactAlloyTargets(&targets)
+	redactTypes(reflect.ValueOf(&targets))
 	require.Empty(t, leakedFields(t, targets, alloyNotSecret...))
 }
 
@@ -151,14 +151,19 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 	fab.Spec.Config.Fabric.DefaultSwitchUsers = map[string]fabapi.SwitchUser{
 		"admin": {PasswordHash: leakedValue, Role: "admin", AuthorizedKeys: []string{leakedValue}},
 	}
-	fillStrings(reflect.ValueOf(&fab.Spec.Config.Fabric.DefaultAlloyConfig).Elem())
+	fillStrings(reflect.ValueOf(&fab.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets).Elem())
+	fillStrings(reflect.ValueOf(&fab.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets).Elem())
 	fillStrings(reflect.ValueOf(&fab.Spec.Config.Observability.Targets).Elem())
 
 	agent := &agentapi.Agent{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault, Annotations: copyAnnotations}
 	agent.Spec.Version = agentapi.AgentVersion{Username: "user", Password: leakedValue}
 	agent.Spec.Users = []agentapi.UserCreds{{Name: "admin", Password: leakedValue, Role: "admin", SSHKeys: []string{leakedValue}}}
-	fillStrings(reflect.ValueOf(&agent.Spec.Alloy).Elem())
+	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.PrometheusTargets).Elem())
+	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.LokiTargets).Elem())
 	fillStrings(reflect.ValueOf(&agent.Spec.Config.Alloy.Targets).Elem())
+	agent.Spec.Config.Alloy.Scrapes = map[string]alloy.Scrape{
+		"remote": {Address: "127.0.0.1:9100", HTTPHeaders: map[string]string{"Authorization": leakedValue}},
+	}
 
 	objs := []kclient.Object{
 		fab,
@@ -198,7 +203,7 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 
 	out := &bytes.Buffer{}
 	require.NoError(t, collector{quiet: true}.collectKubeObjects(t.Context(), kube, scheme,
-		kubeResourceGVKs, kubeResourceRedactors, out))
+		kubeResourceGVKs, out))
 
 	printed := []string{}
 	for doc := range strings.SplitSeq(out.String(), "---\n") {
