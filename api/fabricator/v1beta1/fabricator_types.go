@@ -102,7 +102,7 @@ type ComponentsStatus struct {
 	ControlAlloy         ComponentStatus            `json:"controlAlloy,omitempty"`
 	GatewayAlloy         ComponentStatus            `json:"gatewayAlloy,omitempty"`
 	GatewayDataplane     map[string]ComponentStatus `json:"gatewayDataplane,omitempty"`
-	GatewayFRR           map[string]ComponentStatus `json:"gatewayFRR,omitempty"`
+	GatewayFRR           map[string]ComponentStatus `json:"gatewayFRR,omitempty"` // TODO: remove after 26.05 release
 }
 
 // TODO simplify or generate it instead
@@ -142,17 +142,10 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 				gws[name] &&
 				dp != CompStatusUnknown
 		}
-
-		for name, frr := range c.GatewayFRR {
-			res = res &&
-				gws[name] &&
-				frr != CompStatusUnknown
-		}
 	} else {
 		res = res &&
 			c.GatewayAlloy == CompStatusSkipped &&
-			len(c.GatewayDataplane) == 0 &&
-			len(c.GatewayFRR) == 0
+			len(c.GatewayDataplane) == 0
 	}
 
 	return res
@@ -181,12 +174,6 @@ func (c *ComponentsStatus) IsGatewayReady(cfg Fabricator, nodes []FabNode) bool 
 		res = res &&
 			gws[name] &&
 			dp == CompStatusReady
-	}
-
-	for name, frr := range c.GatewayFRR {
-		res = res &&
-			gws[name] &&
-			frr == CompStatusReady
 	}
 
 	return res
@@ -420,7 +407,7 @@ type GatewayVersions struct {
 	Controller meta.Version `json:"controller,omitempty"`
 	Agent      meta.Version `json:"agent,omitempty"`
 	Dataplane  meta.Version `json:"dataplane,omitempty"`
-	FRR        meta.Version `json:"frr,omitempty"`
+	FRR        meta.Version `json:"frr,omitempty"` // TODO: remove after 26.05 release
 }
 
 type VLABVersions struct {

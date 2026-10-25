@@ -20,7 +20,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
@@ -233,16 +232,6 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.DataplaneValidatorRef, err)
 	}
 
-	frrRepo, err := comp.ImageURL(f, gateway.FRRRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.FRRRef, err)
-	}
-
-	toolboxRepo, err := comp.ImageURL(f, flatcar.ToolboxRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
-	}
-
 	// TODO align APIs (fabric config field names, check agent spec too)
 	return &fmeta.FabricConfig{
 		ControlVIP:             string(f.Spec.Config.Control.VIP),
@@ -305,8 +294,6 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		},
 		DataplaneRef:          dataplaneRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
 		DataplaneValidatorRef: dataplaneValidatorRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
-		FRRRef:                frrRepo + ":" + string(f.Status.Versions.Gateway.FRR),
-		ToolboxRef:            toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
 		DataplaneMetricsPort:  gateway.DataplaneMetricsPort,
 		FRRMetricsPort:        gateway.FRRMetricsPort,
 		GatewayHugePages1G:    gateway.HugePages1G,

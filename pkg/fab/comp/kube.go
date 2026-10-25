@@ -489,7 +489,9 @@ func GetDaemonSetStatus(name, container, image string) KubeStatus {
 			}
 		}
 
-		if upToDate && obj.Status.ObservedGeneration == obj.Generation && obj.Status.DesiredNumberScheduled > 0 && obj.Status.UpdatedNumberScheduled == obj.Status.DesiredNumberScheduled {
+		desired := obj.Status.DesiredNumberScheduled
+		if upToDate && obj.Status.ObservedGeneration == obj.Generation && desired > 0 && obj.Status.UpdatedNumberScheduled == desired &&
+			obj.Status.NumberReady == desired && obj.Status.NumberAvailable == desired {
 			return fabapi.CompStatusReady, nil
 		}
 
