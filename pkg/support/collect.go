@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"go.githedgehog.com/fabricator/pkg/version"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilexec "k8s.io/client-go/util/exec"
 )
 
 const (
@@ -26,6 +28,19 @@ var longBackoff = wait.Backoff{
 	Duration: 100 * time.Millisecond,
 	Factor:   2.0,
 	Jitter:   0,
+}
+
+// retriable reports whether a failed call may succeed on a retry, so the permanent errors, e.g. the missing
+// permissions or a command that ran and failed, fail right away instead of after all the retries
+func retriable(ctx context.Context) func(error) bool {
+	return func(err error) bool {
+		var exitErr utilexec.ExitError
+
+		return ctx.Err() == nil &&
+			!kapierrors.IsForbidden(err) && !kapierrors.IsUnauthorized(err) && !kapierrors.IsInvalid(err) &&
+			!kapierrors.IsBadRequest(err) && !kapierrors.IsNotFound(err) && !kapierrors.IsMethodNotSupported(err) &&
+			!errors.As(err, &exitErr)
+	}
 }
 
 type collector struct {
