@@ -32,6 +32,11 @@ on:
         type: boolean
         required: false
         default: false
+      gatewaydriver:
+        description: "Gateway driver (kernel or dpdk), hhfab default if empty"
+        type: string
+        required: false
+        default: ""
       includeonie:
         description: "Include ONIE into installer"
         type: boolean
@@ -103,7 +108,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
+  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && (inputs.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
@@ -309,6 +314,7 @@ jobs:
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
             --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
             --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \
+            ${{ inputs.gatewaydriver != '' && format('--gateway-driver={0}', inputs.gatewaydriver) || '' }} \
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
