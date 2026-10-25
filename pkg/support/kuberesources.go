@@ -129,6 +129,15 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			cm.BinaryData[k] = []byte(RedactedValue)
 		}
 	},
+	// not secret, but the schemas are about a half of all the collected objects, while they are defined by the
+	// component versions, which the dump has anyway
+	apiextv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"): func(obj kclient.Object) {
+		crd := obj.(*apiextv1.CustomResourceDefinition)
+
+		for idx := range crd.Spec.Versions {
+			crd.Spec.Versions[idx].Schema = nil
+		}
+	},
 	// values hold the rendered component configs, e.g. alloy one has the target credentials
 	helmapi.SchemeGroupVersion.WithKind("HelmChart"): func(obj kclient.Object) {
 		chart := obj.(*helmapi.HelmChart)
