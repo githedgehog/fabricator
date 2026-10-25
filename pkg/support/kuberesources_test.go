@@ -234,7 +234,11 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 			Name: "alloy-ctrl", Namespace: comp.FabNamespace,
 			Data: map[string]string{"config.alloy": leakedValue},
 		},
-		&corev1.ConfigMap{Name: "plain", Namespace: comp.FabNamespace, Annotations: copyAnnotations},
+		&corev1.ConfigMap{
+			Name: "plain", Namespace: comp.FabNamespace, Annotations: copyAnnotations,
+			Data:       map[string]string{"config.yaml": leakedValue},
+			BinaryData: map[string][]byte{"config.bin": []byte(leakedValue)},
+		},
 		&helmapi.HelmChart{
 			Name: "alloy-ctrl", Namespace: comp.FabNamespace,
 			Spec: helmapi.HelmChartSpec{
