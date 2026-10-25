@@ -16,14 +16,14 @@ import (
 
 func testVPC(name, fabric string, domains ...string) vpcapi.VPC {
 	return vpcapi.VPC{
-		ObjectMeta: kmetav1.ObjectMeta{Name: name},
-		Spec:       vpcapi.VPCSpec{Topology: vpcapi.VPCTopology{Fabric: fabric, Domains: domains}},
+		Name: name,
+		Spec: vpcapi.VPCSpec{Topology: vpcapi.VPCTopology{Fabric: fabric, Domains: domains}},
 	}
 }
 
 func testInterconnect(name, peer, fabric, namespace string) vpcapi.External {
 	return vpcapi.External{
-		ObjectMeta: kmetav1.ObjectMeta{Name: name, Annotations: map[string]string{VLABInterconnectAnnotation: peer}},
+		Name: name, Annotations: map[string]string{VLABInterconnectAnnotation: peer},
 		Spec: vpcapi.ExternalSpec{
 			Topology:      vpcapi.ExternalTopology{Fabric: fabric},
 			IPv4Namespace: namespace,
@@ -33,8 +33,8 @@ func testInterconnect(name, peer, fabric, namespace string) vpcapi.External {
 
 func domainExternal(name, domain string) vpcapi.External {
 	return vpcapi.External{
-		ObjectMeta: kmetav1.ObjectMeta{Name: name},
-		Spec:       vpcapi.ExternalSpec{Topology: vpcapi.ExternalTopology{Domain: domain}},
+		Name: name,
+		Spec: vpcapi.ExternalSpec{Topology: vpcapi.ExternalTopology{Domain: domain}},
 	}
 }
 
@@ -44,9 +44,9 @@ func testGateway(fabric string) gwapi.Gateway {
 
 func TestBuildOnReadyPeerings(t *testing.T) {
 	namespaces := []vpcapi.IPv4Namespace{
-		{ObjectMeta: kmetav1.ObjectMeta{Name: "default"}, Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
+		{Name: "default", Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
 		{
-			ObjectMeta: kmetav1.ObjectMeta{Name: "fabric-b"},
+			Name: "fabric-b",
 			Spec: vpcapi.IPv4NamespaceSpec{
 				Topology: vpcapi.IPv4NamespaceTopology{Fabric: "fabric-b"},
 				Subnets:  []string{"10.1.0.0/16"},
@@ -59,7 +59,7 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 	}
 
 	internet := func(annotations map[string]string) vpcapi.External {
-		return vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Annotations: annotations}}
+		return vpcapi.External{Name: "ext-bgp-01", Annotations: annotations}
 	}
 	withPool := internet(map[string]string{extBGPNATAnnotation: "192.168.91.0/24"})
 	transitPeering := map[string]*gwapi.PeeringSpec{
@@ -252,11 +252,11 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 func TestBuildExternalEndpointsSkipsInterconnect(t *testing.T) {
 	externals := []vpcapi.External{
 		testInterconnect("to-fabric-b", "to-default", "", "default"),
-		{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp"}},
-		{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-static"}},
+		{Name: "ext-bgp"},
+		{Name: "ext-static"},
 	}
 
-	var names []string
+	names := make([]string, 0, len(externals))
 	for _, ep := range buildExternalEndpoints(externals) {
 		names = append(names, ep.External.ExternalName)
 	}

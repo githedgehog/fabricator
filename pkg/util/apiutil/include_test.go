@@ -69,7 +69,7 @@ func TestStagedObjects(t *testing.T) {
 
 	staged, err := apiutil.ListStaged(ctx, kube)
 	require.NoError(t, err)
-	names := []string{}
+	names := make([]string, 0, len(staged))
 	for _, obj := range staged {
 		names = append(names, obj.GetName())
 	}
