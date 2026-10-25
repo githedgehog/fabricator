@@ -302,6 +302,17 @@ func TestRedactKubeObjectDropsManagedFields(t *testing.T) {
 	require.Empty(t, cm.ManagedFields)
 }
 
+func TestRedactKubeObjectDropsCRDSchemas(t *testing.T) {
+	crd := &apiextv1.CustomResourceDefinition{Name: "fabricators.fabricator.githedgehog.com"}
+	crd.Spec.Versions = []apiextv1.CustomResourceDefinitionVersion{{
+		Name: "v1beta1", Served: true, Storage: true,
+		Schema: &apiextv1.CustomResourceValidation{OpenAPIV3Schema: &apiextv1.JSONSchemaProps{Type: "object"}},
+	}}
+
+	redactKubeObject(crd, apiextv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"))
+	require.Equal(t, []apiextv1.CustomResourceDefinitionVersion{{Name: "v1beta1", Served: true, Storage: true}}, crd.Spec.Versions)
+}
+
 func TestCollectKubeObjectsRedacts(t *testing.T) {
 	copyAnnotations := map[string]string{}
 	for _, key := range redactedAnnotations {
