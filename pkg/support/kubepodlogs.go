@@ -30,7 +30,7 @@ func (c collector) collectPodLogs(ctx context.Context, dump *Dump) error {
 	}
 
 	var pods *corev1.PodList
-	if err := retry.OnError(longBackoff, func(error) bool { return ctx.Err() == nil }, func() error {
+	if err := retry.OnError(longBackoff, retriable(ctx), func() error {
 		pods, err = clientset.CoreV1().Pods("").List(ctx, kmetav1.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("listing pods: %w", err)
@@ -84,7 +84,7 @@ func (c collector) collectPodLogs(ctx context.Context, dump *Dump) error {
 func getPodContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, ns, pod, container string, previous bool) ([]byte, error) {
 	res := &bytes.Buffer{}
 
-	if err := retry.OnError(longBackoff, func(error) bool { return ctx.Err() == nil }, func() error {
+	if err := retry.OnError(longBackoff, retriable(ctx), func() error {
 		res.Reset()
 
 		req := clientset.CoreV1().Pods(ns).GetLogs(pod, &corev1.PodLogOptions{
