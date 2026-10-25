@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,10 +33,13 @@ import (
 	kyaml "sigs.k8s.io/yaml"
 )
 
-const leakedValue = "leaked-secret"
+const (
+	leakedValue = "leaked-secret"
+	filledKey   = "name"
+)
 
 // fillStrings sets every string reachable from v through exported fields, pointers, slices and maps to leakedValue,
-// so a test covers the fields a type gains later too. Map keys get it as well, but they are names, not values.
+// so a test covers the fields a type gains later too. Map keys are set to filledKey, as they are names, not values.
 func fillStrings(v reflect.Value) {
 	switch v.Kind() { //nolint:exhaustive // only the kinds that can hold a string
 	case reflect.String:
@@ -57,7 +61,11 @@ func fillStrings(v reflect.Value) {
 		v.Set(slice)
 	case reflect.Map:
 		key := reflect.New(v.Type().Key()).Elem()
-		fillStrings(key)
+		if key.Kind() == reflect.String {
+			key.SetString(filledKey)
+		} else {
+			fillStrings(key)
+		}
 		val := reflect.New(v.Type().Elem()).Elem()
 		fillStrings(val)
 		m := reflect.MakeMap(v.Type())
@@ -66,9 +74,16 @@ func fillStrings(v reflect.Value) {
 	}
 }
 
+// notThrough reports the paths that don't go through any of the keys
+func notThrough(keys ...string) func(path []string) bool {
+	return func(path []string) bool {
+		return !slices.ContainsFunc(path, func(p string) bool { return slices.Contains(keys, p) })
+	}
+}
+
 // leakedFields returns the sorted JSON paths of the values of obj that are still leakedValue, as is or base64 encoded
-// like Secret data, skipping the ones that go through any of the allowed keys
-func leakedFields(t *testing.T, obj any, allowed ...string) []string {
+// like Secret data, the ones report returns true for
+func leakedFields(t *testing.T, obj any, report func(path []string) bool) []string {
 	t.Helper()
 
 	leaked := []string{leakedValue, base64.StdEncoding.EncodeToString([]byte(leakedValue))}
@@ -92,7 +107,7 @@ func leakedFields(t *testing.T, obj any, allowed ...string) []string {
 				walk(val, append(slices.Clone(path), strconv.Itoa(idx)))
 			}
 		case string:
-			if slices.Contains(leaked, typed) && !slices.ContainsFunc(path, func(p string) bool { return slices.Contains(allowed, p) }) {
+			if slices.Contains(leaked, typed) && report(path) {
 				res = append(res, strings.Join(path, "."))
 			}
 		}
@@ -125,6 +140,45 @@ func TestCollectsAllOwnKinds(t *testing.T) {
 	}
 }
 
+// credentialField matches the names of the fields that may hold a credential, so the ones a kind gains later fail
+// the test below until they are either redacted or reviewed and listed in notCredentialFields. No "session" as it's
+// the BGP and MCLAG ones in our API.
+var credentialField = regexp.MustCompile(
+	`(?i)pass|pwd|secret|token|key|hash|cred|auth|bearer|pem|private|ssh|psk|header|cookie|salt|otp|license|kubeconfig`)
+
+// notCredentialFields are the fields matching credentialField that are reviewed to not be credentials
+var notCredentialFields = []string{"username", "caPEM", "certPEM"}
+
+func TestRedactsAllOwnKinds(t *testing.T) {
+	report := func(path []string) bool {
+		return slices.ContainsFunc(path, credentialField.MatchString) && notThrough(notCredentialFields...)(path)
+	}
+
+	credentials := 0
+	for gvk, objType := range newScheme(t).AllKnownTypes() {
+		if !strings.HasSuffix(gvk.Group, ".githedgehog.com") || strings.HasSuffix(gvk.Kind, "List") ||
+			strings.HasPrefix(objType.PkgPath(), "k8s.io/apimachinery/") {
+			continue
+		}
+
+		objValue := reflect.New(objType)
+		obj, ok := reflect.TypeAssert[kclient.Object](objValue)
+		require.True(t, ok, "%s isn't a client object", gvk)
+
+		// metadata is left out as its managed fields can't be filled with strings
+		for _, field := range []string{"Spec", "Status"} {
+			if fieldValue := objValue.Elem().FieldByName(field); fieldValue.IsValid() {
+				fillStrings(fieldValue)
+			}
+		}
+		credentials += len(leakedFields(t, obj, report))
+
+		redactKubeObject(obj, gvk)
+		assert.Empty(t, leakedFields(t, obj, report), "unredacted credentials in %s", gvk.Kind)
+	}
+	require.NotZero(t, credentials, "kinds should have credentials before redaction")
+}
+
 // alloyNotSecret are the alloy target fields that aren't credentials and so stay in the dump
 var alloyNotSecret = []string{"url", "username", "labels", "caPEM", "certPEM"}
 
@@ -132,10 +186,10 @@ func TestRedactAlloyTargets(t *testing.T) {
 	// everything else in a target is a credential, so a new target kind or field fails here until it's redacted
 	targets := alloy.Targets{}
 	fillStrings(reflect.ValueOf(&targets).Elem())
-	require.NotEmpty(t, leakedFields(t, targets, alloyNotSecret...), "targets should have credentials before redaction")
+	require.NotEmpty(t, leakedFields(t, targets, notThrough(alloyNotSecret...)), "targets should have credentials before redaction")
 
 	redactTypes(reflect.ValueOf(&targets))
-	require.Empty(t, leakedFields(t, targets, alloyNotSecret...))
+	require.Empty(t, leakedFields(t, targets, notThrough(alloyNotSecret...)))
 }
 
 func TestCollectKubeObjectsRedacts(t *testing.T) {
@@ -212,7 +266,7 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 
 		obj := &unstructured.Unstructured{Object: parsed}
 		printed = append(printed, obj.GetKind()+"/"+obj.GetName())
-		assert.Empty(t, leakedFields(t, parsed, alloyNotSecret...), "leaked in %s %s", obj.GetKind(), obj.GetName())
+		assert.Empty(t, leakedFields(t, parsed, notThrough(alloyNotSecret...)), "leaked in %s %s", obj.GetKind(), obj.GetName())
 	}
 
 	for _, obj := range objs {
