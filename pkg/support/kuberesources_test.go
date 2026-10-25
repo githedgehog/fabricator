@@ -291,6 +291,17 @@ func TestRedactAlloyTargets(t *testing.T) {
 	require.Empty(t, leakedFields(t, targets, notThrough(alloyNotSecret...)))
 }
 
+// the fake client doesn't keep the managed fields, so they are checked on an object as is
+func TestRedactKubeObjectDropsManagedFields(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		Name: "cm", Namespace: comp.FabNamespace,
+		ManagedFields: []kmetav1.ManagedFieldsEntry{{Manager: "kubectl", Operation: kmetav1.ManagedFieldsOperationApply}},
+	}
+
+	redactKubeObject(cm, corev1.SchemeGroupVersion.WithKind("ConfigMap"))
+	require.Empty(t, cm.ManagedFields)
+}
+
 func TestCollectKubeObjectsRedacts(t *testing.T) {
 	copyAnnotations := map[string]string{}
 	for _, key := range redactedAnnotations {
