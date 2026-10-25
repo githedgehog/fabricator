@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	fcintapi "go.githedgehog.com/fabric/api/fcint/v1alpha1"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/fabric/api/gwint/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
@@ -61,6 +63,7 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 	wiringapi.AddToScheme, vpcapi.AddToScheme, dhcpapi.AddToScheme, agentapi.AddToScheme,
 	fabapi.AddToScheme,
 	gwapi.AddToScheme, gwintapi.AddToScheme,
+	fcintapi.AddToScheme,
 }
 
 var kubeResourceGVKs = []schema.GroupVersionKind{
@@ -87,6 +90,7 @@ var kubeResourceGVKs = []schema.GroupVersionKind{
 	agentapi.GroupVersion.WithKind(""),
 	gwapi.GroupVersion.WithKind(""),
 	gwintapi.GroupVersion.WithKind(""),
+	fcintapi.GroupVersion.WithKind(""),
 }
 
 type kubeResourceRedactorFunc func(kclient.Object)
@@ -224,6 +228,20 @@ func (c collector) collectKubeResources(ctx context.Context, dump *Dump) error {
 	return nil
 }
 
+// matchesGVK reports whether gvk is selected by any of withGVKs, the empty fields of which match anything, or by
+// none of them being set at all
+func matchesGVK(gvk schema.GroupVersionKind, withGVKs []schema.GroupVersionKind) bool {
+	if len(withGVKs) == 0 {
+		return true
+	}
+
+	return slices.ContainsFunc(withGVKs, func(with schema.GroupVersionKind) bool {
+		return (with.Group == "" || with.Group == gvk.Group) &&
+			(with.Version == "" || with.Version == gvk.Version) &&
+			(with.Kind == "" || with.Kind == gvk.Kind)
+	})
+}
+
 func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtime.Scheme,
 	withGVKs []schema.GroupVersionKind, redactors map[schema.GroupVersionKind]kubeResourceRedactorFunc,
 	w io.Writer,
@@ -247,23 +265,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 			continue
 		}
 
-		ok := len(withGVKs) == 0
-		for _, withGVK := range withGVKs {
-			if withGVK.Group != "" && withGVK.Group != gvk.Group {
-				continue
-			}
-			if withGVK.Version != "" && withGVK.Version != gvk.Version {
-				continue
-			}
-			if withGVK.Kind != "" && withGVK.Kind != gvk.Kind {
-				continue
-			}
-
-			ok = true
-
-			break
-		}
-		if !ok {
+		if !matchesGVK(gvk, withGVKs) {
 			continue
 		}
 

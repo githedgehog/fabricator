@@ -103,6 +103,28 @@ func leakedFields(t *testing.T, obj any, allowed ...string) []string {
 	return res
 }
 
+func newScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	for _, builder := range schemeBuilders {
+		require.NoError(t, builder(scheme))
+	}
+
+	return scheme
+}
+
+func TestCollectsAllOwnKinds(t *testing.T) {
+	for gvk, objType := range newScheme(t).AllKnownTypes() {
+		// skip the options/events every group gets registered with
+		if !strings.HasSuffix(gvk.Group, ".githedgehog.com") || strings.HasPrefix(objType.PkgPath(), "k8s.io/apimachinery/") {
+			continue
+		}
+
+		assert.True(t, matchesGVK(gvk, kubeResourceGVKs), "%s isn't collected", gvk)
+	}
+}
+
 // alloyNotSecret are the alloy target fields that aren't credentials and so stay in the dump
 var alloyNotSecret = []string{"url", "username", "labels", "caPEM", "certPEM"}
 
@@ -171,10 +193,7 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 		},
 	}
 
-	scheme := runtime.NewScheme()
-	for _, builder := range schemeBuilders {
-		require.NoError(t, builder(scheme))
-	}
+	scheme := newScheme(t)
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
 	out := &bytes.Buffer{}
