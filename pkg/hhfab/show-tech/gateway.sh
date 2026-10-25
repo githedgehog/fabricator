@@ -2,7 +2,7 @@
 # Copyright 2025 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-# show-tech.sh: Collect diagnostics from a Gateway node (OS level + FRR/vtysh).
+# show-tech.sh: Collect diagnostics from a Gateway node (OS level + dataplane incl. FRR/vtysh).
 set +e
 
 OUTPUT_FILE="/tmp/show-tech.log"
@@ -12,16 +12,13 @@ OUTPUT_FILE="/tmp/show-tech.log"
 # Suppress crictl config file warnings by pointing to /dev/null
 export CRI_CONFIG_FILE=/dev/null
 
-# Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps --name '^frr$' -q 2>>"$OUTPUT_FILE" | head -1)
-
-# Find the running dataplane container ID
+# Find the running dataplane container ID, it runs FRR as well
 DATAPLANE_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name '^dataplane$' 2>>"$OUTPUT_FILE" | head -1)
 
-# Helper for running vtysh commands inside the FRR container
+# Helper for running vtysh commands inside the dataplane container, its vtysh loads the hedgehog extension on its own
 run_vtysh_cmd() {
     echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
-    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -X /lib/libvtysh_hedgehog.so -c "$1" >> "$OUTPUT_FILE" 2>&1
+    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$DATAPLANE_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
 }
 
 # Helper for running dataplane-cli commands inside the dataplane container
@@ -147,6 +144,11 @@ capture_container_logs() {
 
     echo -e "\n=== Top Memory Processes ==="
     ps aux --sort=-%mem | head -n 20
+
+    echo -e "\n=== Hugepages ==="
+    grep -i huge /proc/meminfo
+    systemctl status hh-hugepages.service --no-pager
+    journalctl -u hh-hugepages.service --no-pager -b
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -186,18 +188,6 @@ capture_container_logs() {
     run_vtysh_cmd "show ip bgp"
     run_vtysh_cmd "show hedgehog plugin version"
     run_vtysh_cmd "show hedgehog rpc stats"
-} >> "$OUTPUT_FILE" 2>&1
-
-# ---------------------------
-# FRR Container Logs
-# ---------------------------
-{
-    echo -e "\n=== FRR Container Logs ==="
-    if [ -n "$FRR_CONTAINER_ID" ]; then
-        capture_container_logs "$FRR_CONTAINER_ID"
-    else
-        echo "FRR container not found - skipping container logs"
-    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------

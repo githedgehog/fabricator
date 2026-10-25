@@ -153,24 +153,22 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   so after a daemon crash `docker logs` is empty; the unit's exit status,
   restart count and start/stop times are still recorded here
 
-### gateway.sh - gateway node (FRR + dataplane)
+### gateway.sh - gateway node (dataplane incl. FRR)
 
 - **System**: kernel version, OS release, uptime, hostname, date
 - **Networking**: `ip addr/route/neigh/link`, per-interface packet statistics
   (`ip -s link`), per-NIC driver counters (`ethtool -S`, nonzero rows only),
   protocol counters (`netstat -s`) - without the driver counters, RX-ring and
   queue drops on the dataplane uplink are unobservable
-- **Resources**: disk usage, memory, top memory and CPU processes
-- **FRR** (via `vtysh` inside the `frr` container): version, running config,
-  BGP summary (IPv4, L2VPN EVPN), BGP routes, per-neighbor state, per-VRF BGP
-  and route tables, interface status, FRR logs, protocol summary, zebra status,
-  memory usage, thread CPU stats, Hedgehog plugin version and RPC stats
-- **FRR container logs**: full container log, read directly from the on-disk
-  log files (current plus up to the 20 most recent rotations) rather than
-  `crictl logs` alone, which only returns the current file and can silently
-  miss everything before the last kubelet log rotation on a long test run
+- **Resources**: disk usage, memory, top memory and CPU processes, hugepages
+  (`/proc/meminfo` and the `hh-hugepages.service` status and logs)
+- **FRR** (via `vtysh` inside the `dataplane` container, which runs FRR):
+  version, running config, BGP summary (IPv4, L2VPN EVPN), BGP routes,
+  per-neighbor state, per-VRF BGP and route tables, interface status, FRR logs,
+  protocol summary, zebra status, memory usage, thread CPU stats, Hedgehog
+  plugin version and RPC stats
 - **Dataplane** (via `dataplane-cli` inside the dataplane container): `show
-  tech` output
+  tech` output, incl. transceivers, link and LLDP neighbors
 - **Dataplane metrics**: full scrape of the dataplane's metrics endpoint, whose
   address is read off the dataplane container's own process (`--metrics-address`,
   default `127.0.0.1:9442`); skipped if the dataplane container isn't running -
@@ -178,8 +176,11 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   these counters are per VPC pair and directional
   (`vpc_pair_drops_packet_count{from=...,to=...}`) with no reason attached, so
   attributing a single-packet loss to a flow and a direction needs both halves
-- **Dataplane container logs**: same rotation-aware capture as the FRR
-  container logs above
+- **Dataplane container logs** (incl. FRR): full container log, read directly
+  from the on-disk log files (current plus up to the 20 most recent rotations)
+  rather than `crictl logs` alone, which only returns the current file and can
+  silently miss everything before the last kubelet log rotation on a long test
+  run
 - **Services and logs**: `k3s-agent.service` status and last-hour logs,
   `sshd` status, `systemd-networkd` last-hour logs, kernel logs (last hour),
   kernel network/bond/VLAN messages from `dmesg`

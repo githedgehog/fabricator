@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	corev1 "k8s.io/api/core/v1"
@@ -48,79 +49,36 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 	}
 
 	for _, pod := range pods.Items {
-		// TODO: better ways to detect correct pods
-
-		if !strings.HasPrefix(pod.Name, "gw--") {
+		gwName, ok := strings.CutPrefix(pod.Labels["app.kubernetes.io/name"], gwapi.DaemonSetName(""))
+		if !ok {
 			continue
 		}
 
-		gwName, ok := gatewayName(pod.Name)
-		if !ok {
-			slog.Warn("Failed to extract gateway name, skipping", "pod", pod.Name)
-
-			continue
+		if !c.quiet {
+			slog.Debug("Collecting gateway insights", "pod", pod.Name)
 		}
 
-		gw, ok := insights[gwName]
-		if !ok {
-			gw = map[string]ExecOutputs{}
+		gw := map[string]ExecOutputs{}
+
+		// show tech includes everything the dataplane cli shows, e.g. transceivers, link and lldp neighbors
+		for _, cmd := range []string{
+			"show tech",
+		} {
+			gw["dataplane: "+cmd] = execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, "/dataplane-cli", "-c", cmd)
 		}
 
-		switch {
-		// Collect dataplane insights
-		case strings.Contains(pod.Name, "--dataplane-"):
-			if !c.quiet {
-				slog.Debug("Collecting dataplane insights", "pod", pod.Name)
-			}
-
-			for _, cmd := range []string{
-				"show tech",
-			} {
-				if !c.quiet {
-					slog.Debug("Executing dataplane/cli", "pod", pod.Name, "cmd", cmd)
-				}
-
-				stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg,
-					pod.Namespace, pod.Name, "dataplane",
-					[]string{"/dataplane-cli", "-c", cmd})
-				errStr := ""
-				if err != nil {
-					slog.Error("Failed to exec dataplane/cli", "pod", pod.Name, "cmd", cmd, "err", err)
-					errStr = err.Error()
-				}
-				gw["dataplane: "+cmd] = ExecOutputs{Stdout: stdout, Stderr: stderr, Error: errStr}
-			}
-
-		// Collect FRR insights
-		case strings.Contains(pod.Name, "--frr-"):
-			if !c.quiet {
-				slog.Debug("Collecting frr insights", "pod", pod.Name)
-			}
-
-			for _, cmd := range []string{
-				"show daemons",
-				"show hedgehog rpc stats",
-				"show zebra client summary",
-				"show running-config",
-				"show interface brief",
-				"show bfd peers",
-				"show bgp summary",
-				"show ip route vrf all",
-				"show ip fib vrf all",
-			} {
-				if !c.quiet {
-					slog.Debug("Executing frr/vtysh", "pod", pod.Name, "cmd", cmd)
-				}
-				stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg,
-					pod.Namespace, pod.Name, "frr",
-					[]string{"vtysh", "-c", cmd})
-				errStr := ""
-				if err != nil {
-					slog.Error("Failed to exec frr/vtysh", "pod", pod.Name, "cmd", cmd, "err", err)
-					errStr = err.Error()
-				}
-				gw["frr: "+cmd] = ExecOutputs{Stdout: stdout, Stderr: stderr, Error: errStr}
-			}
+		for _, cmd := range []string{
+			"show daemons",
+			"show hedgehog rpc stats",
+			"show zebra client summary",
+			"show running-config",
+			"show interface brief",
+			"show bfd peers",
+			"show bgp summary",
+			"show ip route vrf all",
+			"show ip fib vrf all",
+		} {
+			gw["frr: "+cmd] = execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, "vtysh", "-c", cmd)
 		}
 
 		insights[gwName] = gw
@@ -131,17 +89,19 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 	return nil
 }
 
-// gatewayName extracts the gateway name — everything between the first "--" and the last "--" in a pod name like
-// "gw--he-f2-gw-1--dataplane-wcbjv"
-func gatewayName(s string) (string, bool) {
-	const sep = "--"
-	first := strings.Index(s, sep)
-	last := strings.LastIndex(s, sep)
-	if first < 0 || last <= first {
-		return "", false
+func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, pod corev1.Pod, quiet bool, command ...string) ExecOutputs {
+	if !quiet {
+		slog.Debug("Executing in gateway dataplane", "pod", pod.Name, "cmd", command)
 	}
 
-	return s[first+len(sep) : last], true
+	stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg, pod.Namespace, pod.Name, "dataplane", command)
+	errStr := ""
+	if err != nil {
+		slog.Error("Failed to exec in gateway dataplane", "pod", pod.Name, "cmd", command, "err", err)
+		errStr = err.Error()
+	}
+
+	return ExecOutputs{Stdout: stdout, Stderr: stderr, Error: errStr}
 }
 
 func execPodContainerCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, ns, pod, container string, command []string) (string, string, error) {
