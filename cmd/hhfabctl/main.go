@@ -17,16 +17,20 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/hhfabctl"
+	"go.githedgehog.com/fabricator/pkg/support"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"k8s.io/klog/v2"
 	kctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
-	FlagWorkDir = "workdir"
-	FlagName    = "name"
-	FlagForce   = "force"
-	FlagYes     = "yes"
+	FlagWorkDir     = "workdir"
+	FlagName        = "name"
+	FlagForce       = "force"
+	FlagYes         = "yes"
+	FlagOutput      = "output"
+	FlagStripColors = "strip-colors"
+	FlagASCII       = "ascii"
 )
 
 func setupLogger(verbose bool) error {
@@ -171,6 +175,46 @@ func main() {
 								Force:   cCtx.Bool(FlagForce),
 							}); err != nil {
 								return fmt.Errorf("collecting support dump: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:      "extract",
+						Usage:     "extract a support dump into a tree of files: metadata, objects, pod logs and gateway insights",
+						ArgsUsage: "<dump" + support.FileExt + ">",
+						Flags: []cli.Flag{
+							verboseFlag,
+							&cli.StringFlag{
+								Name:    FlagOutput,
+								Aliases: []string{"o"},
+								Usage:   "directory to extract into, must not exist (default: the dump path without " + support.FileExt + ")",
+							},
+							&cli.BoolFlag{
+								Name:  FlagStripColors,
+								Usage: "strip the ANSI color codes from the pod logs and gateway insights",
+								Value: true,
+							},
+							&cli.BoolFlag{
+								Name:  FlagASCII,
+								Usage: "replace the box drawing and other decorations in the pod logs and gateway insights with ASCII",
+							},
+						},
+						Before: func(_ *cli.Context) error {
+							return setupLogger(verbose)
+						},
+						Action: func(cCtx *cli.Context) error {
+							if cCtx.NArg() != 1 {
+								return cli.Exit("exactly one support dump file expected", 1)
+							}
+
+							if err := support.Extract(cCtx.Args().First(), support.ExtractOpts{
+								OutDir:      cCtx.String(FlagOutput),
+								StripColors: cCtx.Bool(FlagStripColors),
+								ASCII:       cCtx.Bool(FlagASCII),
+							}); err != nil {
+								return fmt.Errorf("extracting support dump: %w", err)
 							}
 
 							return nil

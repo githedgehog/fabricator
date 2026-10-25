@@ -29,6 +29,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
+	"go.githedgehog.com/fabricator/pkg/support"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/term"
 	"k8s.io/klog/v2"
@@ -1053,6 +1054,51 @@ func Run(ctx context.Context) error {
 					}
 
 					return nil
+				},
+			},
+			{
+				Name:  "support",
+				Usage: "support dump helpers",
+				Subcommands: []*cli.Command{
+					{
+						Name:      "extract",
+						Usage:     "extract a support dump into a tree of files: metadata, objects, pod logs and gateway insights",
+						ArgsUsage: "<dump" + support.FileExt + ">",
+						Flags: []cli.Flag{
+							verboseFlag,
+							briefFlag,
+							&cli.StringFlag{
+								Name:    "output",
+								Aliases: []string{"o"},
+								Usage:   "directory to extract into, must not exist (default: the dump path without " + support.FileExt + ")",
+							},
+							&cli.BoolFlag{
+								Name:  "strip-colors",
+								Usage: "strip the ANSI color codes from the pod logs and gateway insights",
+								Value: true,
+							},
+							&cli.BoolFlag{
+								Name:  "ascii",
+								Usage: "replace the box drawing and other decorations in the pod logs and gateway insights with ASCII",
+							},
+						},
+						Before: before(true),
+						Action: func(c *cli.Context) error {
+							if c.NArg() != 1 {
+								return cli.Exit("exactly one support dump file expected", 1)
+							}
+
+							if err := support.Extract(c.Args().First(), support.ExtractOpts{
+								OutDir:      c.String("output"),
+								StripColors: c.Bool("strip-colors"),
+								ASCII:       c.Bool("ascii"),
+							}); err != nil {
+								return fmt.Errorf("extracting support dump: %w", err)
+							}
+
+							return nil
+						},
+					},
 				},
 			},
 			{
