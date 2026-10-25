@@ -22,11 +22,8 @@ const (
 	// Fabric version used for all fabric components
 	FabricVersion = meta.Version("v0.137.0")
 
-	// Gateway Dataplane version (including WASM validator)
+	// Gateway Dataplane version (including WASM validator and FRR)
 	DataplaneVersion = meta.Version("v0.30.1")
-
-	// Gateway FRR version
-	FRRVersion = meta.Version("v0.30.1")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
 	BCMSONiCVersion = meta.Version("v4.5.2")
@@ -113,7 +110,6 @@ var Versions = fabapi.Versions{
 	},
 	Gateway: fabapi.GatewayVersions{
 		Dataplane: DataplaneVersion,
-		FRR:       FRRVersion,
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.1",

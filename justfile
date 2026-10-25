@@ -236,8 +236,9 @@ bump component version ref="":
       echo "Bumping dataplane version to {{ version }}"
       sed -i.bak "s/^\tDataplaneVersion.*/\tDataplaneVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
     elif [ "{{ component }}" == "frr" ]; then
-      echo "Bumping frr version to {{ version }}"
-      sed -i.bak "s/^\tFRRVersion.*/\tFRRVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+      # TODO: remove once the dataplane release workflow stops bumping frr
+      echo "FRR is part of the dataplane image now, nothing to bump"
+      exit 0
     else
       echo "Unknown component: {{ component }}"
       exit 1
