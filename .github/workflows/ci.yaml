@@ -282,7 +282,7 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && (matrix.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
@@ -304,6 +304,7 @@ jobs:
       fabricmode: spine-leaf
       mesh: ${{ matrix.mesh }}
       gateway: ${{ matrix.gateway }}
+      gatewaydriver: ${{ matrix.gatewaydriver }}
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
@@ -342,6 +343,7 @@ jobs:
           # gateway l2vni w/ onie, usb (max artifacts)
           - mesh: false
             gateway: true
+            gatewaydriver: dpdk
             includeonie: true
             buildmode: usb
             vpcmode: l2vni
@@ -351,15 +353,27 @@ jobs:
           # gateway l3vni w/ onie, iso (max artifacts)
           - mesh: false
             gateway: true
+            gatewaydriver: dpdk
             includeonie: true
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
             upgradefrom: ""
 
+          # gateway l2vni with the kernel driver
+          - mesh: false
+            gateway: true
+            gatewaydriver: kernel
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: ""
+
           # hlab gateway l2vni
           - mesh: false
             gateway: true
+            gatewaydriver: dpdk
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
@@ -370,6 +384,7 @@ jobs:
           - mesh: true
             includeonie: false
             gateway: true
+            gatewaydriver: dpdk
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
