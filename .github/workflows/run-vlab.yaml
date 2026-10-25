@@ -429,20 +429,26 @@ jobs:
 
           HHFAB_PRE_ARGS=()
           HHFAB_TEST_ARGS=(--ready=release-test)
+          HHFAB_RT_REGEX_ARGS=()
+          if [[ -n "$INPUT_RT_REGEX" ]]; then
+            HHFAB_RT_REGEX_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
+            if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
+              HHFAB_RT_REGEX_ARGS+=(--release-test-regexes-invert)
+            fi
+          fi
           if [[ "$INPUT_ADD_FABRIC" == "true" ]]; then
             # the second Fabric is added before anything inspects the VLAB, then its servers get their VPCs and peerings
             HHFAB_PRE_ARGS=(--ready=add-fabric)
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
+            if [[ "${{ inputs.releasetest }}" == "true" ]]; then
+              # the release tests that support several Fabrics run after the on-ready checks, the others skip
+              HHFAB_TEST_ARGS+=(--ready=release-test "${HHFAB_RT_REGEX_ARGS[@]}")
+            fi
           elif [[ "$INPUT_MULTI_DOMAIN" == "true" ]]; then
             # the release tests assume one domain, so the peerings come from the cluster and the matrix checks them
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
           elif [[ "${{ inputs.releasetest }}" == "true" ]]; then
-            if [[ -n "$INPUT_RT_REGEX" ]]; then
-              HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
-              if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
-                HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
-              fi
-            fi
+            HHFAB_TEST_ARGS+=("${HHFAB_RT_REGEX_ARGS[@]}")
           elif [[ "${{ inputs.hybrid }}" == "true" || -n "${{ inputs.upgradefrom }}" ]]; then
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
           else

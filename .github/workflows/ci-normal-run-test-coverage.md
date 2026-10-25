@@ -69,7 +69,7 @@ All created VPCs, peerings, and server network configurations are torn down rega
 
 ## The add-fabric job
 
-The `v-gwk-iso-l2vni-mf` job (`addfabric=true`, `gateway=kernel`) does not run the OnReady Suite or release tests, whatever `releasetest` is. It generates two Fabrics with `--add-fabric --interconnect-fabrics --interconnect-links=2`: the default Fabric with 2 orphan leaves and the extra Fabric with 2 mesh leaves, one server per leaf, 1 BGP + 1 static external, no ESLAG, and the 2 gateways in the default Fabric only. The Fabrics are linked by two independent interconnect pairs, each with its own two Externals and attachments on a port of the same leaf on each side. The extra Fabric is left out of the install: its VMs boot and its switches wait for their Switch objects.
+The `v-gwk-iso-l2vni-mf` job (`addfabric=true`, `gateway=kernel`) does not run the OnReady Suite. With `releasetest` it also runs the release tests after the steps below, which skip every suite except the Multi-Fabric Suite, and its name gets the `-rt` suffix. It generates two Fabrics with `--add-fabric --interconnect-fabrics --interconnect-links=2`: the default Fabric with 2 orphan leaves and the extra Fabric with 2 mesh leaves, one server per leaf, 1 BGP + 1 static external, no ESLAG, and the 2 gateways in the default Fabric only. The Fabrics are linked by two independent interconnect pairs, each with its own two Externals and attachments on a port of the same leaf on each side. The extra Fabric is left out of the install: its VMs boot and its switches wait for their Switch objects.
 
 The ready steps then run in this order:
 
