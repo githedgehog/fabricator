@@ -113,7 +113,7 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 				}
 				stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg,
 					pod.Namespace, pod.Name, "frr",
-					[]string{"vtysh", "-X", "/lib/libvtysh_hedgehog.so", "-c", cmd})
+					[]string{"vtysh", "-c", cmd})
 				errStr := ""
 				if err != nil {
 					slog.Error("Failed to exec frr/vtysh", "pod", pod.Name, "cmd", cmd, "err", err)
