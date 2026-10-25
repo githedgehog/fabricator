@@ -273,3 +273,16 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 		require.Equal(t, NICTypePassthrough+NICTypeSep+pci, cfg.VMs[parts[0]].NICs[parts[1]], swPort)
 	}
 }
+
+func TestResolveVMSizes(t *testing.T) {
+	saved := DefaultSizes
+	saved.Gateway = VMSize{CPU: 4, RAM: 6144, Disk: 100}
+	saved.Server = VMSize{}
+
+	sizes, err := resolveVMSizes(saved, VMSizes{Control: VMSize{RAM: 4096}})
+	require.NoError(t, err)
+	require.Equal(t, VMSize{CPU: DefaultSizes.Gateway.CPU, RAM: DefaultSizes.Gateway.RAM, Disk: 100}, sizes.Gateway)
+	require.Equal(t, DefaultSizes.Server, sizes.Server)
+	require.Equal(t, VMSize{CPU: DefaultSizes.Control.CPU, RAM: 4096, Disk: DefaultSizes.Control.Disk}, sizes.Control)
+	require.Equal(t, DefaultSizes.Switch, sizes.Switch)
+}

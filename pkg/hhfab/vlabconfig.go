@@ -201,6 +201,30 @@ type VMSize struct {
 	Disk uint `json:"disk"` // in GB
 }
 
+// saved sizes are raised to the current defaults, overrides win
+func resolveVMSizes(saved, overrides VMSizes) (VMSizes, error) {
+	sizes := VMSizes{
+		Control:  saved.Control.atLeast(DefaultSizes.Control),
+		Switch:   saved.Switch.atLeast(DefaultSizes.Switch),
+		Server:   saved.Server.atLeast(DefaultSizes.Server),
+		Gateway:  saved.Gateway.atLeast(DefaultSizes.Gateway),
+		External: saved.External.atLeast(DefaultSizes.External),
+	}
+	if err := mergo.Merge(&sizes, overrides, mergo.WithOverride); err != nil {
+		return VMSizes{}, fmt.Errorf("merging VLAB sizes overrides: %w", err)
+	}
+
+	return sizes, nil
+}
+
+func (s VMSize) atLeast(floor VMSize) VMSize {
+	return VMSize{
+		CPU:  max(s.CPU, floor.CPU),
+		RAM:  max(s.RAM, floor.RAM),
+		Disk: max(s.Disk, floor.Disk),
+	}
+}
+
 var DefaultSizes = VMSizes{
 	Control:  VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
 	Switch:   VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
@@ -279,12 +303,9 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		return nil, fmt.Errorf("unmarshaling VLAB config: %w", err)
 	}
 
-	sizes := opts.VMSizesOverrides
-	if err := mergo.Merge(&sizes, vlabCfg.Sizes); err != nil {
-		return nil, fmt.Errorf("merging VLAB sizes from config: %w", err)
-	}
-	if err := mergo.Merge(&sizes, DefaultSizes); err != nil {
-		return nil, fmt.Errorf("merging default VLAB sizes: %w", err)
+	sizes, err := resolveVMSizes(vlabCfg.Sizes, opts.VMSizesOverrides)
+	if err != nil {
+		return nil, err
 	}
 	vlabCfg.Sizes = sizes
 
