@@ -1354,14 +1354,8 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 
 	if dump, err := support.Collect(ctx, "vlab", kubeconfig, false); err != nil {
 		slog.Warn("Failed to collect support dump", "err", err)
-	} else {
-		if data, err := support.Marshal(dump); err != nil {
-			slog.Warn("Failed to marshal support dump", "err", err)
-		} else {
-			if err := os.WriteFile(filepath.Join(c.WorkDir, "vlab.hhs"), data, 0o644); err != nil { //nolint:gosec
-				slog.Warn("Failed to write support dump", "err", err)
-			}
-		}
+	} else if err := support.WriteFile(filepath.Join(c.WorkDir, "vlab.hhs"), dump, 0o644); err != nil {
+		slog.Warn("Failed to write support dump", "err", err)
 	}
 
 	if (opts.CollectShowTech && forceShowTech) || opts.ForceCollectShowTech {

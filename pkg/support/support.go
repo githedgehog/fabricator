@@ -4,8 +4,13 @@
 package support
 
 import (
+	"bufio"
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/Masterminds/semver/v3"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,16 +66,70 @@ type ExecOutputs struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func Marshal(d *Dump) ([]byte, error) {
+// gzipMagic starts every gzip stream, while a YAML document can't start with it, so it tells the compressed dumps from
+// the plain YAML ones made before
+var gzipMagic = []byte{0x1f, 0x8b}
+
+// Marshal writes the dump to w as gzip compressed YAML, as it's mostly the logs, which compress well. It's compressed
+// on the way to w, so the compressed copy isn't kept in memory.
+func Marshal(w io.Writer, d *Dump) error {
 	data, err := kyaml.Marshal(d)
 	if err != nil {
-		return nil, fmt.Errorf("marshalling dump: %w", err)
+		return fmt.Errorf("marshalling dump: %w", err)
 	}
 
-	return data, nil
+	gz := gzip.NewWriter(w)
+	if _, err := gz.Write(data); err != nil {
+		return fmt.Errorf("compressing dump: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("compressing dump: %w", err)
+	}
+
+	return nil
 }
 
-func Unmarshal(data []byte, d *Dump) error {
+// WriteFile marshals the dump into the file at path, replacing it if it exists
+func WriteFile(path string, d *Dump, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("creating dump file: %w", err)
+	}
+
+	if err := Marshal(f, d); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing dump file: %w", err)
+	}
+
+	return nil
+}
+
+// Unmarshal reads a dump made by Marshal or a plain YAML one made before the dumps were compressed
+func Unmarshal(r io.Reader, d *Dump) error {
+	br := bufio.NewReader(r)
+
+	var in io.Reader = br
+	if magic, err := br.Peek(len(gzipMagic)); err == nil && bytes.Equal(magic, gzipMagic) {
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			return fmt.Errorf("decompressing dump: %w", err)
+		}
+		defer gz.Close()
+
+		in = gz
+	}
+
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return fmt.Errorf("reading dump: %w", err)
+	}
+
 	dv := &DumpVersion{}
 	if err := kyaml.Unmarshal(data, dv); err != nil {
 		return fmt.Errorf("unmarshalling dump version: %w", err)

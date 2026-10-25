@@ -62,12 +62,7 @@ func SupportDump(ctx context.Context, opts SupportDumpOpts) error {
 		return fmt.Errorf("collecting support dump: %w", err)
 	}
 
-	data, err := support.Marshal(dump)
-	if err != nil {
-		return fmt.Errorf("marshaling dump: %w", err)
-	}
-
-	if err := os.WriteFile(fullPath, data, 0o600); err != nil {
+	if err := support.WriteFile(fullPath, dump, 0o600); err != nil {
 		return fmt.Errorf("writing dump file: %w", err)
 	}
 
