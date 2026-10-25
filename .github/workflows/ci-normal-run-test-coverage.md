@@ -81,7 +81,7 @@ The ready steps then run in this order:
 
 ## The multi-domain job
 
-The `v-iso-l2vni-md` job (`multidomain=true`) does not run the OnReady Suite or release tests either. It generates one Fabric with a second domain: `--extra-domain --shared-leafs-count=1` with one ESLAG group of 2 leaves, 3 orphan leaves, one server per orphan leaf and the ESLAG servers, 1 BGP + 1 static external and no gateways. The ESLAG group stays in the default domain, so `leaf-01` and `leaf-02` are in `default` only. The orphan leaves and the externals are in the second domain, `domain-b`: `leaf-03` and `leaf-04` are in `domain-b` only and `leaf-05` is shared by `default` and `domain-b`.
+The `v-iso-l2vni-md` job (`multidomain=true`) does not run the OnReady Suite either. With `releasetest` it also runs the release tests after the steps below, which all skip because no suite supports several domains yet, and its name gets the `-rt` suffix. It generates one Fabric with a second domain: `--extra-domain --shared-leafs-count=1` with one ESLAG group of 2 leaves, 3 orphan leaves, one server per orphan leaf and the ESLAG servers, 1 BGP + 1 static external and no gateways. The ESLAG group stays in the default domain, so `leaf-01` and `leaf-02` are in `default` only. The orphan leaves and the externals are in the second domain, `domain-b`: `leaf-03` and `leaf-04` are in `domain-b` only and `leaf-05` is shared by `default` and `domain-b`.
 
 The ready steps run in this order: `inspect`, `inspect-pods`, `setup-vpcs`, `setup-peerings`, `test-connectivity`.
 
