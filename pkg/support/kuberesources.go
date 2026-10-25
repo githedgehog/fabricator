@@ -419,6 +419,9 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 }
 
 func redactKubeObject(obj kclient.Object, gvk schema.GroupVersionKind) {
+	// only the field paths each writer owns, no values, so just noise
+	obj.SetManagedFields(nil)
+
 	annotations := obj.GetAnnotations()
 	for _, key := range redactedAnnotations {
 		delete(annotations, key)
@@ -432,8 +435,6 @@ func redactKubeObject(obj kclient.Object, gvk schema.GroupVersionKind) {
 }
 
 func printKubeObject(obj kclient.Object, w io.Writer) error {
-	obj.SetManagedFields(nil)
-
 	buf, err := kyaml.Marshal(obj)
 	if err != nil {
 		return fmt.Errorf("marshalling: %w", err)
