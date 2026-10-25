@@ -223,9 +223,13 @@ if {$logged_in} {
     run_cmd "systemctl status k3s-agent --no-pager" $prompt_re 30
     run_cmd "journalctl -u k3s-agent --no-pager -n 50" $prompt_re 60
 
-    # FRR container status (use sudo -n for non-interactive to avoid hanging on password prompt)
+    # Dataplane (incl. FRR) container status (use sudo -n for non-interactive to avoid hanging on password prompt)
     run_cmd "sudo -n crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps" $prompt_re 30
-    run_cmd "sudo -n crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs \$(sudo -n crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name frr 2>/dev/null | head -1) 2>&1 | tail -100" $prompt_re 60
+    run_cmd "sudo -n crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs \$(sudo -n crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name '^dataplane\$' 2>/dev/null | head -1) 2>&1 | tail -100" $prompt_re 60
+
+    # Hugepages reserved before k3s starts
+    run_cmd "grep -i huge /proc/meminfo" $prompt_re 10
+    run_cmd "systemctl status hh-hugepages --no-pager" $prompt_re 30
 
     # System logs
     run_cmd "journalctl -k --no-pager -n 50" $prompt_re 30
