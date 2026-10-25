@@ -21,7 +21,7 @@ import (
 
 func icVPC(name, fabric, subnet string) *vpcapi.VPC {
 	return &vpcapi.VPC{
-		ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault},
+		Name: name, Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCSpec{
 			Topology: vpcapi.VPCTopology{Fabric: fabric},
 			Subnets:  map[string]*vpcapi.VPCSubnet{"subnet-01": {Subnet: subnet}},
@@ -31,7 +31,7 @@ func icVPC(name, fabric, subnet string) *vpcapi.VPC {
 
 func icExternalPeering(name, vpc, external, prefix string) *vpcapi.ExternalPeering {
 	return &vpcapi.ExternalPeering{
-		ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault, Labels: map[string]string{vpcapi.LabelVPC: vpc}},
+		Name: name, Namespace: kmetav1.NamespaceDefault, Labels: map[string]string{vpcapi.LabelVPC: vpc},
 		Spec: vpcapi.ExternalPeeringSpec{Permit: vpcapi.ExternalPeeringSpecPermit{
 			VPC:      vpcapi.ExternalPeeringSpecVPC{Name: vpc, Subnets: []string{"subnet-01"}},
 			External: vpcapi.ExternalPeeringSpecExternal{Name: external, Prefixes: []vpcapi.ExternalPeeringSpecPrefix{{Prefix: prefix}}},
@@ -41,10 +41,8 @@ func icExternalPeering(name, vpc, external, prefix string) *vpcapi.ExternalPeeri
 
 func icAttachment(external string) *vpcapi.ExternalAttachment {
 	return &vpcapi.ExternalAttachment{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "leaf--" + external, Namespace: kmetav1.NamespaceDefault,
-			Labels: map[string]string{vpcapi.LabelExternal: external},
-		},
+		Name: "leaf--" + external, Namespace: kmetav1.NamespaceDefault,
+		Labels: map[string]string{vpcapi.LabelExternal: external},
 	}
 }
 
@@ -140,14 +138,12 @@ func icServer(name, switchName, vpc string) []kclient.Object {
 	conn.Labels = map[string]string(wiringapi.MatchingLabelsForListLabelServer(name))
 
 	return []kclient.Object{
-		&wiringapi.Server{ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}},
+		&wiringapi.Server{Name: name, Namespace: kmetav1.NamespaceDefault},
 		conn,
 		&vpcapi.VPCAttachment{
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name: conn.Name + "--" + vpc, Namespace: kmetav1.NamespaceDefault,
-				Labels: map[string]string{wiringapi.LabelConnection: conn.Name, wiringapi.LabelVPC: vpc},
-			},
-			Spec: vpcapi.VPCAttachmentSpec{Subnet: vpc + "/subnet-01", Connection: conn.Name},
+			Name: conn.Name + "--" + vpc, Namespace: kmetav1.NamespaceDefault,
+			Labels: map[string]string{wiringapi.LabelConnection: conn.Name, wiringapi.LabelVPC: vpc},
+			Spec:   vpcapi.VPCAttachmentSpec{Subnet: vpc + "/subnet-01", Connection: conn.Name},
 		},
 	}
 }
@@ -159,18 +155,16 @@ func TestExternalReachableViaPeeringIgnoresInterconnect(t *testing.T) {
 
 	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
 	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
-	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}}
+	internet := vpcapi.External{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}
 	toA.Namespace, toB.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
 
-	objs := []kclient.Object{
+	objs := slices.Concat([]kclient.Object{
 		icVPC("vpc-01", "", "10.0.1.0/24"), icVPC("vpc-02", "fabric-b", "10.1.1.0/24"),
 		&toB, &toA, &internet,
 		icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("ext-bgp-01"),
 		icExternalPeering("a", "vpc-01", "ext-bgp-01", "0.0.0.0/0"),
 		icExternalPeering("b", "vpc-02", "to-default", "0.0.0.0/0"),
-	}
-	objs = append(objs, icServer("server-01", "leaf-01", "vpc-01")...)
-	objs = append(objs, icServer("server-02", "leaf-03", "vpc-02")...)
+	}, icServer("server-01", "leaf-01", "vpc-01"), icServer("server-02", "leaf-03", "vpc-02"))
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
 	reachable, err := isExternalSubnetReachableViaPeering(context.Background(), kube, "server-01", "0.0.0.0/0")
@@ -184,7 +178,7 @@ func TestExternalReachableViaPeeringIgnoresInterconnect(t *testing.T) {
 
 func icTransitPeering(transitCIDR string) *gwapi.GatewayPeering {
 	return &gwapi.GatewayPeering{
-		ObjectMeta: kmetav1.ObjectMeta{Name: "to-fabric-b--ext-bgp-01", Namespace: kmetav1.NamespaceDefault},
+		Name: "to-fabric-b--ext-bgp-01", Namespace: kmetav1.NamespaceDefault,
 		Spec: gwapi.PeeringSpec{
 			Topology: gwapi.GatewayPeeringTopology{Fabric: "default"},
 			Peering: map[string]*gwapi.PeeringEntry{
@@ -204,7 +198,7 @@ func TestIsExternalReachableOverInterconnect(t *testing.T) {
 	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
 	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
 	toA.Namespace, toB.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
-	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}}
+	internet := vpcapi.External{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}
 
 	base := func(vpcPrefix string, gwPeering *gwapi.GatewayPeering) []kclient.Object {
 		objs := []kclient.Object{
@@ -264,13 +258,13 @@ func TestOnReadyTransitPeeringIsReachable(t *testing.T) {
 
 	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
 	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
-	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{
+	internet := vpcapi.External{
 		Name: "ext-bgp-01", Annotations: map[string]string{extBGPNATAnnotation: "192.168.91.0/24"},
-	}}
+	}
 	namespaces := []vpcapi.IPv4Namespace{
-		{ObjectMeta: kmetav1.ObjectMeta{Name: "default"}, Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
+		{Name: "default", Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
 		{
-			ObjectMeta: kmetav1.ObjectMeta{Name: "fabric-b"},
+			Name: "fabric-b",
 			Spec: vpcapi.IPv4NamespaceSpec{
 				Topology: vpcapi.IPv4NamespaceTopology{Fabric: "fabric-b"},
 				Subnets:  []string{"10.1.0.0/16"},
@@ -291,9 +285,10 @@ func TestOnReadyTransitPeeringIsReachable(t *testing.T) {
 		icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("ext-bgp-01"),
 		icExternalPeering("b", "vpc-02", "to-default", "10.0.0.0/16"),
 	}
+	objs = slices.Grow(objs, len(set.Gateway)+2)
 	for name, spec := range set.Gateway {
 		spec.Topology.Fabric = "default"
-		objs = append(objs, &gwapi.GatewayPeering{ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}, Spec: *spec})
+		objs = append(objs, &gwapi.GatewayPeering{Name: name, Namespace: kmetav1.NamespaceDefault, Spec: *spec})
 	}
 	// the VPC prefixes the builder asked for, as the External peering would carry them
 	objs[len(objs)-len(set.Gateway)-1] = icExternalPeering("b", "vpc-02", "to-default", "0.0.0.0/0")
@@ -316,12 +311,12 @@ func TestIsExternalSubnetReachableSeesTransit(t *testing.T) {
 	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
 	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
 	toA.Namespace, toB.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
-	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}}
+	internet := vpcapi.External{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}
 
 	vpcInfo := func(name string, subnets map[string]*gwapi.VPCInfoSubnet) *gwapi.VPCInfo {
 		return &gwapi.VPCInfo{
-			ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault},
-			Spec:       gwapi.VPCInfoSpec{Subnets: subnets},
+			Name: name, Namespace: kmetav1.NamespaceDefault,
+			Spec: gwapi.VPCInfoSpec{Subnets: subnets},
 		}
 	}
 

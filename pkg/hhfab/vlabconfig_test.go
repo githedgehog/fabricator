@@ -192,12 +192,12 @@ func TestCreateVLABConfigInterconnect(t *testing.T) {
 func TestCreateVLABConfigInterconnectLinks(t *testing.T) {
 	l := apiutil.NewLoader()
 	b := &VLABBuilderDefault{
-		ExtBGPCount:         1,
-		ExtOrphanConnCount:  1,
-		ExtraFabric:         true,
-		InterconnectFabrics: true,
-		InterconnectLinks:   2,
-		VLABBuilderBase:     VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+		ExtBGPCount:          1,
+		ExtOrphanConnCount:   1,
+		ExtraFabric:          true,
+		InterconnectFabrics:  true,
+		InterconnectLinks:    2,
+		DefaultSwitchProfile: meta.SwitchProfileVS,
 	}
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()
@@ -208,7 +208,7 @@ func TestCreateVLABConfigInterconnectLinks(t *testing.T) {
 
 	// each pair is on its own port of the same two leaves and is cabled to its own peer
 	for _, leaf := range []string{"leaf-03", "leaf-04"} {
-		ports := []string{}
+		ports := make([]string, 0, 2)
 		for _, suffix := range []string{"--interconnect", "--interconnect-2"} {
 			conn := &wiringapi.Connection{}
 			require.NoError(t, l.GetClient().Get(t.Context(), kclient.ObjectKey{Name: leaf + suffix}, conn))
@@ -235,10 +235,10 @@ func TestCreateVLABConfigInterconnectLinks(t *testing.T) {
 
 func TestInterconnectLinksNeedInterconnect(t *testing.T) {
 	b := &VLABBuilderDefault{
-		ExtBGPCount:       1,
-		ExtraFabric:       true,
-		InterconnectLinks: 2,
-		VLABBuilderBase:   VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+		ExtBGPCount:          1,
+		ExtraFabric:          true,
+		InterconnectLinks:    2,
+		DefaultSwitchProfile: meta.SwitchProfileVS,
 	}
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()
@@ -411,12 +411,12 @@ func TestResolveVMSizes(t *testing.T) {
 func TestMarkStagedAddFabric(t *testing.T) {
 	l := apiutil.NewLoader()
 	b := &VLABBuilderDefault{
-		ExtBGPCount:         1,
-		ExtOrphanConnCount:  1,
-		ExtraFabric:         true,
-		AddFabric:           true,
-		InterconnectFabrics: true,
-		VLABBuilderBase:     VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+		ExtBGPCount:          1,
+		ExtOrphanConnCount:   1,
+		ExtraFabric:          true,
+		AddFabric:            true,
+		InterconnectFabrics:  true,
+		DefaultSwitchProfile: meta.SwitchProfileVS,
 	}
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()
@@ -469,7 +469,7 @@ func TestMarkStagedAddFabric(t *testing.T) {
 			continue
 		}
 
-		all, any := true, false
+		all, found := true, false
 		for _, obj := range objs {
 			conn, ok := obj.(*wiringapi.Connection)
 			if !ok {
@@ -478,11 +478,11 @@ func TestMarkStagedAddFabric(t *testing.T) {
 			_, servers, _, _, err := conn.Spec.Endpoints()
 			require.NoError(t, err)
 			if slices.Contains(servers, server.Name) {
-				any = true
+				found = true
 				all = all && stagedConns[conn.Name]
 			}
 		}
-		require.True(t, any, "server %s has no connection", server.Name)
+		require.True(t, found, "server %s has no connection", server.Name)
 		require.Equal(t, all, apiutil.IsStaged(server), "server %s", server.Name)
 	}
 

@@ -292,7 +292,7 @@ func TestFindExternalsSkipsInterconnect(t *testing.T) {
 	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
 	extList := &vpcapi.ExternalList{Items: []vpcapi.External{
 		toB,
-		{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01"}},
+		{Name: "ext-bgp-01"},
 	}}
 	attaches := &vpcapi.ExternalAttachmentList{Items: []vpcapi.ExternalAttachment{
 		{Spec: vpcapi.ExternalAttachmentSpec{External: "to-fabric-b"}},
