@@ -448,7 +448,7 @@ jobs:
             # the release tests assume one domain, so the peerings come from the cluster and the matrix checks them
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
             if [[ "${{ inputs.releasetest }}" == "true" ]]; then
-              # no release test supports several domains yet, so they all skip
+              # the release tests that support several domains run after the on-ready checks, the others skip
               HHFAB_TEST_ARGS+=(--ready=release-test "${HHFAB_RT_REGEX_ARGS[@]}")
             fi
           elif [[ "${{ inputs.releasetest }}" == "true" ]]; then
