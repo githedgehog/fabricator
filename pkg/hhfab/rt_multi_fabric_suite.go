@@ -153,17 +153,22 @@ func (sc *interconnectScenario) peer(extPeerings map[string]*vpcapi.ExternalPeer
 		slices.Sorted(maps.Keys(vpc.Spec.Subnets)), namespaceSubnets(sc.namespaces, other))
 }
 
-// runInterconnectMatrix applies the peerings and asserts the matrix: the unpeered pairs of VPCs must be isolated
+// runInterconnectMatrix applies the External peerings and asserts the matrix: the unpeered pairs of VPCs must be isolated
 // too, so a path the model does not expect fails the test
 func (testCtx *VPCPeeringTestCtx) runInterconnectMatrix(ctx context.Context, matrix *ConnectivityMatrix, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
-	if err := DoSetupPeerings(ctx, testCtx.kube, nil, extPeerings, nil, true); err != nil {
+	return testCtx.runPeeringMatrix(ctx, matrix, nil, extPeerings)
+}
+
+// runPeeringMatrix applies the peerings, refreshes the matrix and asserts it
+func (testCtx *VPCPeeringTestCtx) runPeeringMatrix(ctx context.Context, matrix *ConnectivityMatrix, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, extPeerings, nil, true); err != nil {
 		return fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
 		return fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
-		return fmt.Errorf("testing interconnect connectivity: %w", err)
+		return fmt.Errorf("testing connectivity: %w", err)
 	}
 
 	return nil
