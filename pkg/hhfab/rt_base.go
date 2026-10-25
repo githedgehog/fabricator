@@ -869,11 +869,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
 	multiFabricSuite := makeMultiFabricSuite()
+	multiDomainSuite := makeMultiDomainSuite()
 
 	if rtOpts.OnReadyTest {
 		suites = []*JUnitTestSuite{ortSuite}
 	} else {
-		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite, multiFabricSuite}
+		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite, multiFabricSuite, multiDomainSuite}
 	}
 
 	if rtOpts.ListTests {
@@ -1162,13 +1163,23 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		multiFabricFailures = multiFabricResults.Failures
 	}
 
+	var multiDomainFailures int
+	if skipFlags.MultiDomain {
+		multiDomainResults, err := selectAndRunSuite(ctx, testCtx, multiDomainSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		if err != nil && rtOpts.FailFast {
+			return fmt.Errorf("running multi-domain suite: %w", err)
+		}
+		results = append(results, *multiDomainResults)
+		multiDomainFailures = multiDomainResults.Failures
+	}
+
 	if err := recapAndReport(results, rtOpts); err != nil {
 		return fmt.Errorf("recapping and reporting results: %w", err)
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
-	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || gwNATACLResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 || multiFabricFailures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, gwNATACL=%d, basic=%d, noVpc=%d, multiFabric=%d", singleVpcResults.Failures, multiVpcResults.Failures, gwNATACLResults.Failures, basicResults.Failures, noVpcResults.Failures, multiFabricFailures) //nolint:err113
+	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || gwNATACLResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 || multiFabricFailures > 0 || multiDomainFailures > 0 {
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, gwNATACL=%d, basic=%d, noVpc=%d, multiFabric=%d, multiDomain=%d", singleVpcResults.Failures, multiVpcResults.Failures, gwNATACLResults.Failures, basicResults.Failures, noVpcResults.Failures, multiFabricFailures, multiDomainFailures) //nolint:err113
 	}
 
 	return nil
