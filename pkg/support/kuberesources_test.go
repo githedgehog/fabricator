@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -41,33 +43,52 @@ const (
 // fillStrings sets every string reachable from v through exported fields, pointers, slices and maps to leakedValue,
 // so a test covers the fields a type gains later too. Map keys are set to filledKey, as they are names, not values.
 func fillStrings(v reflect.Value) {
+	fillStringsIn(v, map[reflect.Type]bool{})
+}
+
+// fillStringsIn fills v, skipping the structs already being filled on the way to it, so a recursive type, e.g. the CRD
+// schema, is only filled at its first level, while the same type in a few places side by side is filled in all of
+// them. That's enough for the tests, as the deeper levels have the same fields, which are redacted the same way.
+func fillStringsIn(v reflect.Value, filling map[reflect.Type]bool) {
 	switch v.Kind() { //nolint:exhaustive // only the kinds that can hold a string
 	case reflect.String:
 		v.SetString(leakedValue)
 	case reflect.Pointer:
+		if filling[v.Type().Elem()] {
+			return
+		}
 		if v.IsNil() {
 			v.Set(reflect.New(v.Type().Elem()))
 		}
-		fillStrings(v.Elem())
+		fillStringsIn(v.Elem(), filling)
 	case reflect.Struct:
+		filling[v.Type()] = true
+		defer delete(filling, v.Type())
 		for idx := range v.NumField() {
 			if v.Type().Field(idx).IsExported() {
-				fillStrings(v.Field(idx))
+				fillStringsIn(v.Field(idx), filling)
 			}
 		}
 	case reflect.Slice:
+		// raw or binary data, e.g. the managed fields of the embedded pod templates, has to stay valid as is
+		if v.Type().Elem().Kind() == reflect.Uint8 || filling[v.Type().Elem()] {
+			return
+		}
 		slice := reflect.MakeSlice(v.Type(), 1, 1)
-		fillStrings(slice.Index(0))
+		fillStringsIn(slice.Index(0), filling)
 		v.Set(slice)
 	case reflect.Map:
+		if filling[v.Type().Elem()] {
+			return
+		}
 		key := reflect.New(v.Type().Key()).Elem()
 		if key.Kind() == reflect.String {
 			key.SetString(filledKey)
 		} else {
-			fillStrings(key)
+			fillStringsIn(key, filling)
 		}
 		val := reflect.New(v.Type().Elem()).Elem()
-		fillStrings(val)
+		fillStringsIn(val, filling)
 		m := reflect.MakeMap(v.Type())
 		m.SetMapIndex(key, val)
 		v.Set(m)
@@ -141,24 +162,101 @@ func TestCollectsAllOwnKinds(t *testing.T) {
 }
 
 // credentialField matches the names of the fields that may hold a credential, so the ones a kind gains later fail
-// the test below until they are either redacted or reviewed and listed in notCredentialFields. No "session" as it's
-// the BGP and MCLAG ones in our API.
+// the test below until they are either redacted or reviewed. No "session" as it's the BGP and MCLAG ones in our API.
 var credentialField = regexp.MustCompile(
 	`(?i)pass|pwd|secret|token|key|hash|cred|auth|bearer|pem|private|ssh|psk|header|cookie|salt|otp|license|kubeconfig`)
 
-// notCredentialFields are the fields matching credentialField that are reviewed to not be credentials
+// notCredentialFields are the field names matching credentialField that never hold a credential, wherever they are
 var notCredentialFields = []string{"username", "caPEM", "certPEM"}
 
-func TestRedactsAllOwnKinds(t *testing.T) {
-	report := func(path []string) bool {
-		return slices.ContainsFunc(path, credentialField.MatchString) && notThrough(notCredentialFields...)(path)
-	}
+// isNotCredentialField reports the fields that can't hold a credential themselves, wherever they are: the ones listed
+// above, the references to a Secret or another object, which only have its name and key, and the pod templates
+// cert-manager embeds for its solvers, which are core Kubernetes ones and so left out the same as the core kinds
+func isNotCredentialField(name string) bool {
+	return slices.Contains(notCredentialFields, name) ||
+		strings.HasSuffix(name, "Ref") || strings.HasSuffix(name, "Name") || name == "podTemplate"
+}
 
+// issuerReviewedFields are the fields of the cert-manager Issuer and ClusterIssuer, which share their spec, matching
+// credentialField that are reviewed to not hold a credential: references to the Secrets without the Ref suffix and
+// the identifiers going with the secrets referenced next to them
+var issuerReviewedFields = []string{
+	"spec.acme.externalAccountBinding.keyAlgorithm",
+	"spec.acme.externalAccountBinding.keyID",
+	"spec.acme.solvers.0.dns01.route53.accessKeyID",
+	"spec.vault.auth.appRole.path",
+	"spec.vault.auth.appRole.roleId",
+	"spec.vault.auth.aws.iamRoleArn",
+	"spec.vault.auth.aws.mountPath",
+	"spec.vault.auth.aws.region",
+	"spec.vault.auth.aws.role",
+	"spec.vault.auth.aws.vaultHeaderValue",
+	"spec.vault.auth.clientCertificate.mountPath",
+	"spec.vault.auth.clientCertificate.name",
+	"spec.vault.auth.kubernetes.mountPath",
+	"spec.vault.auth.kubernetes.role",
+	"spec.venafi.ngts.tokenEndpoint",
+	"status.acme.lastPrivateKeyHash",
+}
+
+// reviewedFields are the fields matching credentialField that are reviewed to not hold a credential, by kind
+var reviewedFields = map[schema.GroupVersionKind][]string{
+	cmapi.SchemeGroupVersion.WithKind(cmapi.IssuerKind):        issuerReviewedFields,
+	cmapi.SchemeGroupVersion.WithKind(cmapi.ClusterIssuerKind): issuerReviewedFields,
+	cmapi.SchemeGroupVersion.WithKind(cmapi.CertificateKind): {
+		// the keystore and private key settings, e.g. its algorithm, not the key itself
+		"spec.keystores.jks.alias",
+		"spec.keystores.pkcs12.profile",
+		"spec.privateKey.algorithm",
+		"spec.privateKey.encoding",
+		"spec.privateKey.rotationPolicy",
+		"spec.secretTemplate.annotations.name",
+		"spec.secretTemplate.labels.name",
+	},
+	helmapi.SchemeGroupVersion.WithKind("HelmChart"): {
+		"spec.authSecret.name",
+		"spec.dockerRegistrySecret.name",
+		"spec.podSecurityContext.windowsOptions.gmsaCredentialSpec",
+		"spec.securityContext.windowsOptions.gmsaCredentialSpec",
+		"spec.valuesSecrets.0.keys.0",
+		"spec.valuesSecrets.0.name",
+	},
+	helmapi.SchemeGroupVersion.WithKind("HelmChartConfig"): {
+		"spec.valuesSecrets.0.keys.0",
+		"spec.valuesSecrets.0.name",
+	},
+}
+
+// isScannedForCredentials reports whether the kind is checked by the test below: the collected kinds of our own API
+// groups and of the third-party ones with their own CRDs, i.e. cert-manager and helm-controller. The core Kubernetes
+// kinds are left out, as their selector keys and Secret references match credentialField all over and would need a
+// long list of reviewed fields. The list types and the options/events every group gets registered with aren't kinds
+// to check at all.
+func isScannedForCredentials(gvk schema.GroupVersionKind, objType reflect.Type) bool {
+	switch {
+	case !strings.HasSuffix(gvk.Group, ".githedgehog.com") && gvk.Group != "cert-manager.io" && gvk.Group != "helm.cattle.io":
+		return false
+	case !matchesGVK(gvk, kubeResourceGVKs):
+		return false
+	case strings.HasSuffix(gvk.Kind, "List"), strings.HasPrefix(objType.PkgPath(), "k8s.io/apimachinery/"):
+		return false
+	default:
+		return true
+	}
+}
+
+func TestRedactsCredentialFields(t *testing.T) {
 	credentials := 0
 	for gvk, objType := range newScheme(t).AllKnownTypes() {
-		if !strings.HasSuffix(gvk.Group, ".githedgehog.com") || strings.HasSuffix(gvk.Kind, "List") ||
-			strings.HasPrefix(objType.PkgPath(), "k8s.io/apimachinery/") {
+		if !isScannedForCredentials(gvk, objType) {
 			continue
+		}
+
+		candidate := func(path []string) bool {
+			return slices.ContainsFunc(path, credentialField.MatchString) && !slices.ContainsFunc(path, isNotCredentialField)
+		}
+		report := func(path []string) bool {
+			return candidate(path) && !slices.Contains(reviewedFields[gvk], strings.Join(path, "."))
 		}
 
 		objValue := reflect.New(objType)
@@ -172,6 +270,7 @@ func TestRedactsAllOwnKinds(t *testing.T) {
 			}
 		}
 		credentials += len(leakedFields(t, obj, report))
+		assert.Subset(t, leakedFields(t, obj, candidate), reviewedFields[gvk], "reviewed fields not in %s", gvk.Kind)
 
 		redactKubeObject(obj, gvk)
 		assert.Empty(t, leakedFields(t, obj, report), "unredacted credentials in %s", gvk.Kind)
