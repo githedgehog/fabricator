@@ -29,9 +29,15 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/libmeta/pkg/alloy"
+	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,6 +64,8 @@ var redactedAnnotations = []string{
 
 var schemeBuilders = []func(*runtime.Scheme) error{
 	corev1.AddToScheme, appsv1.AddToScheme, rbacv1.AddToScheme, metricsapi.AddToScheme, apiextv1.AddToScheme,
+	batchv1.AddToScheme, coordinationv1.AddToScheme, discoveryv1.AddToScheme, admissionregv1.AddToScheme,
+	storagev1.AddToScheme, schedulingv1.AddToScheme,
 	helmapi.AddToScheme,
 	cmapi.AddToScheme, cmmeta.AddToScheme,
 	wiringapi.AddToScheme, vpcapi.AddToScheme, dhcpapi.AddToScheme, agentapi.AddToScheme,
@@ -82,7 +90,14 @@ var kubeResourceGVKs = []schema.GroupVersionKind{
 	appsv1.SchemeGroupVersion.WithKind(""),
 	apiextv1.SchemeGroupVersion.WithKind("CustomResourceDefinition"),
 	metricsapi.SchemeGroupVersion.WithKind(""),
+	batchv1.SchemeGroupVersion.WithKind(""),
+	coordinationv1.SchemeGroupVersion.WithKind(""),
+	discoveryv1.SchemeGroupVersion.WithKind(""),
+	admissionregv1.SchemeGroupVersion.WithKind(""),
+	storagev1.SchemeGroupVersion.WithKind(""),
+	schedulingv1.SchemeGroupVersion.WithKind(""),
 	helmapi.SchemeGroupVersion.WithKind(""),
+	cmapi.SchemeGroupVersion.WithKind(""),
 	fabapi.GroupVersion.WithKind(""),
 	wiringapi.GroupVersion.WithKind(""),
 	vpcapi.GroupVersion.WithKind(""),
@@ -201,6 +216,16 @@ var typeRedactors = lo.SliceToMap([]typeRedactor{
 	redactType(func(user *agentapi.UserCreds) {
 		redactString(&user.Password)
 		redactStrings(user.SSHKeys)
+	}),
+	redactType(func(keystore *cmapi.JKSKeystore) {
+		if keystore.Password != nil {
+			redactString(keystore.Password)
+		}
+	}),
+	redactType(func(keystore *cmapi.PKCS12Keystore) {
+		if keystore.Password != nil {
+			redactString(keystore.Password)
+		}
 	}),
 }, func(r typeRedactor) (reflect.Type, func(reflect.Value)) {
 	return r.typ, r.redact
