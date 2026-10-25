@@ -881,6 +881,7 @@ github.com/yusufpapurcu/wmi
 ## explicit; go 1.26.8
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
+go.githedgehog.com/fabric/api/fcint/v1alpha1
 go.githedgehog.com/fabric/api/gateway/v1alpha1
 go.githedgehog.com/fabric/api/gwint/v1alpha1
 go.githedgehog.com/fabric/api/meta
