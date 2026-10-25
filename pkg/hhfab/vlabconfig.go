@@ -205,7 +205,7 @@ var DefaultSizes = VMSizes{
 	Control:  VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
 	Switch:   VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
 	Server:   VMSize{CPU: 2, RAM: 768, Disk: 14},   // TODO 1GB RAM?
-	Gateway:  VMSize{CPU: 8, RAM: 6144, Disk: 50},  // TODO proper min size
+	Gateway:  VMSize{CPU: 8, RAM: 8192, Disk: 50},  // TODO proper min size
 	External: VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
 }
 
