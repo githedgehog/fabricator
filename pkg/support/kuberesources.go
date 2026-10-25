@@ -120,11 +120,13 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 	corev1.SchemeGroupVersion.WithKind("ConfigMap"): func(obj kclient.Object) {
 		cm := obj.(*corev1.ConfigMap)
 
-		// TODO make it more granular and only remove sensitive data or move it to a separate secret
-		if cm.Name == "fabric-ctrl-config" || strings.HasPrefix(cm.Name, "alloy") {
-			for k := range cm.Data {
-				cm.Data[k] = RedactedValue
-			}
+		// all values, as rendered configs could hold credentials, e.g. the fabric controller and alloy ones
+		// TODO make it more granular, e.g. by parsing the known configs and redacting them by type
+		for k := range cm.Data {
+			cm.Data[k] = RedactedValue
+		}
+		for k := range cm.BinaryData {
+			cm.BinaryData[k] = []byte(RedactedValue)
 		}
 	},
 	// values hold the rendered component configs, e.g. alloy one has the target credentials
