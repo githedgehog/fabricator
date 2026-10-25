@@ -49,7 +49,7 @@ type collector struct {
 }
 
 func Collect(ctx context.Context, name, kubeconfigPath string, quiet bool) (*Dump, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
 	hostname, err := os.Hostname()
