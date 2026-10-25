@@ -22,6 +22,10 @@ const (
 	FRRRef                = "dataplane/frr"
 	DataplaneMetricsPort  = 9442
 	FRRMetricsPort        = 9342
+
+	// Hugepages reserved on the gateway nodes and requested by the dataplane, it currently only uses 1G pages
+	HugePages1G = 4
+	HugePages2M = 0
 )
 
 var _ comp.ListOCIArtifacts = Artifacts

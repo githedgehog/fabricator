@@ -309,6 +309,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ToolboxRef:            toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
 		DataplaneMetricsPort:  gateway.DataplaneMetricsPort,
 		FRRMetricsPort:        gateway.FRRMetricsPort,
+		GatewayHugePages1G:    gateway.HugePages1G,
+		GatewayHugePages2M:    gateway.HugePages2M,
 
 		ExtraValidators: fmeta.ExtraValidators{
 			Peering: valid.Peering,
