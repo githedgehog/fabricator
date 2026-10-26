@@ -399,11 +399,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 			ifaces := map[string]gwapi.GatewayInterface{}
 			for i := uint8(1); i <= b.GatewayUplinks; i++ {
-				iface := gwapi.GatewayInterface{PCI: vlabcomp.GatewayPCI(i)}
-				if b.GatewayDriver == GatewayDriverKernel {
-					iface.Kernel = vlabcomp.GatewayKernel(i)
+				ifaces[fmt.Sprintf("port%d", i)] = gwapi.GatewayInterface{
+					PCI:    vlabcomp.GatewayPCI(i),
+					Kernel: vlabcomp.GatewayKernel(i),
 				}
-				ifaces[fmt.Sprintf("port%d", i)] = iface
 			}
 
 			if _, err := b.createGateway(ctx, gwName, gwapi.GatewaySpec{
