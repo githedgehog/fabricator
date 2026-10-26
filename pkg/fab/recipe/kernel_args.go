@@ -33,7 +33,11 @@ func ensureKernelArgs(ctx context.Context, keys, args []string) error {
 		return fmt.Errorf("reading %q: %w", oemGrubCfg, err)
 	}
 
-	if updated := setKernelArgs(cfg, keys, args); !bytes.Equal(updated, cfg) {
+	updated, err := setKernelArgs(cfg, keys, args)
+	if err != nil {
+		return fmt.Errorf("setting kernel args in %q: %w", oemGrubCfg, err)
+	}
+	if !bytes.Equal(updated, cfg) {
 		slog.Info("Updating kernel args", "path", oemGrubCfg, "args", args)
 
 		if err := os.WriteFile(oemGrubCfg, updated, 0o644); err != nil { //nolint:gosec
@@ -95,7 +99,7 @@ func ensureKernelArgs(ctx context.Context, keys, args []string) error {
 
 // setKernelArgs merges all unconditional linux_append lines into a single one, replacing all args with the keys by the
 // args, the same format the ignition kargs helper uses so it works with both
-func setKernelArgs(cfg []byte, keys, args []string) []byte {
+func setKernelArgs(cfg []byte, keys, args []string) ([]byte, error) {
 	out := &bytes.Buffer{}
 	opts := []string{}
 	found := false
@@ -106,6 +110,11 @@ func setKernelArgs(cfg []byte, keys, args []string) []byte {
 			out.WriteString(line)
 
 			continue
+		}
+
+		// neither we nor the ignition kargs helper parse quoting
+		if strings.Contains(value, `\"`) {
+			return nil, fmt.Errorf("escaped quotes aren't supported: %q", strings.TrimSpace(line)) //nolint:err113
 		}
 
 		found = true
@@ -119,7 +128,7 @@ func setKernelArgs(cfg []byte, keys, args []string) []byte {
 
 	opts = append(opts, args...)
 	if !found && len(args) == 0 {
-		return cfg
+		return cfg, nil
 	}
 
 	if out.Len() > 0 && !bytes.HasSuffix(out.Bytes(), []byte("\n")) {
@@ -129,7 +138,7 @@ func setKernelArgs(cfg []byte, keys, args []string) []byte {
 		fmt.Fprintf(out, "%s$linux_append %s\"\n", linuxAppendPrefix, strings.Join(opts, " "))
 	}
 
-	return out.Bytes()
+	return out.Bytes(), nil
 }
 
 // kernelArgsApplied checks that the args with the keys in the cmdline are exactly the args, in the same order
