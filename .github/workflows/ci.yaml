@@ -328,7 +328,7 @@ jobs:
           - { vpcmode: l2vni, gateway: dpdk, buildmode: usb, includeonie: true }
 
           # hlab
-          - { hybrid: true, vpcmode: l2vni, gateway: dpdk }
+          - { hybrid: true, vpcmode: l2vni, gateway: kernel }
 
           # upgrades keep the driver and older releases only have kernel gateways in vlab
           - { upgradefrom: "26.03", vpcmode: l2vni }
