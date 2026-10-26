@@ -25,6 +25,23 @@ const (
 	HugePages2M = 0
 )
 
+// KernelArgKeys are the kernel args fully managed on the gateway nodes, any of them not in KernelArgs is dropped
+var KernelArgKeys = []string{"iommu", "intel_iommu", "amd_iommu", "hugepagesz", "hugepages", "default_hugepagesz"}
+
+// KernelArgs are set by ignition on install and by the installer on upgrade, ignition skips args that are already
+// there, so they must be unique to keep the hugepages sizes and counts paired
+func KernelArgs() []string {
+	args := []string{"iommu=pt", "intel_iommu=on"}
+	if HugePages1G > 0 {
+		args = append(args, "hugepagesz=1G", fmt.Sprintf("hugepages=%d", HugePages1G))
+	}
+	if HugePages2M > 0 {
+		args = append(args, "hugepagesz=2M", fmt.Sprintf("hugepages=%d", HugePages2M))
+	}
+
+	return args
+}
+
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {

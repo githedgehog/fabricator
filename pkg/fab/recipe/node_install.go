@@ -4,10 +4,7 @@
 package recipe
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,15 +26,9 @@ import (
 )
 
 const (
-	dropVXLANService    = "hh-drop-vxlan.service"
-	dropVXLANUnitPath   = "/etc/systemd/system/" + dropVXLANService
-	hugePagesService    = "hh-hugepages.service"
-	hugePagesUnitPath   = "/etc/systemd/system/" + hugePagesService
-	hugePagesScriptPath = k3s.BinDir + "/hh-hugepages.sh"
+	dropVXLANService  = "hh-drop-vxlan.service"
+	dropVXLANUnitPath = "/etc/systemd/system/" + dropVXLANService
 )
-
-//go:embed hugepages.sh
-var hugePagesScript []byte
 
 type NodeInstallUpgrade struct {
 	WorkDir string
@@ -52,6 +43,12 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		mode = "upgrade"
 	}
 	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
+
+	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+		if err := ensureKernelArgs(ctx, gateway.KernelArgKeys, gateway.KernelArgs()); err != nil {
+			return fmt.Errorf("ensuring kernel args: %w", err)
+		}
+	}
 
 	if err := checkIfaceAddresses(c.Node.Spec.Management.Interface,
 		string(c.Node.Spec.Management.IP),
@@ -80,9 +77,13 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
+	// kubelet only advertises the hugepages available when it starts, joining k8s (re)starts it
 	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
-		if err := reserveHugePages(ctx); err != nil {
-			return fmt.Errorf("reserving hugepages: %w", err)
+		if err := checkHugePages(1<<20, gateway.HugePages1G); err != nil { // 1G
+			return err
+		}
+		if err := checkHugePages(2<<10, gateway.HugePages2M); err != nil { // 2M
+			return err
 		}
 	}
 
@@ -208,73 +209,6 @@ func (c *NodeInstallUpgrade) joinK8s(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// reserveHugePages installs a unit that reserves the gateway hugepages before k3s starts, kubelet only advertises the
-// hugepages available when it starts and k3s requires the unit, so restarting it on changes restarts k3s as well
-func reserveHugePages(ctx context.Context) error {
-	slog.Info("Reserving hugepages", "1G", gateway.HugePages1G, "2M", gateway.HugePages2M)
-
-	unit := fmt.Sprintf(`[Unit]
-Description=Reserve hugepages for the gateway dataplane
-Before=%[1]s
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-TimeoutStartSec=infinity
-ExecStart=%[2]s %[3]d %[4]d
-
-[Install]
-WantedBy=multi-user.target
-RequiredBy=%[1]s
-`, k3s.AgentServiceName, hugePagesScriptPath, gateway.HugePages1G, gateway.HugePages2M)
-
-	scriptChanged, err := writeIfChanged(hugePagesScriptPath, hugePagesScript, 0o755)
-	if err != nil {
-		return fmt.Errorf("writing hugepages script: %w", err)
-	}
-
-	unitChanged, err := writeIfChanged(hugePagesUnitPath, []byte(unit), 0o644)
-	if err != nil {
-		return fmt.Errorf("writing hugepages unit: %w", err)
-	}
-
-	action := "start"
-	if scriptChanged || unitChanged {
-		action = "restart"
-	}
-
-	for _, args := range [][]string{
-		{"daemon-reload"},
-		{"enable", hugePagesService},
-		{action, hugePagesService},
-	} {
-		cmd := exec.CommandContext(ctx, "systemctl", args...)
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("running systemctl %s: %w", strings.Join(args, " "), err)
-		}
-	}
-
-	return nil
-}
-
-func writeIfChanged(path string, content []byte, mode os.FileMode) (bool, error) {
-	existing, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("reading %q: %w", path, err)
-	}
-	if err == nil && bytes.Equal(existing, content) {
-		return false, nil
-	}
-
-	if err := os.WriteFile(path, content, mode); err != nil {
-		return false, fmt.Errorf("writing %q: %w", path, err)
-	}
-
-	return true, nil
 }
 
 func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {

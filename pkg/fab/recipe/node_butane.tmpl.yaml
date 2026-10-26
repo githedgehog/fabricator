@@ -15,6 +15,15 @@ passwd:
         - wheel
       shell: /bin/bash
 
+{{ if .KernelArgs }}
+# applied on the first boot with a reboot from the initramfs, so hugepages are reserved before memory gets fragmented
+kernel_arguments:
+  should_exist:
+    {{ range .KernelArgs }}
+    - {{ . }}
+    {{ end }}
+{{ end }}
+
 systemd:
   units:
     - name: locksmithd.service

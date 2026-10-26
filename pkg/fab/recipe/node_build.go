@@ -12,11 +12,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
@@ -135,6 +137,11 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:err113
 	}
 
+	var kernelArgs []string
+	if slices.Contains(b.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+		kernelArgs = gateway.KernelArgs()
+	}
+
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
 		"Hostname":       b.Node.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
@@ -144,6 +151,7 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		"DummyAddress":   dummyIP.Masked().String(),
 		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
 		"AutoInstall":    autoInstallPath,
+		"KernelArgs":     kernelArgs,
 
 		"VLABVirtioNamesLinkPath": flatcar.VLABVirtioNamesLinkPath,
 		"VLABVirtioNamesLink":     flatcar.VLABVirtioNamesLink,
