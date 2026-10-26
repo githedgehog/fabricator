@@ -540,8 +540,8 @@ github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78/go.mod h1:aL8wCCfTfS
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.githedgehog.com/fabric v0.137.0 h1:i0a6B1G5OYPynG4N5qn9zZSXHlyIyR5qXGpOiY90Qcw=
-go.githedgehog.com/fabric v0.137.0/go.mod h1:CE3oR/oiXYvUaGuuct8hXgrZK08wRAEnEX+BjGxxxQU=
+go.githedgehog.com/fabric v0.138.0 h1:JyVpCuW5JAm4jLJkZw0owDlEgTtVeU0MfDDQOI7ossg=
+go.githedgehog.com/fabric v0.138.0/go.mod h1:CE3oR/oiXYvUaGuuct8hXgrZK08wRAEnEX+BjGxxxQU=
 go.githedgehog.com/libmeta v0.4.0 h1:JHwmt3SJwauPO3CqSyGe73bTpZ1CJaDovMw71Hd738w=
 go.githedgehog.com/libmeta v0.4.0/go.mod h1:gS8lXwHatQnQZY17EHW++p4IWodfJgQeW7Gbo7E1htk=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
