@@ -53,7 +53,6 @@ func makeMultiDomainSuite() *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
-				VirtualSwitch: true,
 			},
 		},
 	}
