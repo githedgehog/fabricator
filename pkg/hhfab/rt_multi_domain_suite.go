@@ -131,6 +131,22 @@ func buildDomainScenario(fabrics []wiringapi.Fabric, vpcItems []vpcapi.VPC, need
 	return sc, nil
 }
 
+// meshPeerings peers every pair of VPCs that share a domain, which is all the fabric accepts
+func (sc *domainScenario) meshPeerings() map[string]*vpcapi.VPCPeeringSpec {
+	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
+	for idx, vpc1 := range sc.vpcs {
+		_, domains1 := vpcGroupKey(vpc1)
+		for _, vpc2 := range sc.vpcs[idx+1:] {
+			_, domains2 := vpcGroupKey(vpc2)
+			if slices.ContainsFunc(domains1, func(domain string) bool { return slices.Contains(domains2, domain) }) {
+				appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, []string{}, []string{})
+			}
+		}
+	}
+
+	return vpcPeerings
+}
+
 // skipOnNoDomains turns the missing domains or VPCs of the topology into a skip
 func skipOnNoDomains(err error) (bool, []RevertFunc, error) {
 	return errors.Is(err, errNoDomains), nil, err
@@ -169,24 +185,16 @@ func domainFullMeshPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return skipOnNoDomains(err)
 	}
 
-	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
-	for idx, vpc1 := range sc.vpcs {
-		_, domains1 := vpcGroupKey(vpc1)
-		for _, vpc2 := range sc.vpcs[idx+1:] {
-			_, domains2 := vpcGroupKey(vpc2)
-			if slices.ContainsFunc(domains1, func(domain string) bool { return slices.Contains(domains2, domain) }) {
-				appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, []string{}, []string{})
-			}
-		}
-	}
-
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, vpcPeerings, nil)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), nil)
 }
 
-// Every VPC is peered with the Externals of its own domains: it reaches them, and the VPCs of the
-// other domains, which the fabric does not let peer with those Externals, do not.
+// Every VPC is peered with the Externals of its own domains, on top of the mesh of VPCs that share
+// a domain: it reaches them, and the VPCs of the other domains, which the fabric does not let peer
+// with those Externals, do not. The mesh is there because an External routes between the VPCs
+// peered with it, which the matrix does not model, so those pairs must be allowed anyway.
 func domainExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
-	if _, err := loadDomainScenario(ctx, testCtx, false); err != nil {
+	sc, err := loadDomainScenario(ctx, testCtx, false)
+	if err != nil {
 		return skipOnNoDomains(err)
 	}
 
@@ -198,5 +206,5 @@ func domainExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return true, nil, nil
 	}
 
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, nil, extPeerings)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), extPeerings)
 }
