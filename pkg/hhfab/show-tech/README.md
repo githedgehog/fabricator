@@ -161,7 +161,7 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   protocol counters (`netstat -s`) - without the driver counters, RX-ring and
   queue drops on the dataplane uplink are unobservable
 - **Resources**: disk usage, memory, top memory and CPU processes, hugepages
-  (`/proc/meminfo` and the `hh-hugepages.service` status and logs)
+  (`/proc/meminfo`, the kernel args in `/proc/cmdline` and `/oem/grub.cfg`)
 - **FRR** (via `vtysh` inside the `dataplane` container, which runs FRR):
   version, running config, BGP summary (IPv4, L2VPN EVPN), BGP routes,
   per-neighbor state, per-VRF BGP and route tables, interface status, FRR logs,

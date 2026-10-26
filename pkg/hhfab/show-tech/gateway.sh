@@ -147,8 +147,8 @@ capture_container_logs() {
 
     echo -e "\n=== Hugepages ==="
     grep -i huge /proc/meminfo
-    systemctl status hh-hugepages.service --no-pager
-    journalctl -u hh-hugepages.service --no-pager -b
+    cat /proc/cmdline
+    cat /oem/grub.cfg
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------

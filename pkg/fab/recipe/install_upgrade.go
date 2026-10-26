@@ -35,6 +35,8 @@ const (
 	HedgehogDir           = "/opt/hedgehog"
 	InstallMarkerFile     = HedgehogDir + "/.install"
 	InstallMarkerComplete = "complete"
+	// RebootMarkerFile holds the boot id and kernel args the node was rebooted for, until they're applied
+	RebootMarkerFile = HedgehogDir + "/.reboot"
 )
 
 func DoInstall(ctx context.Context, workDir string, yes bool) error {
