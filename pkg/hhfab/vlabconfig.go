@@ -1127,9 +1127,9 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
 
-				// e1000 has a single tx ring while dpdk uses one per worker plus one for the control plane
+				// dpdk needs a queue pair per worker plus one for the control plane, igb has 16 and e1000(e) only 1-2
 				if vm.Type == VMTypeGateway && nicID > 0 {
-					nic = "e1000e"
+					nic = "igb"
 				}
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)

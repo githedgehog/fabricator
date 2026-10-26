@@ -328,7 +328,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 				var slot uint
 				_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
 				require.NoError(t, err, iface.PCI)
-				require.Contains(t, vmNICs[nicID], "-device e1000e,", name)
+				require.Contains(t, vmNICs[nicID], "-device igb,", name)
 				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), name)
 			}
 		})
