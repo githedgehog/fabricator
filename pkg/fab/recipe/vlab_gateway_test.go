@@ -8,6 +8,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestMigrateVLABGatewayIfaces(t *testing.T) {
@@ -43,4 +51,94 @@ func TestMigrateVLABGatewayIfaces(t *testing.T) {
 		Interfaces: map[string]gwapi.GatewayInterface{"enp2s0": {}},
 	}})
 	require.Error(t, err)
+}
+
+func TestMigrateVLABGatewayPorts(t *testing.T) {
+	oldGw := func(name string) *gwapi.Gateway {
+		return &gwapi.Gateway{
+			Name: name, Namespace: kmetav1.NamespaceDefault,
+			Spec: gwapi.GatewaySpec{
+				Driver:     gwapi.GatewayDriverKernel,
+				Interfaces: map[string]gwapi.GatewayInterface{"enp2s1": {}},
+			},
+		}
+	}
+	newGw := func(name string) *gwapi.Gateway {
+		gw := oldGw(name)
+		gw.Spec.Interfaces = map[string]gwapi.GatewayInterface{"port1": {PCI: "0000:00:10.0", Kernel: "enp0s16"}}
+
+		return gw
+	}
+	conn := func(port string) *wiringapi.Connection {
+		return &wiringapi.Connection{
+			Name: "spine-01--gateway--gateway-1", Namespace: kmetav1.NamespaceDefault,
+			Spec: wiringapi.ConnectionSpec{Gateway: &wiringapi.ConnGateway{Links: []wiringapi.GatewayLink{{
+				Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: "spine-01/E1/5"}},
+				Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: port}},
+			}}}},
+		}
+	}
+	hwNode := &fabapi.FabNode{
+		Name: "gateway-1", Namespace: comp.FabNamespace,
+		Annotations: map[string]string{vlabcomp.NodeTypeAnnotation: vlabcomp.NodeTypeHW},
+	}
+
+	for _, tt := range []struct {
+		name     string
+		objs     []kclient.Object
+		wantIfc  string
+		wantPort string
+		wantWait bool
+	}{
+		{
+			name:     "full",
+			objs:     []kclient.Object{oldGw("gateway-1"), conn("gateway-1/enp2s1")},
+			wantIfc:  "port1",
+			wantPort: "gateway-1/port1",
+			wantWait: true,
+		},
+		{
+			name:     "partial",
+			objs:     []kclient.Object{newGw("gateway-1"), conn("gateway-1/enp2s1")},
+			wantIfc:  "port1",
+			wantPort: "gateway-1/port1",
+			wantWait: true,
+		},
+		{
+			name:     "done",
+			objs:     []kclient.Object{newGw("gateway-1"), conn("gateway-1/port1")},
+			wantIfc:  "port1",
+			wantPort: "gateway-1/port1",
+		},
+		{
+			name:     "hw",
+			objs:     []kclient.Object{hwNode, oldGw("gateway-1"), conn("gateway-1/enp2s1")},
+			wantIfc:  "enp2s1",
+			wantPort: "gateway-1/enp2s1",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, gwapi.AddToScheme(scheme))
+			require.NoError(t, wiringapi.AddToScheme(scheme))
+			require.NoError(t, fabapi.AddToScheme(scheme))
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+
+			waited := false
+			require.NoError(t, migrateVLABGatewayPorts(t.Context(), kube, func() error {
+				waited = true
+
+				return nil
+			}))
+			require.Equal(t, tt.wantWait, waited)
+
+			gw := &gwapi.Gateway{}
+			require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Name: "gateway-1", Namespace: kmetav1.NamespaceDefault}, gw))
+			require.Contains(t, gw.Spec.Interfaces, tt.wantIfc)
+
+			c := &wiringapi.Connection{}
+			require.NoError(t, kube.Get(t.Context(), kclient.ObjectKeyFromObject(conn("")), c))
+			require.Equal(t, tt.wantPort, c.Spec.Gateway.Links[0].Gateway.Port)
+		})
+	}
 }
