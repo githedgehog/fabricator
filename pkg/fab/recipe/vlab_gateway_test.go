@@ -4,6 +4,7 @@
 package recipe
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,10 +13,13 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestMigrateVLABGatewayIfaces(t *testing.T) {
@@ -86,6 +90,7 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		objs     []kclient.Object
+		conflict bool
 		wantIfc  string
 		wantPort string
 		wantWait bool
@@ -93,6 +98,14 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 		{
 			name:     "full",
 			objs:     []kclient.Object{oldGw("gateway-1"), conn("gateway-1/enp2s1")},
+			wantIfc:  "port1",
+			wantPort: "gateway-1/port1",
+			wantWait: true,
+		},
+		{
+			name:     "conflict",
+			objs:     []kclient.Object{oldGw("gateway-1"), conn("gateway-1/enp2s1")},
+			conflict: true,
 			wantIfc:  "port1",
 			wantPort: "gateway-1/port1",
 			wantWait: true,
@@ -122,7 +135,19 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			require.NoError(t, gwapi.AddToScheme(scheme))
 			require.NoError(t, wiringapi.AddToScheme(scheme))
 			require.NoError(t, fabapi.AddToScheme(scheme))
-			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			// the first update of each object conflicts, as if the fabric controller updated it in between
+			conflicted := map[string]bool{}
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(ctx context.Context, kube kclient.WithWatch, obj kclient.Object, opts ...kclient.UpdateOption) error {
+					if tt.conflict && !conflicted[obj.GetName()] {
+						conflicted[obj.GetName()] = true
+
+						return kapierrors.NewConflict(schema.GroupResource{}, obj.GetName(), nil)
+					}
+
+					return kube.Update(ctx, obj, opts...)
+				},
+			}).Build()
 
 			waited := false
 			require.NoError(t, migrateVLABGatewayPorts(t.Context(), kube, func() error {
