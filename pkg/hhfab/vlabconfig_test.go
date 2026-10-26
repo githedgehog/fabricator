@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -171,6 +172,15 @@ func TestCreateVLABConfigInterconnect(t *testing.T) {
 	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 	f.Default()
 	require.NoError(t, b.Build(t.Context(), l, f, nil))
+
+	require.NoError(t, l.GetClient().Create(t.Context(), &vpcapi.IPv4Namespace{
+		Name:      "ipns-other-fabric",
+		Namespace: kmetav1.NamespaceDefault,
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Topology: vpcapi.IPv4NamespaceTopology{Fabric: "other"},
+			Subnets:  []string{"10.62.0.0/16"},
+		},
+	}))
 
 	cfg, err := createVLABConfig(t.Context(), nil, nil, l.GetClient())
 	require.NoError(t, err)
@@ -441,4 +451,81 @@ func TestResolveVMSizes(t *testing.T) {
 	require.Equal(t, DefaultSizes.Server, sizes.Server)
 	require.Equal(t, VMSize{CPU: DefaultSizes.Control.CPU, RAM: 4096, Disk: DefaultSizes.Control.Disk}, sizes.Control)
 	require.Equal(t, DefaultSizes.Switch, sizes.Switch)
+}
+
+func TestExternalIgnitionStaticReturnRoutes(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		subnets []string
+		want    []string
+	}{
+		{name: "namespace subnets", subnets: []string{"10.60.0.0/16", "10.61.0.0/16"}, want: []string{"10.60.0.0/16", "10.61.0.0/16"}},
+		{name: "legacy config without subnets", want: []string{"10.0.0.0/16"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ext := ExternalsCfg{
+				NICs: map[string]ExternalNICCfg{},
+				VRFs: map[string]ExternalVRFCfg{
+					"ext-snp-01": {
+						IsStatic: true,
+						TableID:  1000,
+						StaticCfg: ExternalStaticVrfCfg{
+							Prefixes:             []string{"0.0.0.0/0"},
+							GatewayIPs:           []string{"100.2.10.0/24"},
+							SwitchIP:             "100.2.10.2",
+							NICName:              "enp2s2.10",
+							IPv4NamespaceSubnets: tt.subnets,
+						},
+					},
+				},
+			}
+
+			but, _, err := externalIgnition(fabapi.Fabricator{}, VM{Name: "virt-external"}, ext)
+			require.NoError(t, err)
+
+			for _, subnet := range tt.want {
+				require.Contains(t, but, "ip route "+subnet+" 100.2.10.2 enp2s2.10\n")
+				require.Contains(t, but, "ip route "+subnet+" 100.2.10.2 enp2s2.10 nexthop-vrf ext-snp-01\n")
+			}
+		})
+	}
+}
+
+func TestCreateVLABConfigStaticExternalIPv4NamespaceSubnets(t *testing.T) {
+	l := apiutil.NewLoader()
+	b := &VLABBuilderDefault{
+		ExtStaticCount:       1,
+		DefaultSwitchProfile: meta.SwitchProfileVS,
+	}
+	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+	f.Default()
+	require.NoError(t, b.Build(t.Context(), l, f, nil))
+
+	require.NoError(t, l.GetClient().Create(t.Context(), &vpcapi.IPv4Namespace{
+		Name:      "ipns-2",
+		Namespace: kmetav1.NamespaceDefault,
+		Spec:      vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.61.0.0/16"}},
+	}))
+
+	cfg, err := createVLABConfig(t.Context(), nil, nil, l.GetClient())
+	require.NoError(t, err)
+
+	ipns := &vpcapi.IPv4NamespaceList{}
+	require.NoError(t, l.GetClient().List(t.Context(), ipns))
+	want := []string{}
+	for _, ns := range ipns.Items {
+		if ns.Spec.Topology.Fabric == "other" {
+			continue
+		}
+		want = append(want, ns.Spec.Subnets...)
+	}
+	slices.Sort(want)
+	require.Contains(t, want, "10.61.0.0/16")
+	require.NotContains(t, want, "10.62.0.0/16")
+
+	require.Len(t, cfg.Externals.VRFs, 1)
+	for _, vrf := range cfg.Externals.VRFs {
+		require.True(t, vrf.IsStatic)
+		require.Equal(t, want, vrf.StaticCfg.IPv4NamespaceSubnets)
+	}
 }

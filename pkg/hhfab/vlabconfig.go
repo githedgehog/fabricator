@@ -243,11 +243,12 @@ type ExternalBGPVRFCfg struct {
 }
 
 type ExternalStaticVrfCfg struct {
-	Prefixes    []string `json:"prefixes"`    // the prefixes reachable via this external
-	GatewayIPs  []string `json:"gatewayIPs"`  // the addresses that can be used on the gateway to connect to this external
-	SwitchIP    string   `json:"switchIP"`    // the address on the switch on the other side of the attachment
-	NICName     string   `json:"nicName"`     // name of the NIC attachment
-	NATPoolCIDR string   `json:"natPoolCIDR"` // NAT pool CIDR that the gateway source-NATs into; installs a return route toward the switch
+	Prefixes             []string `json:"prefixes"`             // the prefixes reachable via this external
+	GatewayIPs           []string `json:"gatewayIPs"`           // the addresses that can be used on the gateway to connect to this external
+	SwitchIP             string   `json:"switchIP"`             // the address on the switch on the other side of the attachment
+	NICName              string   `json:"nicName"`              // name of the NIC attachment
+	NATPoolCIDR          string   `json:"natPoolCIDR"`          // NAT pool CIDR that the gateway source-NATs into; installs a return route toward the switch
+	IPv4NamespaceSubnets []string `json:"ipv4NamespaceSubnets"` // subnets of the IPv4 namespaces in the external's fabric; each gets a return route toward the switch
 }
 
 type ExternalVRFCfg struct {
@@ -722,6 +723,24 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			"enp2s0": NICTypeUsernet,
 		},
 	}
+	ipv4NSs := &vpcapi.IPv4NamespaceList{}
+	if err := wiring.List(ctx, ipv4NSs); err != nil {
+		return nil, fmt.Errorf("failed to list IPv4 namespaces: %w", err)
+	}
+	ipv4NSSubnetsByFabric := map[string]map[string]bool{}
+	for _, ns := range ipv4NSs.Items {
+		fabric := ns.Spec.Topology.Fabric
+		if fabric == "" {
+			fabric = wiringapi.DefaultFabric
+		}
+		if ipv4NSSubnetsByFabric[fabric] == nil {
+			ipv4NSSubnetsByFabric[fabric] = map[string]bool{}
+		}
+		for _, subnet := range ns.Spec.Subnets {
+			ipv4NSSubnetsByFabric[fabric][subnet] = true
+		}
+	}
+
 	tableID := uint32(1000)
 	icPeers := map[string]string{}
 	for _, external := range externals.Items {
@@ -764,12 +783,17 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				}
 				natPoolCIDR = prefix.Masked().String()
 			}
+			extFabric := external.Spec.Topology.Fabric
+			if extFabric == "" {
+				extFabric = wiringapi.DefaultFabric
+			}
 			cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
 				TableID:  tableID,
 				IsStatic: true,
 				StaticCfg: ExternalStaticVrfCfg{
-					Prefixes:    external.Spec.Static.Prefixes,
-					NATPoolCIDR: natPoolCIDR,
+					Prefixes:             external.Spec.Static.Prefixes,
+					NATPoolCIDR:          natPoolCIDR,
+					IPv4NamespaceSubnets: slices.Sorted(maps.Keys(ipv4NSSubnetsByFabric[extFabric])),
 				},
 			}
 		}
