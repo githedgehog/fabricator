@@ -20,6 +20,8 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	fcintapi "go.githedgehog.com/fabric/api/fcint/v1alpha1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -64,6 +66,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		coreapi.AddToScheme, appsapi.AddToScheme,
 		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
 		wiringapi.AddToScheme, vpcapi.AddToScheme, agentapi.AddToScheme, fabapi.AddToScheme,
+		fcintapi.AddToScheme, gwapi.AddToScheme,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -482,6 +485,11 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 		return fmt.Errorf("waiting for fabricator applied: %w", err)
 	}
 
+	// before waiting for ready as the gateways aren't ready until migrated
+	if err := migrateVLABGateways(ctx, kube, string(c.Fab.Status.Versions.Fabric.Controller)); err != nil {
+		return fmt.Errorf("migrating VLAB gateways: %w", err)
+	}
+
 	slog.Info("Waiting for fabricator ready, may take 2-5 minutes")
 
 	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
@@ -501,6 +509,20 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for fabricator ready: %w", err)
+	}
+
+	return nil
+}
+
+// waitFabricCtrlInitialized waits for the fabric controller of the version to refresh all objects with its defaults
+func waitFabricCtrlInitialized(ctx context.Context, kube kclient.Reader, version string) error {
+	slog.Info("Waiting for fabric controller initialized", "version", version)
+
+	if err := waitKube(ctx, kube, fcintapi.FabricControllerName, comp.FabNamespace,
+		&fcintapi.FabricController{}, func(obj *fcintapi.FabricController) (bool, error) {
+			return obj.Status.InitializedVersion == version, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabric controller initialized: %w", err)
 	}
 
 	return nil
