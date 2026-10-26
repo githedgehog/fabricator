@@ -128,6 +128,26 @@ jobs:
         run: |
           echo "$KUBE_NODE"
 
+      - name: Check gateway driver
+        env:
+          INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
+          INPUT_HYBRID: ${{ inputs.hybrid }}
+          INPUT_UPGRADE_FROM: ${{ inputs.upgradefrom }}
+        run: |
+          if [[ -n "$INPUT_GATEWAY_DRIVER" && "$INPUT_GATEWAY_DRIVER" != "kernel" && "$INPUT_GATEWAY_DRIVER" != "dpdk" ]]; then
+            echo "Unsupported gateway driver: $INPUT_GATEWAY_DRIVER" >&2
+            exit 1
+          fi
+          # TODO remove once upgrades are only supported from 26.05 onwards
+          if [[ -n "$INPUT_UPGRADE_FROM" && "$INPUT_GATEWAY_DRIVER" == "dpdk" ]]; then
+            echo "Upgrades only support the kernel gateway driver as older releases only have kernel gateways in vlab" >&2
+            exit 1
+          fi
+          if [[ "$INPUT_HYBRID" == "true" && "$INPUT_GATEWAY_DRIVER" == "dpdk" ]]; then
+            echo "Hybrid only supports the kernel gateway driver as it's set in the lab-ci wiring" >&2
+            exit 1
+          fi
+
       - name: Docker readiness check
         run: |
           for i in $(seq 1 90); do
@@ -292,6 +312,7 @@ jobs:
         env:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_MESH: ${{ inputs.mesh }}
+          INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
         if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
         run: |
           bin/hhfab init -v --dev \
@@ -314,7 +335,7 @@ jobs:
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
             --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
             --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \
-            ${{ inputs.gatewaydriver != '' && format('--gateway-driver={0}', inputs.gatewaydriver) || '' }} \
+            ${INPUT_GATEWAY_DRIVER:+--gateway-driver="$INPUT_GATEWAY_DRIVER"} \
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
