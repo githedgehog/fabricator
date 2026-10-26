@@ -58,12 +58,15 @@ const (
 	VLABNICsPerPCIBridge = 32
 	VLABPCIBridges       = 2
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
-	VLABBaseSSHPort      = 22000
-	VLABBaseDirectPort   = 22100
-	VLABTapPrefix        = "hhtap"
-	VLABBridge           = "hhbr"
-	VLABUUIDPrefix       = "77924ab4-a93b-41d4-928e-"
-	VLABUUIDTmpl         = VLABUUIDPrefix + "%012d"
+	// gateway VM NICs except the management one are on the root bus, so each is in its own IOMMU group for vfio-pci
+	VLABGatewayNICBaseSlot = 0x10
+	VLABGatewayMaxNICs     = 0x1f - VLABGatewayNICBaseSlot // 0x1f is the q35 chipset
+	VLABBaseSSHPort        = 22000
+	VLABBaseDirectPort     = 22100
+	VLABTapPrefix          = "hhtap"
+	VLABBridge             = "hhbr"
+	VLABUUIDPrefix         = "77924ab4-a93b-41d4-928e-"
+	VLABUUIDTmpl           = VLABUUIDPrefix + "%012d"
 )
 
 type VLAB struct {
@@ -1126,9 +1129,21 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
 
+				// e1000 has a single tx ring while dpdk uses one per worker plus one for the control plane
+				if vm.Type == VMTypeGateway && nicID > 0 {
+					nic = "e1000e"
+				}
+
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
 			}
-			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+			if vm.Type == VMTypeGateway && nicID > 0 {
+				if nicID > VLABGatewayMaxNICs {
+					return nil, fmt.Errorf("too many NICs for gateway VM %q: %d", name, nicID) //nolint:err113
+				}
+				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", VLABGatewayNICBaseSlot+nicID-1)
+			} else {
+				device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+			}
 
 			nic := ""
 			if netdev != "" {
@@ -1244,6 +1259,22 @@ func getPassthroughLinks(obj kclient.Object) map[string]string {
 	}
 
 	return links
+}
+
+func VLABGatewayPCI(nicID uint8) string {
+	if nicID == 0 {
+		return "0000:02:00.0"
+	}
+
+	return fmt.Sprintf("0000:00:%02x.0", VLABGatewayNICBaseSlot+nicID-1)
+}
+
+func VLABGatewayKernel(nicID uint8) string {
+	if nicID == 0 {
+		return "enp2s0"
+	}
+
+	return fmt.Sprintf("enp0s%d", VLABGatewayNICBaseSlot+nicID-1)
 }
 
 const (

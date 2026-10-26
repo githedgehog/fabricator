@@ -468,6 +468,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 			}
 
+			// vfio-pci needs an IOMMU, interrupt remapping needs the split irqchip and caching mode is for passthrough NICs,
+			// it goes right after the machine so it's ahead of all PCI devices
+			if vm.Type == VMTypeGateway {
+				idx := slices.Index(args, "-machine") + 1
+				args[idx] += ",kernel-irqchip=split"
+				args = slices.Insert(args, idx+1, "-device", "intel-iommu,intremap=on,caching-mode=on")
+			}
+
 			// Mark Flatcar VMs as VLAB in SMBIOS, where VLAB-only host config can match on it
 			// (see flatcar.VLABVirtioNamesLink). The chassis asset tag is set by nothing else and
 			// read by nothing else, unlike the vendor and product fields switch images may use.

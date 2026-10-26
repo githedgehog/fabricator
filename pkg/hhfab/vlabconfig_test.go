@@ -13,11 +13,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -271,6 +273,70 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 	for swPort, pci := range pcis {
 		parts := strings.SplitN(swPort, "/", 2)
 		require.Equal(t, NICTypePassthrough+NICTypeSep+pci, cfg.VMs[parts[0]].NICs[parts[1]], swPort)
+	}
+}
+
+func TestVLABGatewayNICs(t *testing.T) {
+	require.Equal(t, "0000:02:00.0", VLABGatewayPCI(0))
+	require.Equal(t, "enp2s0", VLABGatewayKernel(0))
+	require.Equal(t, "0000:00:10.0", VLABGatewayPCI(1))
+	require.Equal(t, "enp0s16", VLABGatewayKernel(1))
+	require.Equal(t, "0000:00:1e.0", VLABGatewayPCI(VLABGatewayMaxNICs))
+
+	nodes := []fabapi.FabNode{{
+		Name: "gateway-1",
+		Spec: fabapi.FabNodeSpec{
+			Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+			Management: fabapi.ControlNodeManagement{Interface: VLABGatewayKernel(0)},
+		},
+	}}
+
+	for _, driver := range GatewayDrivers {
+		t.Run(driver, func(t *testing.T) {
+			l := apiutil.NewLoader()
+			b := &VLABBuilderDefault{
+				GatewayLogLevel:      "info",
+				GatewayDriver:        driver,
+				DefaultSwitchProfile: meta.SwitchProfileVS,
+			}
+			f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+			f.Default()
+			require.NoError(t, b.Build(t.Context(), l, f, nodes))
+
+			gw := &gwapi.Gateway{}
+			require.NoError(t, l.GetClient().Get(t.Context(), kclient.ObjectKey{Name: "gateway-1", Namespace: kmetav1.NamespaceDefault}, gw))
+			require.Equal(t, gwapi.GatewayDriver(driver), gw.Spec.Driver)
+			require.NotEmpty(t, gw.Spec.Interfaces)
+
+			cfg, err := createVLABConfig(t.Context(), nil, nodes, l.GetClient())
+			require.NoError(t, err)
+			vlab, err := vlabFromConfig(cfg, VLABRunOpts{})
+			require.NoError(t, err)
+
+			idx := slices.IndexFunc(vlab.VMs, func(vm VM) bool { return vm.Name == "gateway-1" })
+			require.GreaterOrEqual(t, idx, 0)
+			vmNICs := vlab.VMs[idx].NICs
+			require.Contains(t, vmNICs[0], "-device e1000,")
+			require.Contains(t, vmNICs[0], ",bus="+VLABPCIBridgePrefix+"0,addr=0x0")
+
+			for name, iface := range gw.Spec.Interfaces {
+				nicID, err := getNICID(name)
+				require.NoError(t, err, name)
+				require.Equal(t, VLABGatewayPCI(uint8(nicID)), iface.PCI, name) //nolint:gosec
+
+				kernel := ""
+				if driver == GatewayDriverKernel {
+					kernel = VLABGatewayKernel(uint8(nicID)) //nolint:gosec
+				}
+				require.Equal(t, kernel, iface.Kernel, name)
+
+				var slot uint
+				_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
+				require.NoError(t, err, iface.PCI)
+				require.Contains(t, vmNICs[nicID], "-device e1000e,", name)
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), name)
+			}
+		})
 	}
 }
 

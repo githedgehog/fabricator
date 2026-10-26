@@ -398,21 +398,15 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 			ifaces := map[string]gwapi.GatewayInterface{}
 			for i := uint8(1); i <= b.GatewayUplinks; i++ {
-				switch b.GatewayDriver {
-				case GatewayDriverKernel:
-					ifaces[fmt.Sprintf("enp2s%d", i)] = gwapi.GatewayInterface{}
-					// TODO enable after migrating dataplane to a new interface format
-					// ifaces[fmt.Sprintf("port%d", i)] = gwapi.GatewayInterface{
-					// 	Kernel: fmt.Sprintf("enp2s%d", i),
-					// }
-				case GatewayDriverDPDK:
-					ifaces[fmt.Sprintf("port%d", i)] = gwapi.GatewayInterface{
-						PCI: fmt.Sprintf("0000:02:%02d.0", i),
-					}
+				iface := gwapi.GatewayInterface{PCI: VLABGatewayPCI(i)}
+				if b.GatewayDriver == GatewayDriverKernel {
+					iface.Kernel = VLABGatewayKernel(i)
 				}
+				ifaces[fmt.Sprintf("port%d", i)] = iface
 			}
 
 			if _, err := b.createGateway(ctx, gwName, gwapi.GatewaySpec{
+				Driver: gwapi.GatewayDriver(b.GatewayDriver),
 				Groups: []gwapi.GatewayGroupMembership{
 					{Name: gwapi.DefaultGatewayGroup},
 				},
@@ -742,15 +736,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			for _, gw := range gws {
 				switchPort := b.nextSwitchPort(spineName)
 
-				gwPort := fmt.Sprintf("%s/", gw.Name)
-				switch b.GatewayDriver {
-				case GatewayDriverKernel:
-					gwPort += fmt.Sprintf("enp2s%d", spineID)
-					// TODO enable after migrating dataplane to a new interface format
-					// gwPort += fmt.Sprintf("port%d", spineID)
-				case GatewayDriverDPDK:
-					gwPort += fmt.Sprintf("port%d", spineID)
-				}
+				gwPort := fmt.Sprintf("%s/port%d", gw.Name, spineID)
 
 				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
 					Gateway: &wiringapi.ConnGateway{
@@ -804,15 +790,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 				leafName := fmt.Sprintf("leaf-%02d", leafID)
 				switchPort := b.nextSwitchPort(leafName)
 
-				gwPort := fmt.Sprintf("%s/", gw.Name)
-				switch b.GatewayDriver {
-				case GatewayDriverKernel:
-					gwPort += fmt.Sprintf("enp2s%d", connectedLeafs+1)
-					// TODO enable after migrating dataplane to a new interface format
-					// gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
-				case GatewayDriverDPDK:
-					gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
-				}
+				gwPort := fmt.Sprintf("%s/port%d", gw.Name, connectedLeafs+1)
 
 				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
 					Gateway: &wiringapi.ConnGateway{
