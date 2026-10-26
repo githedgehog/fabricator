@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
+const gatewayDataplaneContainer = "dataplane"
+
 func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error {
 	insights := map[string]map[string]ExecOutputs{}
 
@@ -60,11 +62,23 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 
 		gw := map[string]ExecOutputs{}
 
+		skip := gatewayExecSkipReason(pod)
+		if skip != "" {
+			slog.Warn("Skipping gateway insights", "pod", pod.Name, "reason", skip)
+		}
+		exec := func(command ...string) ExecOutputs {
+			if skip != "" {
+				return ExecOutputs{Error: "skipped: " + skip}
+			}
+
+			return execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, command...)
+		}
+
 		// show tech includes everything the dataplane cli shows, e.g. transceivers, link and lldp neighbors
 		for _, cmd := range []string{
 			"show tech",
 		} {
-			gw["dataplane: "+cmd] = execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, "/dataplane-cli", "-c", cmd)
+			gw["dataplane: "+cmd] = exec("/dataplane-cli", "-c", cmd)
 		}
 
 		for _, cmd := range []string{
@@ -78,7 +92,7 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 			"show ip route vrf all",
 			"show ip fib vrf all",
 		} {
-			gw["frr: "+cmd] = execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, "vtysh", "-c", cmd)
+			gw["frr: "+cmd] = exec("vtysh", "-c", cmd)
 		}
 
 		insights[gwName] = gw
@@ -89,12 +103,35 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 	return nil
 }
 
+// gatewayExecSkipReason returns why execs into the dataplane container can't succeed within the retries, e.g. it's
+// crashlooping or the pod isn't schedulable, or nothing so other failures are retried and recorded as usual
+func gatewayExecSkipReason(pod corev1.Pod) string {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse && cond.Reason == corev1.PodReasonUnschedulable {
+			return "pod unschedulable: " + cond.Message
+		}
+	}
+
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name != gatewayDataplaneContainer || status.State.Waiting == nil {
+			continue
+		}
+
+		switch reason := status.State.Waiting.Reason; reason {
+		case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError", "CreateContainerError", "InvalidImageName":
+			return "dataplane container " + reason + ": " + status.State.Waiting.Message
+		}
+	}
+
+	return ""
+}
+
 func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, pod corev1.Pod, quiet bool, command ...string) ExecOutputs {
 	if !quiet {
 		slog.Debug("Executing in gateway dataplane", "pod", pod.Name, "cmd", command)
 	}
 
-	stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg, pod.Namespace, pod.Name, "dataplane", command)
+	stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg, pod.Namespace, pod.Name, gatewayDataplaneContainer, command)
 	errStr := ""
 	if err != nil {
 		slog.Error("Failed to exec in gateway dataplane", "pod", pod.Name, "cmd", command, "err", err)
