@@ -153,14 +153,15 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 		}
 	}
 
-	for i, vpc := range vpcs.Items {
+	// the peering is named after the VPC itself, the order of the list says nothing about its name
+	for _, vpc := range vpcs.Items {
 		for _, ext := range exts.Items {
 			if ext.Spec.Static != nil && proxyExts[ext.Name] {
 				continue
 			}
 			if ext.Spec.IPv4Namespace == vpc.Spec.IPv4Namespace && externalPeerableWithVPC(&ext, &vpc) {
 				subnets := slices.Collect(maps.Keys(vpc.Spec.Subnets))
-				appendExtPeeringSpec(extPeerings, i+1, ext.Name, subnets, AllZeroPrefix)
+				appendExtPeeringSpecByName(extPeerings, vpc.Name, ext.Name, subnets, AllZeroPrefix)
 			}
 		}
 	}
