@@ -14,6 +14,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
+	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -91,26 +92,34 @@ func migrateVLABGatewayPorts(ctx context.Context, kube kclient.Client, waitRefre
 		return fmt.Errorf("listing gateways: %w", err)
 	}
 
+	// the new fabric controller writes to the same objects, so all updates are retried on conflict with a fresh copy
 	migrated := map[string]gwapi.Gateway{}
 	for _, gw := range gws.Items {
 		if hw[gw.Name] || gw.Spec.Driver != gwapi.GatewayDriverKernel {
 			continue
 		}
 
-		renames, err := migrateVLABGatewayIfaces(&gw)
-		if err != nil {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := kube.Get(ctx, kclient.ObjectKeyFromObject(&gw), &gw); err != nil {
+				return fmt.Errorf("getting: %w", err)
+			}
+
+			renames, err := migrateVLABGatewayIfaces(&gw)
+			if err != nil || len(renames) == 0 {
+				return err
+			}
+
+			slog.Info("Migrating VLAB gateway interfaces", "gateway", gw.Name, "renames", renames)
+
+			if err := kube.Update(ctx, &gw); err != nil {
+				return fmt.Errorf("updating: %w", err)
+			}
+
+			return nil
+		}); err != nil {
 			return fmt.Errorf("migrating gateway %s: %w", gw.Name, err)
 		}
 		migrated[gw.Name] = gw
-		if len(renames) == 0 {
-			continue
-		}
-
-		slog.Info("Migrating VLAB gateway interfaces", "gateway", gw.Name, "renames", renames)
-
-		if err := kube.Update(ctx, &gw); err != nil {
-			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
-		}
 	}
 
 	if err := kube.List(ctx, conns); err != nil {
@@ -122,37 +131,54 @@ func migrateVLABGatewayPorts(ctx context.Context, kube kclient.Client, waitRefre
 			continue
 		}
 
-		changed := false
-		for idx, link := range conn.Spec.Gateway.Links {
-			gwName, iface, _ := strings.Cut(link.Gateway.Port, "/")
-			gw, ok := migrated[gwName]
-			if !ok {
-				continue
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := kube.Get(ctx, kclient.ObjectKeyFromObject(&conn), &conn); err != nil {
+				return fmt.Errorf("getting: %w", err)
 			}
 
-			port, _, err := newVLABGatewayPort(iface)
-			if err != nil {
-				return fmt.Errorf("migrating connection %s: %w", conn.Name, err)
-			}
-			if _, exist := gw.Spec.Interfaces[port]; port == "" || !exist {
-				continue
+			changed, err := migrateVLABGatewayLinks(&conn, migrated)
+			if err != nil || !changed {
+				return err
 			}
 
-			conn.Spec.Gateway.Links[idx].Gateway.Port = gwName + "/" + port
-			changed = true
-		}
-		if !changed {
-			continue
-		}
+			slog.Info("Migrating VLAB gateway connection", "connection", conn.Name)
 
-		slog.Info("Migrating VLAB gateway connection", "connection", conn.Name)
+			if err := kube.Update(ctx, &conn); err != nil {
+				return fmt.Errorf("updating: %w", err)
+			}
 
-		if err := kube.Update(ctx, &conn); err != nil {
-			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("migrating connection %s: %w", conn.Name, err)
 		}
 	}
 
 	return nil
+}
+
+// migrateVLABGatewayLinks renames the old style ports of the migrated gateways in the connection
+func migrateVLABGatewayLinks(conn *wiringapi.Connection, migrated map[string]gwapi.Gateway) (bool, error) {
+	changed := false
+	for idx, link := range conn.Spec.Gateway.Links {
+		gwName, iface, _ := strings.Cut(link.Gateway.Port, "/")
+		gw, ok := migrated[gwName]
+		if !ok {
+			continue
+		}
+
+		port, _, err := newVLABGatewayPort(iface)
+		if err != nil {
+			return false, err
+		}
+		if _, exist := gw.Spec.Interfaces[port]; port == "" || !exist {
+			continue
+		}
+
+		conn.Spec.Gateway.Links[idx].Gateway.Port = gwName + "/" + port
+		changed = true
+	}
+
+	return changed, nil
 }
 
 // newVLABGatewayPort returns portN and N for an old style enp2sN interface or nothing for any other one
