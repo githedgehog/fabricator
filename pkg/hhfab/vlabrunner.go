@@ -1136,7 +1136,33 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
-				if err := ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info); err != nil {
+				bootID, err := sshBootID(ctx, ssh)
+				if err != nil {
+					return err
+				}
+
+				err = ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info)
+				if err != nil && opts.AutoUpgrade {
+					rebooted, rerr := waitNodeReboot(ctx, ssh, bootID)
+					if rerr != nil {
+						return fmt.Errorf("running node %s: %w: waiting for reboot: %w", mode, err, rerr)
+					}
+					if rebooted {
+						slog.Info("Node rebooted to apply kernel args, re-running "+mode, "vm", vm.Name, "type", vm.Type)
+
+						ftp, cleanup, err = ssh.NewSftp()
+						if cleanup != nil {
+							defer cleanup() //nolint:errcheck
+						}
+						if err != nil {
+							return fmt.Errorf("re-creating sftp: %w", err)
+						}
+						defer ftp.Close()
+
+						err = ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info)
+					}
+				}
+				if err != nil {
 					return fmt.Errorf("running node %s: %w", mode, err)
 				}
 				slog.Info("Node "+mode+" completed", "vm", vm.Name, "type", vm.Type)
@@ -1253,6 +1279,48 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
 
 	return nil
+}
+
+func sshBootID(ctx context.Context, ssh *sshutil.Config) (string, error) {
+	out, _, err := ssh.Run(ctx, "cat /proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", fmt.Errorf("reading boot id: %w", err)
+	}
+
+	return strings.TrimSpace(out), nil
+}
+
+// waitNodeReboot checks if the installer rebooted the node during the run that started with the boot id, it's the
+// first field of the reboot marker, and waits for the node to come back
+func waitNodeReboot(ctx context.Context, ssh *sshutil.Config, bootID string) (bool, error) {
+	out, _, err := ssh.Run(ctx, "cat "+recipe.RebootMarkerFile)
+	if _, exited := sshutil.ExitStatus(err); exited {
+		return false, nil
+	}
+	if markerBootID, _, _ := strings.Cut(out, " "); err == nil && markerBootID != bootID {
+		return false, nil
+	}
+
+	// marker from this run or the node is already going down
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	for {
+		if err := ssh.Wait(ctx); err != nil {
+			return false, fmt.Errorf("waiting for ssh: %w", err)
+		}
+
+		current, err := sshBootID(ctx, ssh)
+		if err == nil && current != bootID {
+			return true, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return false, fmt.Errorf("waiting for reboot: %w", ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 func sshReadMarker(client *sftp.Client) (string, error) {
