@@ -18,6 +18,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -277,17 +278,11 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 }
 
 func TestVLABGatewayNICs(t *testing.T) {
-	require.Equal(t, "0000:02:00.0", VLABGatewayPCI(0))
-	require.Equal(t, "enp2s0", VLABGatewayKernel(0))
-	require.Equal(t, "0000:00:10.0", VLABGatewayPCI(1))
-	require.Equal(t, "enp0s16", VLABGatewayKernel(1))
-	require.Equal(t, "0000:00:1e.0", VLABGatewayPCI(VLABGatewayMaxNICs))
-
 	nodes := []fabapi.FabNode{{
 		Name: "gateway-1",
 		Spec: fabapi.FabNodeSpec{
 			Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
-			Management: fabapi.ControlNodeManagement{Interface: VLABGatewayKernel(0)},
+			Management: fabapi.ControlNodeManagement{Interface: vlabcomp.GatewayKernel(0)},
 		},
 	}}
 
@@ -322,11 +317,11 @@ func TestVLABGatewayNICs(t *testing.T) {
 			for name, iface := range gw.Spec.Interfaces {
 				nicID, err := getNICID(name)
 				require.NoError(t, err, name)
-				require.Equal(t, VLABGatewayPCI(uint8(nicID)), iface.PCI, name) //nolint:gosec
+				require.Equal(t, vlabcomp.GatewayPCI(uint8(nicID)), iface.PCI, name) //nolint:gosec
 
 				kernel := ""
 				if driver == GatewayDriverKernel {
-					kernel = VLABGatewayKernel(uint8(nicID)) //nolint:gosec
+					kernel = vlabcomp.GatewayKernel(uint8(nicID)) //nolint:gosec
 				}
 				require.Equal(t, kernel, iface.Kernel, name)
 

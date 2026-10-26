@@ -19,6 +19,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -398,9 +399,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 			ifaces := map[string]gwapi.GatewayInterface{}
 			for i := uint8(1); i <= b.GatewayUplinks; i++ {
-				iface := gwapi.GatewayInterface{PCI: VLABGatewayPCI(i)}
+				iface := gwapi.GatewayInterface{PCI: vlabcomp.GatewayPCI(i)}
 				if b.GatewayDriver == GatewayDriverKernel {
-					iface.Kernel = VLABGatewayKernel(i)
+					iface.Kernel = vlabcomp.GatewayKernel(i)
 				}
 				ifaces[fmt.Sprintf("port%d", i)] = iface
 			}
