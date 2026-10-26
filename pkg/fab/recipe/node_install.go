@@ -44,7 +44,19 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
+	checkGateway := false
 	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+		ubuntu, err := isUbuntu()
+		if err != nil {
+			return fmt.Errorf("checking os: %w", err)
+		}
+		if ubuntu {
+			slog.Warn("Skipping gateway kernel args and hugepages checks on ubuntu, make sure they're set", "args", gateway.KernelArgs())
+		}
+		checkGateway = !ubuntu
+	}
+
+	if checkGateway {
 		if err := ensureKernelArgs(ctx, gateway.KernelArgKeys, gateway.KernelArgs()); err != nil {
 			return fmt.Errorf("ensuring kernel args: %w", err)
 		}
@@ -78,7 +90,7 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 
 	// kubelet only advertises the hugepages available when it starts, joining k8s (re)starts it
-	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+	if checkGateway {
 		if err := checkHugePages(1<<20, gateway.HugePages1G); err != nil { // 1G
 			return err
 		}
