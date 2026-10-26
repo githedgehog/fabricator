@@ -4,6 +4,8 @@
 package recipe
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -87,6 +89,15 @@ func TestSetKernelArgs(t *testing.T) {
 			require.Equal(t, tt.want, string(again), "not idempotent")
 		})
 	}
+}
+
+func TestCheckIOMMU(t *testing.T) {
+	dir := t.TempDir()
+	require.Error(t, checkIOMMU(filepath.Join(dir, "missing")))
+	require.Error(t, checkIOMMU(dir))
+
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "dmar0"), 0o755))
+	require.NoError(t, checkIOMMU(dir))
 }
 
 func TestKernelArgsApplied(t *testing.T) {
