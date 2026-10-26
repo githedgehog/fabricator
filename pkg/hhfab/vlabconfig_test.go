@@ -332,12 +332,17 @@ func TestCreateVLABConfigDPDKGatewayIOMMU(t *testing.T) {
 					_, err := fmt.Sscanf(ifaceName, "port%d", &nicID)
 					require.NoError(t, err, ifaceName)
 
-					// the address the gateway is told is where the VM's NIC is
-					var slot uint
-					_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
+					// the address the gateway is told is the bus behind the NIC's root port, numbered
+					// after the PCI bridges' buses
+					var bus uint
+					_, err = fmt.Sscanf(iface.PCI, "0000:%02x:00.0", &bus)
 					require.NoError(t, err, iface.PCI)
-					require.Contains(t, vm.NICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), vm.Name+"/"+ifaceName)
-					require.Contains(t, vm.NICs[nicID], "-device e1000e,", vm.Name+"/"+ifaceName)
+					require.Equal(t, 2*VLABPCIBridges+nicID, bus, vm.Name+"/"+ifaceName)
+					port := fmt.Sprintf("rp%02d", nicID)
+					require.Contains(t, vm.NICs[nicID], fmt.Sprintf("-device pcie-root-port,id=%s,", port), vm.Name+"/"+ifaceName)
+					require.Contains(t, vm.NICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x ", VLABIOMMUNICBaseSlot+nicID), vm.Name+"/"+ifaceName)
+					require.Contains(t, vm.NICs[nicID], "-device igb,", vm.Name+"/"+ifaceName)
+					require.True(t, strings.HasSuffix(vm.NICs[nicID], ",bus="+port+",addr=0x0"), vm.NICs[nicID])
 				}
 			}
 			require.Equal(t, 2, gws)

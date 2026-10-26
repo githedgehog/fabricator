@@ -60,9 +60,12 @@ const (
 	VLABPCIBridges       = 2
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
 	// A gateway VM with a virtual IOMMU keeps its management NIC behind the PCI bridge and puts
-	// its other NICs on the root bus from this slot on. Everything behind a conventional PCI
-	// bridge shares one IOMMU group, and vfio-pci can only hand a group to DPDK whole, so a
-	// dataplane NIC there would take the management NIC with it.
+	// each of its other NICs behind a PCIe root port on the root bus, from this slot on.
+	// Everything behind a conventional PCI bridge shares one IOMMU group, and vfio-pci can only
+	// hand a group to DPDK whole, so a dataplane NIC there would take the management NIC with it.
+	// The root port is for the igb: it can do SR-IOV, and QEMU reserves the slots its virtual
+	// functions would take on its bus, 16 and 17 slots on, which an igb in the next slot collides
+	// with.
 	VLABIOMMUNICBaseSlot = 0x10
 	VLABIOMMUMaxNICs     = 0x1f - VLABIOMMUNICBaseSlot // slot 0x1f is the q35 LPC/SATA/SMBus
 	VLABBaseSSHPort      = 22000
@@ -71,6 +74,9 @@ const (
 	VLABBridge           = "hhbr"
 	VLABUUIDPrefix       = "77924ab4-a93b-41d4-928e-"
 	VLABUUIDTmpl         = VLABUUIDPrefix + "%012d"
+
+	// Root ports need distinct (chassis, slot) pairs; the PCI bridges are chassis 1.
+	VLABIOMMURootPortChassis = 2
 )
 
 type VLAB struct {
@@ -1120,12 +1126,14 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					// sets what the guest sees, it does not limit the traffic
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
-				// The DPDK driver gives each port a transmit queue per worker and one more for
-				// the control plane. The e1000 (82540EM) has a single transmit ring, though its
-				// DPDK driver advertises two, so what is sent on the second never leaves; the
-				// e1000e (82574L) has two.
+				// The DPDK driver gives each port a receive and a transmit queue per worker and one
+				// more of each for the control plane, and spreads traffic over the workers with
+				// RSS. The e1000 (82540EM) has a single transmit ring, though its DPDK driver
+				// advertises two, so what is sent on the second never leaves; the e1000e (82574L)
+				// has two rings and no RSS, so it runs one worker. The igb (82576) has 16 queue
+				// pairs and RSS.
 				if vm.IOMMU && nicID > 0 {
-					nic = "e1000e"
+					nic = "igb"
 				}
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
@@ -1134,7 +1142,9 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				if nicID > VLABIOMMUMaxNICs {
 					return nil, fmt.Errorf("too many NICs for VM %q with IOMMU: %d", name, nicID) //nolint:goerr113
 				}
-				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", VLABIOMMUNICBaseSlot+nicID)
+				port := fmt.Sprintf("rp%02d", nicID)
+				device = fmt.Sprintf("pcie-root-port,id=%s,chassis=%d,slot=%d,bus=pcie.0,addr=0x%x -device %s,bus=%s,addr=0x0",
+					port, VLABIOMMURootPortChassis, nicID, VLABIOMMUNICBaseSlot+nicID, device, port)
 			} else {
 				device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 			}
@@ -1192,10 +1202,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	}, nil
 }
 
-// VLABGatewayDPDKPCI is the PCI address a DPDK gateway VM's NIC nicID has: on the root bus, see
-// VLABIOMMUNICBaseSlot.
+// VLABGatewayDPDKPCI is the PCI address a DPDK gateway VM's NIC nicID has: alone on the bus
+// behind its root port, see VLABIOMMUNICBaseSlot. The firmware numbers buses depth first in slot
+// order, and the root ports come after the DMI-to-PCI bridges, each with a PCI bridge behind it,
+// so the bridges take buses 1 to 2*VLABPCIBridges.
 func VLABGatewayDPDKPCI(nicID uint) string {
-	return fmt.Sprintf("0000:00:%02x.0", VLABIOMMUNICBaseSlot+nicID)
+	return fmt.Sprintf("0000:%02x:00.0", 2*VLABPCIBridges+nicID)
 }
 
 // getDPDKGateways returns the gateways that use the DPDK driver: those with an interface given by
