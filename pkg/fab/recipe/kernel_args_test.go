@@ -15,10 +15,11 @@ func TestSetKernelArgs(t *testing.T) {
 	args := []string{"iommu=pt", "hugepagesz=1G", "hugepages=4"}
 
 	for _, tt := range []struct {
-		name string
-		cfg  string
-		args []string
-		want string
+		name    string
+		cfg     string
+		args    []string
+		want    string
+		wantErr bool
 	}{
 		{
 			name: "no-file",
@@ -64,11 +65,26 @@ func TestSetKernelArgs(t *testing.T) {
 			args: args,
 			want: "if [ \"$x\" ]; then\n  set linux_append=\"$linux_append hugepages=2\"\nfi\nset linux_append=\"$linux_append iommu=pt hugepagesz=1G hugepages=4\"\n",
 		},
+		{
+			name:    "escaped-quotes",
+			cfg:     "set linux_append=\"$linux_append foo=\\\"a b\\\" hugepages=2\"\n",
+			args:    args,
+			wantErr: true,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := setKernelArgs([]byte(tt.cfg), testKernelArgKeys, tt.args)
+			got, err := setKernelArgs([]byte(tt.cfg), testKernelArgKeys, tt.args)
+			if tt.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+			require.NoError(t, err)
 			require.Equal(t, tt.want, string(got))
-			require.Equal(t, tt.want, string(setKernelArgs(got, testKernelArgKeys, tt.args)), "not idempotent")
+
+			again, err := setKernelArgs(got, testKernelArgKeys, tt.args)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(again), "not idempotent")
 		})
 	}
 }
