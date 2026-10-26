@@ -113,6 +113,7 @@ type ExternalStaticVrfCfg struct {
 	SwitchIP    string   `json:"switchIP"`    // the address on the switch on the other side of the attachment
 	NICName     string   `json:"nicName"`     // name of the NIC attachment
 	NATPoolCIDR string   `json:"natPoolCIDR"` // NAT pool CIDR that the gateway source-NATs into; installs a return route toward the switch
+	VPCCIDRs    []string `json:"vpcCIDRs"`    // IPv4 namespace subnets that VPC servers use; each gets a return route toward the switch
 }
 
 type ExternalVRFCfg struct {
@@ -547,6 +548,18 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			"enp2s0": NICTypeUsernet,
 		},
 	}
+	ipv4NSs := &vpcapi.IPv4NamespaceList{}
+	if err := wiring.List(ctx, ipv4NSs); err != nil {
+		return nil, fmt.Errorf("failed to list IPv4 namespaces: %w", err)
+	}
+	vpcCIDRSet := map[string]bool{}
+	for _, ns := range ipv4NSs.Items {
+		for _, subnet := range ns.Spec.Subnets {
+			vpcCIDRSet[subnet] = true
+		}
+	}
+	vpcCIDRs := slices.Sorted(maps.Keys(vpcCIDRSet))
+
 	tableID := uint32(1000)
 	icPeers := map[string]string{}
 	for _, external := range externals.Items {
@@ -595,6 +608,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				StaticCfg: ExternalStaticVrfCfg{
 					Prefixes:    external.Spec.Static.Prefixes,
 					NATPoolCIDR: natPoolCIDR,
+					VPCCIDRs:    vpcCIDRs,
 				},
 			}
 		}

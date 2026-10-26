@@ -944,7 +944,19 @@ func execHelper(ctx context.Context, baseDir string, args []string) error {
 	return nil
 }
 
+// defaultVPCCIDR is the return route used for saved VLAB configs that predate VPCCIDRs.
+const defaultVPCCIDR = "10.0.0.0/16"
+
 func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, []byte, error) {
+	vrfs := make(map[string]ExternalVRFCfg, len(ext.VRFs))
+	for name, vrf := range ext.VRFs {
+		if vrf.IsStatic && len(vrf.StaticCfg.VPCCIDRs) == 0 {
+			vrf.StaticCfg.VPCCIDRs = []string{defaultVPCCIDR}
+		}
+		vrfs[name] = vrf
+	}
+	ext.VRFs = vrfs
+
 	but, err := tmplutil.FromTemplate("butane-external", externalButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
