@@ -22,6 +22,7 @@ const (
 	oemGrubCfg        = "/oem/grub.cfg"
 	procCmdline       = "/proc/cmdline"
 	procBootID        = "/proc/sys/kernel/random/boot_id"
+	sysClassIOMMU     = "/sys/class/iommu"
 	linuxAppendPrefix = `set linux_append="`
 )
 
@@ -151,6 +152,25 @@ func kernelArgsApplied(cmdline string, keys, args []string) bool {
 	}
 
 	return slices.Equal(applied, args)
+}
+
+// checkIOMMU fails without an IOMMU, which needs both the kernel args and VT-d or AMD-Vi enabled in the firmware
+func checkIOMMU(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading %q: %w", dir, err)
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no IOMMU found, enable VT-d or AMD-Vi in the firmware") //nolint:err113
+	}
+
+	iommus := []string{}
+	for _, entry := range entries {
+		iommus = append(iommus, entry.Name())
+	}
+	slog.Info("IOMMU found", "iommus", iommus)
+
+	return nil
 }
 
 // checkHugePages only checks the hugepages as they're reserved on boot by the kernel args, allocating them later

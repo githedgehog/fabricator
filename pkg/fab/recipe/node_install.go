@@ -60,6 +60,10 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		if err := ensureKernelArgs(ctx, gateway.KernelArgKeys, gateway.KernelArgs()); err != nil {
 			return fmt.Errorf("ensuring kernel args: %w", err)
 		}
+
+		if err := checkIOMMU(sysClassIOMMU); err != nil {
+			return err
+		}
 	}
 
 	if err := checkIfaceAddresses(c.Node.Spec.Management.Interface,
