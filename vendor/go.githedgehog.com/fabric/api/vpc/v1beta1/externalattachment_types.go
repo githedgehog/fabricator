@@ -34,8 +34,10 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type ACLProtocol string
-type ACLAction string
+type (
+	ACLProtocol string
+	ACLAction   string
+)
 
 const (
 	ACLProtocolIP    ACLProtocol = "ip"
@@ -254,6 +256,29 @@ type ExternalAttachmentNeighbor struct {
 	// IP is the IP address of the BGP neighbor to peer with (without prefix length).
 	// Leave it and switch.ip empty for a BGP unnumbered session over IPv6 link-local addresses
 	IP string `json:"ip,omitempty"`
+	// PrefixLimit (optional) limits the prefixes accepted from the neighbor
+	// +optional
+	PrefixLimit *ExternalAttachmentPrefixLimit `json:"prefixLimit,omitempty"`
+}
+
+// ExternalAttachmentPrefixLimit limits the prefixes accepted from a BGP neighbor, counted after the inbound filters
+type ExternalAttachmentPrefixLimit struct {
+	// Max is the most prefixes accepted. Above it the session is closed, unless warningOnly is set
+	// +kubebuilder:validation:Minimum=1
+	Max uint32 `json:"max"`
+	// RestartMinutes (optional) is how long the session stays closed after going above max, 5 by default.
+	// Raising max doesn't open the session earlier, removing the limit does. Can't be set with warningOnly
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	RestartMinutes uint16 `json:"restartMinutes,omitempty"`
+	// WarningThresholdPct (optional) is the percentage of max from which the switch logs a warning, 75 by default
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	WarningThresholdPct uint8 `json:"warningThresholdPct,omitempty"`
+	// WarningOnly (optional) keeps the session open above max, so that going above it is only logged
+	// +optional
+	WarningOnly bool `json:"warningOnly,omitempty"`
 }
 
 // ExternalAttachmentStatic defines parameters used for staticexternal attachments
@@ -294,7 +319,7 @@ type ExternalAttachment struct {
 	Status ExternalAttachmentStatus `json:"status,omitempty"`
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ExternalAttachmentList contains a list of ExternalAttachment
 type ExternalAttachmentList struct {
@@ -380,10 +405,22 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		}
 		if attach.Spec.Switch.IP != "" {
 			if _, _, err := net.ParseCIDR(attach.Spec.Switch.IP); err != nil {
-				return nil, errors.New("switch.ip is not a valid IP CIDR") //nolint: goerr113
+				return nil, errors.New("switch.ip is not a valid IP CIDR")
 			}
 			if ip := net.ParseIP(attach.Spec.Neighbor.IP); ip == nil {
-				return nil, errors.New("neighbor.ip is not a valid IP address") //nolint: goerr113
+				return nil, errors.New("neighbor.ip is not a valid IP address")
+			}
+		}
+		if limit := attach.Spec.Neighbor.PrefixLimit; limit != nil {
+			if limit.Max == 0 {
+				return nil, fmt.Errorf("neighbor.prefixLimit.max must be at least 1") //nolint:err113
+			}
+			if limit.WarningThresholdPct > 100 {
+				return nil, fmt.Errorf("neighbor.prefixLimit.warningThresholdPct must be at most 100") //nolint:err113
+			}
+			// the switch refuses a restart timer on a session it never closes
+			if limit.WarningOnly && limit.RestartMinutes != 0 {
+				return nil, fmt.Errorf("neighbor.prefixLimit.restartMinutes must not be set with warningOnly") //nolint:err113
 			}
 		}
 
@@ -418,7 +455,7 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		if attach.Spec.Switch.IP != "" || attach.Spec.Switch.VLAN != 0 {
 			return nil, errors.Errorf("switch parameters must not be set for static external attachment")
 		}
-		if attach.Spec.Neighbor.ASN != 0 || attach.Spec.Neighbor.IP != "" {
+		if attach.Spec.Neighbor.ASN != 0 || attach.Spec.Neighbor.IP != "" || attach.Spec.Neighbor.PrefixLimit != nil {
 			return nil, errors.Errorf("neighbor parameters must not be set for static external attachment")
 		}
 		if attach.Spec.Static.RemoteIP == "" {
@@ -426,14 +463,14 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		}
 		_, err := netip.ParseAddr(attach.Spec.Static.RemoteIP)
 		if err != nil {
-			return nil, errors.New("static.remoteIP is not a valid IP address") //nolint: goerr113
+			return nil, errors.New("static.remoteIP is not a valid IP address")
 		}
 		if (attach.Spec.Static.IP == "" && !attach.Spec.Static.Proxy) || (attach.Spec.Static.IP != "" && attach.Spec.Static.Proxy) {
 			return nil, errors.Errorf("either static.ip or static.proxy must be set for static external attachment")
 		}
 		if attach.Spec.Static.IP != "" {
 			if _, _, err := net.ParseCIDR(attach.Spec.Static.IP); err != nil {
-				return nil, errors.New("static.ip is not a valid IP CIDR") //nolint: goerr113
+				return nil, errors.New("static.ip is not a valid IP CIDR")
 			}
 		}
 		// SONiC's FRR cannot attach BFD to a static route, only to a BGP session

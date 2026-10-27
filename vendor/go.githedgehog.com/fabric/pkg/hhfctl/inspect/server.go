@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/util/pointer"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -52,7 +51,7 @@ func (out *ServerOut) MarshalText(_ ServerIn, now time.Time) (string, error) {
 	if len(out.Connections) > 0 {
 		str.WriteString("Connections:\n")
 
-		connData := [][]string{}
+		connData := [][]string{} //nolint:prealloc
 		connNames := lo.Keys(out.Connections)
 		for _, connName := range connNames {
 			conn := out.Connections[connName]
@@ -74,15 +73,14 @@ func (out *ServerOut) MarshalText(_ ServerIn, now time.Time) (string, error) {
 	if len(out.VPCAttachments) > 0 {
 		str.WriteString("VPC Attachments:\n")
 
-		attachData := [][]string{}
+		attachData := [][]string{} //nolint:prealloc
 		attachNames := lo.Keys(out.VPCAttachments)
 		for _, attachName := range attachNames {
 			attach := out.VPCAttachments[attachName]
 
 			subnet := ""
 			vlan := ""
-			vpcName := strings.SplitN(attach.Subnet, "/", 2)[0]
-			subnetName := strings.SplitN(attach.Subnet, "/", 2)[1]
+			vpcName, subnetName, _ := strings.Cut(attach.Subnet, "/")
 			if vpc, ok := out.AttachedVPCs[vpcName]; ok {
 				if vpcSubnet, ok := vpc.Subnets[subnetName]; ok {
 					subnet = vpcSubnet.Subnet
@@ -139,7 +137,7 @@ func Server(ctx context.Context, kube kclient.Reader, in ServerIn) (*ServerOut, 
 	}
 
 	for _, conn := range conns.Items {
-		out.Connections[conn.Name] = pointer.To(conn.Spec)
+		out.Connections[conn.Name] = new(conn.Spec)
 
 		vpcAttaches := &vpcapi.VPCAttachmentList{}
 		if err := kube.List(ctx, vpcAttaches, kclient.MatchingLabels{
@@ -149,16 +147,16 @@ func Server(ctx context.Context, kube kclient.Reader, in ServerIn) (*ServerOut, 
 		}
 
 		for _, vpcAttach := range vpcAttaches.Items {
-			out.VPCAttachments[vpcAttach.Name] = pointer.To(vpcAttach.Spec)
+			out.VPCAttachments[vpcAttach.Name] = new(vpcAttach.Spec)
 
-			vpcName := strings.SplitN(vpcAttach.Spec.Subnet, "/", 2)[0]
+			vpcName, _, _ := strings.Cut(vpcAttach.Spec.Subnet, "/")
 
 			vpc := &vpcapi.VPC{}
 			if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
 				return nil, errors.Wrapf(err, "cannot get VPC %s", vpcName)
 			}
 
-			out.AttachedVPCs[vpcName] = pointer.To(vpc.Spec)
+			out.AttachedVPCs[vpcName] = new(vpc.Spec)
 		}
 	}
 
