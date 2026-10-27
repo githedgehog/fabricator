@@ -237,12 +237,12 @@ func TestInitConfig(t *testing.T) {
 				DefaultPasswordHash:   "$5$bar",
 				DefaultAuthorizedKeys: []string{"baz"},
 				IncludeONIE:           true,
-				RegUpstream: &fabapi.ControlConfigRegistryUpstream{
+				RegUpstream: &fabapi.ControlConfigRegistryUpstream{ //nolint:gosec // test credentials
 					Repo:        "repo",
 					Prefix:      "prefix",
 					NoTLSVerify: true,
-					Username:    "username",
-					Password:    "password",
+					Username:    "user: name",
+					Password:    `!pa"ss\word #1`,
 				},
 			},
 			expectedFab: fabapi.Fabricator{
@@ -252,12 +252,12 @@ func TestInitConfig(t *testing.T) {
 					Config: fabapi.FabConfig{
 						Registry: fabapi.RegistryConfig{
 							Mode: fabapi.RegistryModeUpstream,
-							Upstream: &fabapi.ControlConfigRegistryUpstream{
+							Upstream: &fabapi.ControlConfigRegistryUpstream{ //nolint:gosec // test credentials
 								Repo:        "repo",
 								Prefix:      "prefix",
 								NoTLSVerify: true,
-								Username:    "username",
-								Password:    "password",
+								Username:    "user: name",
+								Password:    `!pa"ss\word #1`,
 							},
 						},
 						Control: fabapi.ControlConfig{
