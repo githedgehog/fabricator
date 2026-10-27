@@ -24,10 +24,10 @@ const (
 // Gateway VM NICs except the management one are on the root bus, so each is in its own IOMMU group for vfio-pci.
 // The igb NICs expose SR-IOV VFs at PF devfn + 0x80 with stride 2, i.e. in slots PF+16 and PF+17, and QEMU 10.x
 // rejects a PF whose VFs overflow the bus or overlap another PF's VFs, so the PF slots are spaced by 2. The first
-// slot is the one after the fixed devices (virtio rng and blk, two DMI bridges) and the last is 0xd, as slot 0xe
-// puts a VF on the q35 LPC device at slot 31.
+// slot is the one after the fixed devices (virtio rng and blk, the installer device in the ISO and USB build modes,
+// two DMI bridges) and the last is 0xd, as slot 0xe puts a VF on the q35 LPC device at slot 31.
 const (
-	GatewayNICBaseSlot = 0x6
+	GatewayNICBaseSlot = 0x7
 	GatewayNICSlotStep = 2
 	gatewayNICLastSlot = 0xd
 	GatewayMaxNICs     = (gatewayNICLastSlot-GatewayNICBaseSlot)/GatewayNICSlotStep + 1
