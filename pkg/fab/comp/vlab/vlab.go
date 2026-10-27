@@ -25,7 +25,9 @@ const (
 	// a NIC behind its own PCIe root port on the root bus is in its own IOMMU group for vfio-pci and has the port's
 	// bus for its SR-IOV VFs, e.g. igb's
 	RootPortBaseSlot = 0x10
-	MaxRootPorts     = 0x1f - RootPortBaseSlot // 0x1f is the q35 chipset
+	// each root port with an I/O BAR device behind it, e.g. igb, takes a 4K I/O window, so the firmware only fits
+	// about 9 next to the PCI bridges and rejects the NICs over it
+	MaxRootPorts = 8
 	// buses 1 to 4 are the two DMI-to-PCI bridges with the PCI bridges behind them
 	RootPortBaseBus = 5
 )
