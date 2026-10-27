@@ -158,7 +158,7 @@ func domainIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 		return skipOnNoDomains(err)
 	}
 
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, map[string]*vpcapi.VPCPeeringSpec{}, nil)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, map[string]*vpcapi.VPCPeeringSpec{}, nil, nil)
 }
 
 // A VPC of each domain is peered with a VPC on the shared leaf: each reaches the shared VPC, and
@@ -173,7 +173,7 @@ func domainSharedLeafPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	appendVpcPeeringSpecByName(vpcPeerings, sc.firstOnly[0].Name, sc.shared[0].Name, []string{}, []string{})
 	appendVpcPeeringSpecByName(vpcPeerings, sc.secondOnly[0].Name, sc.shared[0].Name, []string{}, []string{})
 
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, vpcPeerings, nil)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, vpcPeerings, nil, nil)
 }
 
 // Every pair of VPCs that share a domain is peered, which is all the fabric accepts: the VPCs of
@@ -185,7 +185,7 @@ func domainFullMeshPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return skipOnNoDomains(err)
 	}
 
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), nil)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), nil, nil)
 }
 
 // Every VPC is peered with the Externals of its own domains, on top of the mesh of VPCs that share
@@ -206,5 +206,5 @@ func domainExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return true, nil, nil
 	}
 
-	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), extPeerings)
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, sc.meshPeerings(), extPeerings, nil)
 }
