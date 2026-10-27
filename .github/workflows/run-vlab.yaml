@@ -131,7 +131,6 @@ jobs:
       - name: Check gateway driver
         env:
           INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
-          INPUT_HYBRID: ${{ inputs.hybrid }}
           INPUT_UPGRADE_FROM: ${{ inputs.upgradefrom }}
         run: |
           if [[ -n "$INPUT_GATEWAY_DRIVER" && "$INPUT_GATEWAY_DRIVER" != "kernel" && "$INPUT_GATEWAY_DRIVER" != "dpdk" ]]; then
@@ -141,10 +140,6 @@ jobs:
           # TODO remove once upgrades are only supported from 26.05 onwards
           if [[ -n "$INPUT_UPGRADE_FROM" && "$INPUT_GATEWAY_DRIVER" == "dpdk" ]]; then
             echo "Upgrades only support the kernel gateway driver as older releases only have kernel gateways in vlab" >&2
-            exit 1
-          fi
-          if [[ "$INPUT_HYBRID" == "true" && "$INPUT_GATEWAY_DRIVER" == "dpdk" ]]; then
-            echo "Hybrid only supports the kernel gateway driver as it's set in the lab-ci wiring" >&2
             exit 1
           fi
 
@@ -339,6 +334,8 @@ jobs:
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
+        env:
+          INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
         run: |
           # shellcheck source=/dev/null
@@ -349,7 +346,8 @@ jobs:
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml" \
-            ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }}
+            ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }} \
+            ${INPUT_GATEWAY_DRIVER:+--ws gatewayDriver="$INPUT_GATEWAY_DRIVER"}
 
       - name: Print hhfab versions and generate diagrams
         run: |
