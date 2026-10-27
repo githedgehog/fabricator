@@ -13,6 +13,7 @@ import (
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilexec "k8s.io/client-go/util/exec"
+	"k8s.io/streaming/pkg/httpstream"
 )
 
 func TestRetriable(t *testing.T) {
@@ -28,6 +29,8 @@ func TestRetriable(t *testing.T) {
 		"bad request":          {kapierrors.NewBadRequest("container is waiting to start"), false},
 		"not found":            {kapierrors.NewNotFound(gr, "vpc-1"), false},
 		"method not supported": {kapierrors.NewMethodNotSupported(gr, "list"), false},
+		"exec pod not found":   {fmt.Errorf("executing: %w", &httpstream.UpgradeFailureError{Cause: kapierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "gw-1")}), false},
+		"exec upgrade failed":  {&httpstream.UpgradeFailureError{Cause: kapierrors.NewServiceUnavailable("busy")}, true},
 		"command failed":       {fmt.Errorf("executing: %w", utilexec.CodeExitError{Err: errors.New("exit 1"), Code: 1}), false}, //nolint:err113 // test error
 		"unavailable":          {kapierrors.NewServiceUnavailable("busy"), true},
 		"timeout":              {kapierrors.NewTimeoutError("slow", 1), true},
