@@ -56,6 +56,7 @@ const (
 
 const (
 	VLABPCIBridgePrefix  = "pcibr"
+	VLABRootPortPrefix   = "rootport"
 	VLABNICsPerPCIBridge = 32
 	VLABPCIBridges       = 2
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
@@ -1134,16 +1135,21 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
 			}
+
+			nic := ""
 			if vm.Type == VMTypeGateway && nicID > 0 {
-				if nicID > vlabcomp.GatewayMaxNICs {
+				port := nicID - 1
+				if port >= vlabcomp.MaxRootPorts {
 					return nil, fmt.Errorf("too many NICs for gateway VM %q: %d", name, nicID) //nolint:err113
 				}
-				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", vlabcomp.GatewayNICBaseSlot+nicID-1)
+				// no hotplug as a hotplug slot would make the NIC named by it instead of the PCI path
+				nic += fmt.Sprintf("-device pcie-root-port,id=%s%d,bus=pcie.0,chassis=%d,addr=0x%x,hotplug=off ",
+					VLABRootPortPrefix, port, port+1, vlabcomp.RootPortBaseSlot+port)
+				device += fmt.Sprintf(",bus=%s%d", VLABRootPortPrefix, port)
 			} else {
 				device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 			}
 
-			nic := ""
 			if netdev != "" {
 				nic += "-netdev " + netdev + " "
 			}

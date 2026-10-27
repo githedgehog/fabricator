@@ -29,7 +29,7 @@ func TestMigrateVLABGatewayIfaces(t *testing.T) {
 		Interfaces: map[string]gwapi.GatewayInterface{
 			"enp2s1": {IPs: []string{"172.30.128.1/31"}, MTU: 9000},
 			"enp2s2": {IPs: []string{"172.30.128.3/31"}},
-			"port3":  {PCI: "0000:00:12.0", Kernel: "enp0s18"},
+			"port3":  {PCI: "0000:07:00.0", Kernel: "enp7s0"},
 		},
 		Neighbors: []gwapi.GatewayBGPNeighbor{
 			{Source: "enp2s1", IP: "172.30.128.0", ASN: 65100},
@@ -41,9 +41,9 @@ func TestMigrateVLABGatewayIfaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"enp2s1": "port1", "enp2s2": "port2"}, renames)
 	require.Equal(t, map[string]gwapi.GatewayInterface{
-		"port1": {PCI: "0000:00:10.0", Kernel: "enp0s16", IPs: []string{"172.30.128.1/31"}, MTU: 9000},
-		"port2": {PCI: "0000:00:11.0", Kernel: "enp0s17", IPs: []string{"172.30.128.3/31"}},
-		"port3": {PCI: "0000:00:12.0", Kernel: "enp0s18"},
+		"port1": {PCI: "0000:05:00.0", Kernel: "enp5s0", IPs: []string{"172.30.128.1/31"}, MTU: 9000},
+		"port2": {PCI: "0000:06:00.0", Kernel: "enp6s0", IPs: []string{"172.30.128.3/31"}},
+		"port3": {PCI: "0000:07:00.0", Kernel: "enp7s0"},
 	}, gw.Spec.Interfaces)
 	require.Equal(t, "port1", gw.Spec.Neighbors[0].Source)
 	require.Equal(t, "port2", gw.Spec.Neighbors[1].Source)
@@ -70,7 +70,7 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 	}
 	newGw := func(name string) *gwapi.Gateway {
 		gw := oldGw(name)
-		gw.Spec.Interfaces = map[string]gwapi.GatewayInterface{"port1": {PCI: "0000:00:10.0", Kernel: "enp0s16"}}
+		gw.Spec.Interfaces = map[string]gwapi.GatewayInterface{"port1": {PCI: "0000:05:00.0", Kernel: "enp5s0"}}
 
 		return gw
 	}

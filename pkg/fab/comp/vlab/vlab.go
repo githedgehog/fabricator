@@ -22,17 +22,29 @@ const (
 )
 
 const (
-	// gateway VM NICs except the management one are on the root bus, so each is in its own IOMMU group for vfio-pci
-	GatewayNICBaseSlot = 0x10
-	GatewayMaxNICs     = 0x1f - GatewayNICBaseSlot // 0x1f is the q35 chipset
+	// a NIC behind its own PCIe root port on the root bus is in its own IOMMU group for vfio-pci and has the port's
+	// bus for its SR-IOV VFs, e.g. igb's
+	RootPortBaseSlot = 0x10
+	MaxRootPorts     = 0x1f - RootPortBaseSlot // 0x1f is the q35 chipset
+	// buses 1 to 4 are the two DMI-to-PCI bridges with the PCI bridges behind them
+	RootPortBaseBus = 5
 )
 
+func RootPortPCI(port uint8) string {
+	return fmt.Sprintf("0000:%02x:00.0", RootPortBaseBus+port)
+}
+
+func RootPortKernel(port uint8) string {
+	return fmt.Sprintf("enp%ds0", RootPortBaseBus+port)
+}
+
+// gateway VM NICs except the management one are behind root ports for vfio-pci
 func GatewayPCI(nicID uint8) string {
 	if nicID == 0 {
 		return "0000:02:00.0"
 	}
 
-	return fmt.Sprintf("0000:00:%02x.0", GatewayNICBaseSlot+nicID-1)
+	return RootPortPCI(nicID - 1)
 }
 
 func GatewayKernel(nicID uint8) string {
@@ -40,7 +52,7 @@ func GatewayKernel(nicID uint8) string {
 		return "enp2s0"
 	}
 
-	return fmt.Sprintf("enp0s%d", GatewayNICBaseSlot+nicID-1)
+	return RootPortKernel(nicID - 1)
 }
 
 func FlatcarVersion(f fabapi.Fabricator) meta.Version {
