@@ -82,68 +82,72 @@ set +e
     fi
 
     echo -e "\n=== VLAB Bridge/Tap Diagnostics ==="
-    if command -v ip >/dev/null 2>&1; then
-        if ip -d link show hhbr >/dev/null 2>&1; then
-            ip -d link show hhbr
+    # hhmgmt is the management bridge with hhmgmtpN taps, hhlinkN are the links with hhlinkNp0/p1 taps
+    vlab_bridges=()
+    vlab_taps=()
+    for dev in /sys/class/net/hhmgmt* /sys/class/net/hhlink*; do
+        [ -e "$dev" ] || continue
+        if [ -d "$dev/bridge" ]; then
+            vlab_bridges+=("$(basename "$dev")")
         else
-            echo "hhbr bridge not found"
+            vlab_taps+=("$(basename "$dev")")
         fi
+    done
+    if [ ${#vlab_bridges[@]} -eq 0 ]; then
+        echo "no hhmgmt/hhlink bridges present"
+    fi
+
+    if command -v ip >/dev/null 2>&1; then
+        for iface in "${vlab_bridges[@]}" "${vlab_taps[@]}"; do
+            ip -d link show "$iface" 2>/dev/null || echo "ip link show $iface failed"
+        done
     else
         echo "ip command not available"
     fi
 
     if command -v bridge >/dev/null 2>&1; then
         bridge link 2>/dev/null || echo "bridge link failed"
-        bridge fdb show br hhbr 2>/dev/null || echo "bridge fdb show failed"
+        for br in "${vlab_bridges[@]}"; do
+            bridge fdb show br "$br" 2>/dev/null || echo "bridge fdb show br $br failed"
+        done
         bridge vlan show 2>/dev/null || echo "bridge vlan show failed"
     else
         echo "bridge command not available"
-    fi
-
-    if command -v ip >/dev/null 2>&1; then
-        if ip -d link show hhtap* >/dev/null 2>&1; then
-            ip -d link show hhtap*
-        else
-            echo "no hhtap interfaces present"
-        fi
-    else
-        echo "ip command not available"
     fi
 
     echo -e "\n=== VLAB sysfs Fallback (no ip/bridge) ==="
     if [ -d /sys/class/net ]; then
         ls /sys/class/net 2>/dev/null || echo "cannot list /sys/class/net"
     fi
-    if [ -d /sys/class/net/hhbr ]; then
-        echo "hhbr exists"
-        ls /sys/class/net/hhbr/brif 2>/dev/null || echo "hhbr has no ports"
-    else
-        echo "hhbr missing"
-    fi
+    for br in "${vlab_bridges[@]}"; do
+        echo "$br ports: $(ls /sys/class/net/"$br"/brif 2>/dev/null | tr '\n' ' ')"
+    done
     if [ -d /proc/net/bridge ]; then
         echo -e "\n=== /proc/net/bridge (fallback) ==="
         cat /proc/net/bridge/bridge 2>/dev/null || echo "cannot read /proc/net/bridge/bridge"
         cat /proc/net/bridge/brif 2>/dev/null || echo "cannot read /proc/net/bridge/brif"
         cat /proc/net/bridge/brforward 2>/dev/null || echo "cannot read /proc/net/bridge/brforward"
     fi
-    for tap in /sys/class/net/hhtap*; do
-        [ -e "$tap" ] || continue
-        iface=$(basename "$tap")
+    for iface in "${vlab_taps[@]}"; do
+        tap="/sys/class/net/$iface"
         echo -e "\n--- $iface ---"
         cat "$tap/address" 2>/dev/null
         cat "$tap/operstate" 2>/dev/null
         cat "$tap/statistics/rx_packets" 2>/dev/null
         cat "$tap/statistics/tx_packets" 2>/dev/null
+        cat "$tap/statistics/rx_dropped" 2>/dev/null
+        cat "$tap/statistics/tx_dropped" 2>/dev/null
     done
-    if [ -d /sys/class/net/hhbr/brif ]; then
-        for port in /sys/class/net/hhbr/brif/*; do
+    for br in "${vlab_bridges[@]}"; do
+        for port in /sys/class/net/"$br"/brif/*; do
             [ -e "$port" ] || continue
-            state_file="$port/brport/state"
+            # brif/<port> links to the port's brport directory
+            state_file="$port/state"
             if [ -f "$state_file" ]; then
-                echo "$(basename "$port") state=$(cat "$state_file")"
+                echo "$br/$(basename "$port") state=$(cat "$state_file") group_fwd_mask=$(cat "$port/group_fwd_mask" 2>/dev/null)"
             fi
         done
-    fi
+    done
 
     echo -e "\n=== Host Networking Summary ==="
     if command -v ip >/dev/null 2>&1; then
