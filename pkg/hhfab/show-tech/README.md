@@ -61,9 +61,10 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
   allocations (`__vm_enough_memory`, page allocation failures) from `dmesg`
 - **Process state**: top memory and CPU consumers, per-QEMU-process RSS/state
 - **Disk and I/O**: `df -h`, `iostat`
-- **VLAB network plumbing**: `hhbr` bridge details, all `hhtap*` tap interfaces
-  (address, operstate, packet counters), bridge port states, bridge FDB/VLAN
-  tables, UDP sockets used by QEMU netdev links
+- **VLAB network plumbing**: `hhmgmt` management bridge and `hhlink*` link
+  bridges, all their taps (address, operstate, packet and drop counters),
+  bridge port states and forward masks, bridge FDB/VLAN tables, UDP sockets
+  used by QEMU netdev links
 - **Host networking**: `ip addr/route/neigh`, nftables ruleset, bridge
   netfilter sysctls
 - **QEMU health**: QMP `query-status` for every running VM, per-process

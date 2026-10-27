@@ -252,14 +252,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	{
-		args := []string{
-			"setup-oob-mgmt-net", "--count", fmt.Sprintf("%d", vlab.Taps),
-		}
-		if opts.OOBMgmtIface != "" {
-			args = append(args, "--iface", opts.OOBMgmtIface)
+		args := []string{"setup-vlab-net"}
+		for _, n := range vlab.Nets {
+			if n.Kind == VLABNetKindMgmt && opts.OOBMgmtIface != "" {
+				n.Ifaces = append(n.Ifaces, opts.OOBMgmtIface)
+			}
+			args = append(args, n.String())
 		}
 		if err := execHelper(ctx, c.WorkDir, args); err != nil {
-			return fmt.Errorf("running helper to prepare taps: %w", err)
+			return fmt.Errorf("running helper to set up networks: %w", err)
 		}
 	}
 

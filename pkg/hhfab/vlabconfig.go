@@ -38,6 +38,7 @@ const (
 	VLABSwitchMACTmpl = "0c:20:12:ff:%02x:00"
 	VLABMACTmpl       = "0c:20:12:fe:%02x:%02x"
 
+	VLABVirtioNet = "virtio-net-pci"
 	// VLABVirtioNetSpeed is the link speed, in Mb/s, VLAB's virtio-net NICs report.
 	VLABVirtioNetSpeed = "10000"
 
@@ -62,18 +63,152 @@ const (
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
 	VLABBaseSSHPort      = 22000
 	VLABBaseDirectPort   = 22100
-	VLABTapPrefix        = "hhtap"
-	VLABBridge           = "hhbr"
 	VLABUUIDPrefix       = "77924ab4-a93b-41d4-928e-"
 	VLABUUIDTmpl         = VLABUUIDPrefix + "%012d"
+
+	// VLABMgmt is the management network bridge, its taps are hhmgmtp0, hhmgmtp1 and so on
+	VLABMgmt = "hhmgmt"
+	// VLABLink prefixes the links, hhlink0 has taps hhlink0p0 and hhlink0p1
+	VLABLink = "hhlink"
+	// VLABLegacyMgmt and VLABLegacyMgmtTap are the management network's previous names, kept to clean it up
+	VLABLegacyMgmt    = "hhbr"
+	VLABLegacyMgmtTap = "hhtap"
+
+	// VLABMaxMgmtTaps caps the management network taps
+	VLABMaxMgmtTaps = 100
+	// VLABLinkMTU leaves room above the 9100 of the fabric links, a bridge drops frames bigger than the tap they leave by
+	VLABLinkMTU = 9216
+	// VLABGatewayNICQueues is the queue pairs of the gateway's virtio-net NICs on links
+	VLABGatewayNICQueues = 8
 )
 
 type VLAB struct {
 	SSHKey       string
 	VMs          []VM
-	Taps         int
+	Nets         []VLABNet
 	Passthroughs []string
 	Externals    ExternalsCfg
+}
+
+type VLABNetKind string
+
+const (
+	// VLABNetKindMgmt is a bridge with the management taps and the host interfaces to reach hardware over
+	VLABNetKindMgmt VLABNetKind = "mgmt"
+	// VLABNetKindLink connects its two taps to each other as transparently as a cable would
+	VLABNetKindLink VLABNetKind = "link"
+)
+
+var VLABNetKinds = []VLABNetKind{
+	VLABNetKindMgmt,
+	VLABNetKindLink,
+}
+
+// VLABNet is a host network VMs attach to over the taps named after it, set up by the setup-vlab-net helper
+type VLABNet struct {
+	Name string
+	Kind VLABNetKind
+	Taps int
+	// Queues has the queue count of each tap QEMU opens with more than one, the kernel refuses that unless it's
+	// created as a multi-queue tap
+	Queues map[int]int
+	// Ifaces are the host interfaces to add to the management network
+	Ifaces []string
+}
+
+func (n VLABNet) TapName(idx int) string {
+	return fmt.Sprintf("%sp%d", n.Name, idx)
+}
+
+const (
+	vlabNetKeyTaps        = "taps"
+	vlabNetKeyIface       = "iface"
+	vlabNetKeyQueuesTmpl  = "p%d.queues"
+	vlabNetKeyQueuesRegex = `^p(\d+)\.queues$`
+)
+
+var vlabNetKeyQueues = regexp.MustCompile(vlabNetKeyQueuesRegex)
+
+// String formats the net the way the setup-vlab-net helper takes it: name=kind[,key=value]..., e.g.
+// "hhmgmt=mgmt,taps=12,iface=enp2s1" or "hhlink0=link,p1.queues=8"
+func (n VLABNet) String() string {
+	parts := []string{n.Name + "=" + string(n.Kind)}
+	if n.Kind != VLABNetKindLink {
+		parts = append(parts, fmt.Sprintf("%s=%d", vlabNetKeyTaps, n.Taps))
+	}
+	for _, idx := range slices.Sorted(maps.Keys(n.Queues)) {
+		parts = append(parts, fmt.Sprintf(vlabNetKeyQueuesTmpl+"=%d", idx, n.Queues[idx]))
+	}
+	for _, iface := range n.Ifaces {
+		parts = append(parts, vlabNetKeyIface+"="+iface)
+	}
+
+	return strings.Join(parts, ",")
+}
+
+func ParseVLABNet(spec string) (VLABNet, error) {
+	parts := strings.Split(spec, ",")
+	name, kind, _ := strings.Cut(parts[0], "=")
+	n := VLABNet{Name: name, Kind: VLABNetKind(kind)}
+
+	switch n.Kind {
+	case VLABNetKindMgmt:
+		if n.Name != VLABMgmt {
+			return VLABNet{}, fmt.Errorf("net %q: management net has to be named %q", spec, VLABMgmt) //nolint:err113
+		}
+	case VLABNetKindLink:
+		id, isLink := strings.CutPrefix(n.Name, VLABLink)
+		if _, err := strconv.ParseUint(id, 10, 32); !isLink || err != nil {
+			return VLABNet{}, fmt.Errorf("net %q: link has to be named %s<number>", spec, VLABLink) //nolint:err113
+		}
+		n.Taps = 2
+	default:
+		return VLABNet{}, fmt.Errorf("net %q: unknown kind %q, expected one of %v", spec, kind, VLABNetKinds) //nolint:err113
+	}
+
+	for _, part := range parts[1:] {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || value == "" {
+			return VLABNet{}, fmt.Errorf("net %q: invalid %q, expected key=value", spec, part) //nolint:err113
+		}
+
+		switch {
+		case key == vlabNetKeyTaps:
+			if n.Kind == VLABNetKindLink {
+				return VLABNet{}, fmt.Errorf("net %q: link always has 2 taps", spec) //nolint:err113
+			}
+			taps, err := strconv.Atoi(value)
+			if err != nil || taps < 0 || taps > VLABMaxMgmtTaps {
+				return VLABNet{}, fmt.Errorf("net %q: taps has to be 0 to %d", spec, VLABMaxMgmtTaps) //nolint:err113
+			}
+			n.Taps = taps
+		case key == vlabNetKeyIface:
+			if n.Kind != VLABNetKindMgmt {
+				return VLABNet{}, fmt.Errorf("net %q: only management net takes host interfaces", spec) //nolint:err113
+			}
+			n.Ifaces = append(n.Ifaces, value)
+		case vlabNetKeyQueues.MatchString(key):
+			idx, _ := strconv.Atoi(vlabNetKeyQueues.FindStringSubmatch(key)[1])
+			queues, err := strconv.Atoi(value)
+			if err != nil || queues < 2 {
+				return VLABNet{}, fmt.Errorf("net %q: %s has to be 2 or more", spec, key) //nolint:err113
+			}
+			if n.Queues == nil {
+				n.Queues = map[int]int{}
+			}
+			n.Queues[idx] = queues
+		default:
+			return VLABNet{}, fmt.Errorf("net %q: unknown key %q", spec, key) //nolint:err113
+		}
+	}
+
+	for idx := range n.Queues {
+		if idx >= n.Taps {
+			return VLABNet{}, fmt.Errorf("net %q: queues for tap p%d out of %d taps", spec, idx, n.Taps) //nolint:err113
+		}
+	}
+
+	return n, nil
 }
 
 type VM struct {
@@ -989,8 +1124,11 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 	vms := []VM{}
 	passthroughs := []string{}
-	tapID := 0
 	controlID := 0
+	mgmt := VLABNet{Name: VLABMgmt, Kind: VLABNetKindMgmt}
+	links := []VLABNet{}
+	type nicKey struct{ vm, nic uint }
+	linkTaps := map[nicKey]string{} // the tap of each link's end not processed yet
 	for _, name := range orderedVMNames {
 		vm := cfg.VMs[name]
 		vmID := vmIDs[name]
@@ -1037,6 +1175,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
+			multiQueue := false
 			port := getDirectNICPort(vmID, uint(nicID))
 			switch nicType {
 			case NICTypeNoop:
@@ -1064,8 +1203,42 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
 				}
 
-				otherPort := getDirectNICPort(otherVMID, otherNICID)
-				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", port, otherPort)
+				otherType := cfg.VMs[otherVM].Type
+				if vm.Type != VMTypeGateway && otherType != VMTypeGateway {
+					otherPort := getDirectNICPort(otherVMID, otherNICID)
+					netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", port, otherPort)
+
+					break
+				}
+
+				// The gateway dataplane needs a NIC with multiple queues: igb locks up from time to time and a
+				// UDP socket backs virtio-net with a single queue only, so links to gateways go over a host link
+				// with a tap for each end, the gateway's one multi-queue
+				tap, ok := linkTaps[nicKey{vmID, uint(nicID)}]
+				if !ok {
+					hostLink := VLABNet{
+						Name:   fmt.Sprintf("%s%d", VLABLink, len(links)),
+						Kind:   VLABNetKindLink,
+						Taps:   2,
+						Queues: map[int]int{},
+					}
+					if vm.Type == VMTypeGateway {
+						hostLink.Queues[0] = VLABGatewayNICQueues
+					}
+					if otherType == VMTypeGateway {
+						hostLink.Queues[1] = VLABGatewayNICQueues
+					}
+					links = append(links, hostLink)
+
+					tap = hostLink.TapName(0)
+					linkTaps[nicKey{otherVMID, otherNICID}] = hostLink.TapName(1)
+				}
+
+				netdev = fmt.Sprintf("tap,ifname=%s,script=no,downscript=no", tap)
+				if vm.Type == VMTypeGateway {
+					multiQueue = true
+					netdev += fmt.Sprintf(",vhost=off,queues=%d", VLABGatewayNICQueues)
+				}
 			case NICTypeUsernet:
 				if usernet > 0 {
 					return nil, fmt.Errorf("multiple usernet NICs for VM %q", name) //nolint:err113
@@ -1090,8 +1263,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				if nicCfg != "" {
 					mac = nicCfg
 				}
-				netdev = fmt.Sprintf("tap,ifname=%s%d,script=no,downscript=no", VLABTapPrefix, tapID)
-				tapID++
+				netdev = fmt.Sprintf("tap,ifname=%s,script=no,downscript=no", mgmt.TapName(mgmt.Taps))
+				mgmt.Taps++
 			case NICTypePassthrough:
 				if nicCfg == "" {
 					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:err113
@@ -1111,7 +1284,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				nic := "e1000"
 				// TODO consider switch all switches to virtio-net-pci, it's just a hack for Cumulus to work
 				if vm.Type == VMTypeSwitch && vm.SwitchMode == VMSwitchModeImage {
-					nic = "virtio-net-pci"
+					nic = VLABVirtioNet
 				}
 				// Every switch agent reaches the control node over the management network.
 				// The emulated e1000 has one queue and a legacy interrupt, so all of that
@@ -1121,16 +1294,23 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				// name. Gateways get the rule too, so they can follow in a later release.
 				link := ""
 				if nicType == NICTypeManagement && vm.Type == VMTypeControl {
-					nic = "virtio-net-pci"
+					nic = VLABVirtioNet
 					// virtio-net reports no link speed or duplex unless told, which LACP
 					// bonds and anything else reading them cannot work with; this only
 					// sets what the guest sees, it does not limit the traffic
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
 
-				// dpdk needs a queue pair per worker plus one for the control plane, igb has 16 and e1000(e) only 1-2
-				if vm.Type == VMTypeGateway && nicID > 0 {
-					nic = "igb"
+				// dpdk needs a queue pair per worker plus one for the control plane, so the gateway's NICs on links
+				// are virtio-net with as many queues, the ones filling the gaps between them stay e1000 as unused
+				if multiQueue {
+					nic = VLABVirtioNet
+					// a vector per queue each way, plus one for config changes and one for the control queue
+					link = fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*VLABGatewayNICQueues+2, VLABVirtioNetSpeed)
+					// the gateway has an IOMMU for vfio-pci, virtio-net goes around it unless told otherwise and
+					// would then DMA to the guest physical addresses instead of the IOVAs DPDK gives it; only a
+					// modern (non-legacy) virtio device can be told so
+					link += ",disable-legacy=on,iommu_platform=on"
 				}
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
@@ -1195,7 +1375,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	return &VLAB{
 		SSHKey:       cfg.SSHKey,
 		VMs:          vms,
-		Taps:         tapID,
+		Nets:         append([]VLABNet{mgmt}, links...),
 		Passthroughs: passthroughs,
 		Externals:    cfg.Externals,
 	}, nil

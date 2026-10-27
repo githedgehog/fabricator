@@ -65,8 +65,6 @@ const (
 	FlagO11yDefaults              = "o11y-defaults"
 	FlagO11yLabels                = "o11y-labels"
 	FlagNameFabricMode            = "fabric-mode"
-	FlagNameCount                 = "count"
-	FlagNameIface                 = "iface"
 	FlagNameKillStale             = "kill-stale"
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
@@ -2679,35 +2677,23 @@ to have it re-run itself under sudo.`,
 				Hidden: true,
 				Subcommands: []*cli.Command{
 					{
-						Name:  "setup-oob-mgmt-net",
-						Usage: "setup bridge to be OOB Mgmt Network with tap devices and interfaces",
-						Flags: flatten(defaultFlags, []cli.Flag{
-							&cli.IntFlag{
-								Name:     FlagNameCount,
-								Usage:    "number of tap devices to prepare (or cleanup if count is 0)",
-								Required: true,
-								Action: func(_ *cli.Context, v int) error {
-									if v < 0 {
-										return fmt.Errorf("count must be zero or positive") //nolint:err113
-									}
-
-									if v > 100 {
-										return fmt.Errorf("count must be less than 100") //nolint:err113
-									}
-
-									return nil
-								},
-							},
-							&cli.StringSliceFlag{
-								Name:     FlagNameIface,
-								Usage:    "list of interfaces to include into the bridge",
-								Required: false,
-							},
-						}),
-						Before: before(true),
+						Name:      "setup-vlab-net",
+						Usage:     "set up the VLAB host networks given and clean up all the others (none given removes all)",
+						ArgsUsage: "name=kind[,key=value]... (e.g. hhmgmt=mgmt,taps=12,iface=enp2s1 or hhlink0=link,p1.queues=8)",
+						Flags:     defaultFlags,
+						Before:    before(true),
 						Action: func(c *cli.Context) error {
-							if err := hhfab.SetupOOBMgmtNet(ctx, c.Int(FlagNameCount), c.StringSlice(FlagNameIface)); err != nil {
-								return fmt.Errorf("preparing oob mgmt net: %w", err)
+							nets := []hhfab.VLABNet{}
+							for _, spec := range c.Args().Slice() {
+								n, err := hhfab.ParseVLABNet(spec)
+								if err != nil {
+									return fmt.Errorf("parsing net: %w", err)
+								}
+								nets = append(nets, n)
+							}
+
+							if err := hhfab.SetupVLABNet(ctx, nets); err != nil {
+								return fmt.Errorf("setting up vlab net: %w", err)
 							}
 
 							return nil

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,38 +19,55 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func SetupOOBMgmtNet(_ context.Context, count int, includeIfaces []string) error {
-	if count > 0 {
-		slog.Debug("Preparing OOB Mgmt Net", "bridge", VLABBridge, "taps", count, "include", includeIfaces)
-	} else {
-		slog.Debug("Removing OOB Mgmt Net", "bridge", VLABBridge)
+// tuntap values netlink only defines on Linux
+const (
+	tuntapModeTap    = netlink.TuntapMode(0x2)    // IFF_TAP
+	tuntapMultiQueue = netlink.TuntapFlag(0x100)  // IFF_MULTI_QUEUE
+	tuntapNoPI       = netlink.TuntapFlag(0x1000) // IFF_NO_PI
+)
+
+// groupFwdMask makes a bridge port pass the link-local frames (STP, LACP, LLDP and the rest) a bridge keeps to
+// itself by default, so VMs get them as if wired directly, all but the pause frames the kernel never forwards
+const groupFwdMask = 0xfffd
+
+// setGroupFwdMask writes the mask over sysfs, netlink's LinkSetBRSlaveGroupFwdMask is Linux only and would break the
+// non-Linux builds
+func setGroupFwdMask(port string) error {
+	path := filepath.Join("/sys/class/net", port, "brport", "group_fwd_mask")
+	if err := os.WriteFile(path, []byte(strconv.Itoa(groupFwdMask)), 0o644); err != nil { //nolint:gosec // sysfs
+		return fmt.Errorf("setting group forward mask of %q: %w", port, err)
 	}
 
-	br, err := netlink.LinkByName(VLABBridge)
-	if err != nil && !errors.As(err, &netlink.LinkNotFoundError{}) {
-		return fmt.Errorf("getting bridge %q: %w", VLABBridge, err)
+	return nil
+}
+
+// disableIPv6 keeps the host off the VMs' links, an IPv6 link-local address has it sending ND and MLD into them and
+// accepting router advertisements from the switches
+func disableIPv6(iface string) error {
+	path := filepath.Join("/proc/sys/net/ipv6/conf", iface, "disable_ipv6")
+	if err := os.WriteFile(path, []byte("1"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) { //nolint:gosec // procfs
+		return fmt.Errorf("disabling IPv6 on %q: %w", iface, err)
 	}
 
-	if errors.As(err, &netlink.LinkNotFoundError{}) && count > 0 {
-		slog.Debug("Creating bridge", "name", VLABBridge)
+	return nil
+}
 
-		la := netlink.NewLinkAttrs()
-		la.Name = VLABBridge
-		br = &netlink.Bridge{LinkAttrs: la}
-		if err := netlink.LinkAdd(br); err != nil {
-			return fmt.Errorf("adding bridge %q: %w", VLABBridge, err)
-		}
-	} else if !errors.As(err, &netlink.LinkNotFoundError{}) && count == 0 {
-		slog.Debug("Deleting bridge", "name", VLABBridge)
+func isVLABNetLink(name string) bool {
+	return strings.HasPrefix(name, VLABMgmt) || strings.HasPrefix(name, VLABLink) ||
+		name == VLABLegacyMgmt || strings.HasPrefix(name, VLABLegacyMgmtTap)
+}
 
-		if err := netlink.LinkDel(br); err != nil {
-			return fmt.Errorf("deleting bridge %q: %w", VLABBridge, err)
-		}
-	}
+// SetupVLABNet makes the host match the nets given: creates the missing bridges and taps, recreates the ones set up
+// differently and deletes all the others VLAB owns, the management network's legacy names included
+func SetupVLABNet(_ context.Context, nets []VLABNet) error {
+	slog.Debug("Setting up VLAB networks", "nets", len(nets))
 
-	if count > 0 {
-		if err := netlink.LinkSetUp(br); err != nil {
-			return fmt.Errorf("setting up bridge %q: %w", VLABBridge, err)
+	bridges := map[string]VLABNet{}
+	taps := map[string]bool{} // whether each tap is multi-queue
+	for _, n := range nets {
+		bridges[n.Name] = n
+		for idx := range n.Taps {
+			taps[n.TapName(idx)] = n.Queues[idx] > 1
 		}
 	}
 
@@ -62,95 +78,128 @@ func SetupOOBMgmtNet(_ context.Context, count int, includeIfaces []string) error
 
 	existing := map[string]netlink.Link{}
 	for _, link := range links {
-		if link.Type() != "tuntap" {
-			continue
-		}
 		name := link.Attrs().Name
-		if !strings.HasPrefix(name, VLABTapPrefix) {
+		if !isVLABNetLink(name) {
 			continue
 		}
 
-		tapID, err := strconv.Atoi(name[len(VLABTapPrefix):])
-		if err != nil {
-			return fmt.Errorf("parsing tap ID: %w", err)
+		keep := false
+		switch link := link.(type) {
+		case *netlink.Bridge:
+			_, ok := bridges[name]
+			keep = ok && (link.MulticastSnooping == nil || !*link.MulticastSnooping)
+		case *netlink.Tuntap:
+			multiQueue, ok := taps[name]
+			keep = ok && (link.Flags&tuntapMultiQueue != 0) == multiQueue
+		}
+		if keep {
+			existing[name] = link
+
+			continue
 		}
 
-		if tapID >= count {
-			slog.Debug("Deleting no more needed tap", "name", name)
-
-			if err := netlink.LinkDel(link); err != nil {
-				return fmt.Errorf("deleting tap %q: %w", name, err)
-			}
+		slog.Debug("Deleting no more needed or differently set up link", "name", name, "type", link.Type())
+		if err := netlink.LinkDel(link); err != nil {
+			return fmt.Errorf("deleting %q: %w", name, err)
 		}
-
-		existing[name] = link
 	}
 
-	for idx := range count {
-		name := fmt.Sprintf("%s%d", VLABTapPrefix, idx)
-		tap, exist := existing[name]
+	for _, n := range nets {
+		br, exist := existing[n.Name]
 		if !exist {
-			slog.Debug("Creating tap", "name", name)
+			slog.Debug("Creating bridge", "name", n.Name)
 
 			la := netlink.NewLinkAttrs()
-			la.Name = name
-			tap = &netlink.Tuntap{
-				LinkAttrs: la,
-				Mode:      0x2, // netlink.TUNTAP_MODE_TAP
+			la.Name = n.Name
+			// snooping drops the multicast it hasn't seen joined, VMs are to get it all as if wired directly
+			bridge := &netlink.Bridge{LinkAttrs: la, MulticastSnooping: new(false)}
+			if err := netlink.LinkAdd(bridge); err != nil {
+				return fmt.Errorf("adding bridge %q: %w", n.Name, err)
 			}
-			if err := netlink.LinkAdd(tap); err != nil {
-				return fmt.Errorf("adding tap %q: %w", name, err)
+			br = bridge
+		}
+
+		if err := disableIPv6(n.Name); err != nil {
+			return err
+		}
+
+		if err := netlink.LinkSetUp(br); err != nil {
+			return fmt.Errorf("setting up bridge %q: %w", n.Name, err)
+		}
+
+		for idx := range n.Taps {
+			name := n.TapName(idx)
+			tap, exist := existing[name]
+			if !exist {
+				slog.Debug("Creating tap", "name", name, "queues", n.Queues[idx])
+
+				la := netlink.NewLinkAttrs()
+				la.Name = name
+				tuntap := &netlink.Tuntap{LinkAttrs: la, Mode: tuntapModeTap}
+				if n.Queues[idx] > 1 {
+					tuntap.Flags = tuntapMultiQueue | tuntapNoPI
+				}
+				if err := netlink.LinkAdd(tuntap); err != nil {
+					return fmt.Errorf("adding tap %q: %w", name, err)
+				}
+				tap = tuntap
+			}
+
+			if err := netlink.LinkSetDown(tap); err != nil {
+				return fmt.Errorf("setting tap down %q: %w", name, err)
+			}
+
+			if err := disableIPv6(name); err != nil {
+				return err
+			}
+
+			// the management bridge keeps the default, it carries host traffic and a bridge takes its ports' lowest MTU
+			if n.Kind == VLABNetKindLink {
+				if err := netlink.LinkSetMTU(tap, VLABLinkMTU); err != nil {
+					return fmt.Errorf("setting tap MTU %q: %w", name, err)
+				}
+			}
+
+			if err := netlink.LinkSetMaster(tap, br); err != nil {
+				return fmt.Errorf("adding tap %q to %q: %w", name, n.Name, err)
+			}
+
+			if err := setGroupFwdMask(name); err != nil {
+				return err
+			}
+
+			if err := netlink.LinkSetUp(tap); err != nil {
+				return fmt.Errorf("setting tap up %q: %w", name, err)
 			}
 		}
 
-		if err := netlink.LinkSetDown(tap); err != nil {
-			return fmt.Errorf("setting tap down %q: %w", name, err)
-		}
+		for _, iface := range n.Ifaces {
+			slog.Debug("Attaching to bridge", "iface", iface, "bridge", n.Name)
 
-		if err := netlink.LinkSetMaster(tap, br); err != nil {
-			return fmt.Errorf("adding tap %q to %q: %w", name, VLABBridge, err)
-		}
+			link, err := netlink.LinkByName(iface)
+			if err != nil {
+				return fmt.Errorf("getting interface %q: %w", iface, err)
+			}
 
-		if err := netlink.LinkSetUp(tap); err != nil {
-			return fmt.Errorf("setting tap up %q: %w", name, err)
-		}
-	}
+			if err := netlink.LinkSetDown(link); err != nil {
+				return fmt.Errorf("setting link down %q: %w", iface, err)
+			}
 
-	included := map[string]bool{}
-	for _, link := range links {
-		name := link.Attrs().Name
-		if !slices.Contains(includeIfaces, name) {
-			continue
-		}
+			if err := netlink.LinkSetMaster(link, br); err != nil {
+				return fmt.Errorf("adding link %q to %q: %w", iface, n.Name, err)
+			}
 
-		slog.Debug("Attaching to bridge", "iface", name)
+			if err := setGroupFwdMask(iface); err != nil {
+				return err
+			}
 
-		if err := netlink.LinkSetDown(link); err != nil {
-			return fmt.Errorf("setting link down %q: %w", name, err)
-		}
-
-		if err := netlink.LinkSetMaster(link, br); err != nil {
-			return fmt.Errorf("adding link %q to %q: %w", name, VLABBridge, err)
-		}
-
-		if err := netlink.LinkSetUp(link); err != nil {
-			return fmt.Errorf("setting link up %q: %w", name, err)
-		}
-
-		included[name] = true
-	}
-
-	for _, iface := range includeIfaces {
-		if !included[iface] {
-			return fmt.Errorf("interface %q not found", iface) //nolint:err113
+			if err := netlink.LinkSetUp(link); err != nil {
+				return fmt.Errorf("setting link up %q: %w", iface, err)
+			}
 		}
 	}
 
-	if count > 0 {
-		slog.Info("OOB Mgmt Net is ready", "bridge", VLABBridge, "taps", count, "included", includeIfaces)
-	} else {
-		slog.Info("OOB Mgmt Net is removed", "bridge", VLABBridge)
-	}
+	slog.Info("VLAB networks are ready", "nets", len(nets))
 
 	return nil
 }

@@ -324,8 +324,37 @@ func TestVLABGatewayNICs(t *testing.T) {
 				port := nicID - 1
 				require.Contains(t, vmNICs[nicID], fmt.Sprintf("-device pcie-root-port,id=%s%d,bus=pcie.0,chassis=%d,addr=0x%x,hotplug=off ",
 					VLABRootPortPrefix, port, port+1, vlabcomp.RootPortBaseSlot+port), name)
-				require.Contains(t, vmNICs[nicID], "-device igb,", name)
+				require.Contains(t, vmNICs[nicID], "-device virtio-net-pci,", name)
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*VLABGatewayNICQueues+2, VLABVirtioNetSpeed), name)
+				require.Contains(t, vmNICs[nicID], ",disable-legacy=on,iommu_platform=on,", name)
 				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=%s%d", VLABRootPortPrefix, port), name)
+
+				// the gateway end of the link is its multi-queue tap, the switch end a plain one under e1000
+				_, tap, ok := strings.Cut(vmNICs[nicID], "-netdev tap,ifname=")
+				require.True(t, ok, name)
+				tap, _, _ = strings.Cut(tap, ",")
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",vhost=off,queues=%d,", VLABGatewayNICQueues), name)
+
+				netIdx := slices.IndexFunc(vlab.Nets, func(n VLABNet) bool { return strings.HasPrefix(tap, n.Name+"p") })
+				require.GreaterOrEqual(t, netIdx, 0, tap)
+				n := vlab.Nets[netIdx]
+				require.Equal(t, VLABNetKindLink, n.Kind, tap)
+				tapIdx := slices.IndexFunc([]string{n.TapName(0), n.TapName(1)}, func(name string) bool { return name == tap })
+				require.GreaterOrEqual(t, tapIdx, 0, tap)
+				require.Equal(t, map[int]int{tapIdx: VLABGatewayNICQueues}, n.Queues, tap)
+
+				other := "-netdev tap,ifname=" + n.TapName(1-tapIdx) + ",script=no,downscript=no,id="
+				found := false
+				for _, vm := range vlab.VMs {
+					for _, nic := range vm.NICs {
+						if strings.Contains(nic, other) {
+							require.Equal(t, VMTypeSwitch, vm.Type, nic)
+							require.Contains(t, nic, "-device e1000,", nic)
+							found = true
+						}
+					}
+				}
+				require.True(t, found, "no switch end for %s", tap)
 			}
 		})
 	}
@@ -334,6 +363,55 @@ func TestVLABGatewayNICs(t *testing.T) {
 func TestVLABRootPortBaseBus(t *testing.T) {
 	// the firmware numbers the DMI-to-PCI and PCI bridge buses first as they're on the lower slots
 	require.Equal(t, 2*VLABPCIBridges+1, vlabcomp.RootPortBaseBus)
+}
+
+func TestVLABNetSpec(t *testing.T) {
+	for _, tt := range []struct {
+		spec string
+		net  VLABNet
+	}{
+		{"hhmgmt=mgmt,taps=0", VLABNet{Name: VLABMgmt, Kind: VLABNetKindMgmt}},
+		{"hhmgmt=mgmt,taps=12,iface=enp2s1,iface=enp2s2", VLABNet{Name: VLABMgmt, Kind: VLABNetKindMgmt, Taps: 12, Ifaces: []string{"enp2s1", "enp2s2"}}},
+		{"hhlink0=link", VLABNet{Name: "hhlink0", Kind: VLABNetKindLink, Taps: 2}},
+		{"hhlink17=link,p1.queues=8", VLABNet{Name: "hhlink17", Kind: VLABNetKindLink, Taps: 2, Queues: map[int]int{1: 8}}},
+		{"hhlink3=link,p0.queues=4,p1.queues=8", VLABNet{Name: "hhlink3", Kind: VLABNetKindLink, Taps: 2, Queues: map[int]int{0: 4, 1: 8}}},
+	} {
+		t.Run(tt.spec, func(t *testing.T) {
+			n, err := ParseVLABNet(tt.spec)
+			require.NoError(t, err)
+			require.Equal(t, tt.net, n)
+			require.Equal(t, tt.spec, n.String())
+		})
+	}
+
+	for _, spec := range []string{
+		"",
+		"hhmgmt",
+		"hhmgmt=bridge",
+		"hhother=mgmt,taps=1",
+		"hhmgmt=mgmt,taps=101",
+		"hhmgmt=mgmt,taps=-1",
+		"hhmgmt=mgmt,mtu=1500",
+		"hhmgmt=mgmt,taps",
+		"hhmgmt=mgmt,taps=",
+		"hhlink=link",
+		"hhlinkx=link",
+		"hhlink0=link,taps=2",
+		"hhlink0=link,iface=eth0",
+		"hhlink0=link,p2.queues=8",
+		"hhlink0=link,p1.queues=1",
+		"hhlink0=link,p1.queues=x",
+		"hhlink0=link,px.queues=8",
+	} {
+		t.Run("invalid "+spec, func(t *testing.T) {
+			_, err := ParseVLABNet(spec)
+			require.Error(t, err)
+		})
+	}
+
+	n := VLABNet{Name: "hhlink5", Kind: VLABNetKindLink, Taps: 2}
+	require.Equal(t, "hhlink5p0", n.TapName(0))
+	require.Equal(t, "hhlink5p1", n.TapName(1))
 }
 
 func TestResolveVMSizes(t *testing.T) {

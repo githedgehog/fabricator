@@ -161,7 +161,7 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 			return err
 		}
 
-		slog.Info("Reaching the API over the management bridge", "bridge", VLABBridge, "source", source, "api", addr)
+		slog.Info("Reaching the API over the management bridge", "bridge", VLABMgmt, "source", source, "api", addr)
 
 		apiServer, sourceAddr = "https://"+addr.String(), source
 	case bench.APIViaHostfwd:
@@ -227,7 +227,7 @@ func benchBridgeIP(ctx context.Context, workDir, cacheDir string, port uint16) (
 	dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: source.AsSlice()}}
 	conn, err := dialer.DialContext(ctx, "tcp", addr.String())
 	if err != nil {
-		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("control VIP %s is not reachable from %s on %s: %w", addr, source, VLABBridge, err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("control VIP %s is not reachable from %s on %s: %w", addr, source, VLABMgmt, err)
 	}
 	if err := conn.Close(); err != nil {
 		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("closing probe connection to %s: %w", addr, err)
@@ -240,14 +240,14 @@ func benchBridgeIP(ctx context.Context, workDir, cacheDir string, port uint16) (
 // already. Reading the bridge's addresses needs no privileges, so sudo is only
 // run - and can only prompt - when something has to change.
 func ensureBridgeAddr(ctx context.Context, addr netip.Prefix) error {
-	iface, err := net.InterfaceByName(VLABBridge)
+	iface, err := net.InterfaceByName(VLABMgmt)
 	if err != nil {
-		return fmt.Errorf("getting management bridge %s, is the VLAB running: %w", VLABBridge, err)
+		return fmt.Errorf("getting management bridge %s, is the VLAB running: %w", VLABMgmt, err)
 	}
 
 	existing, err := iface.Addrs()
 	if err != nil {
-		return fmt.Errorf("listing addresses on %s: %w", VLABBridge, err)
+		return fmt.Errorf("listing addresses on %s: %w", VLABMgmt, err)
 	}
 	for _, a := range existing {
 		if ipNet, ok := a.(*net.IPNet); ok && ipNet.IP.Equal(addr.Addr().AsSlice()) {
@@ -255,15 +255,15 @@ func ensureBridgeAddr(ctx context.Context, addr netip.Prefix) error {
 		}
 	}
 
-	slog.Info("Adding address to the management bridge", "bridge", VLABBridge, "addr", addr)
+	slog.Info("Adding address to the management bridge", "bridge", VLABMgmt, "addr", addr)
 
-	cmd := exec.CommandContext(ctx, VLABCmdSudo, "ip", "addr", "add", addr.String(), "dev", VLABBridge) //nolint:gosec // addr is a parsed prefix, formatted by netip
+	cmd := exec.CommandContext(ctx, VLABCmdSudo, "ip", "addr", "add", addr.String(), "dev", VLABMgmt) //nolint:gosec // addr is a parsed prefix, formatted by netip
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adding %s to %s: %w", addr, VLABBridge, err)
+		return fmt.Errorf("adding %s to %s: %w", addr, VLABMgmt, err)
 	}
 
 	return nil
@@ -296,7 +296,7 @@ func DoVLABBenchBoots(ctx context.Context, workDir, cacheDir string, opts BenchB
 		return err
 	}
 
-	slog.Info("Reaching fabric-boot over the management bridge", "bridge", VLABBridge, "source", source, "boot", addr)
+	slog.Info("Reaching fabric-boot over the management bridge", "bridge", VLABMgmt, "source", source, "boot", addr)
 
 	if err := bench.RunBoots(ctx, admin, bench.BootsOpts{
 		URL:         "http://" + addr.String(),
@@ -379,7 +379,7 @@ func DoVLABBenchDHCP(ctx context.Context, workDir, cacheDir string, opts BenchDH
 	}
 	defer transport.Close()
 
-	slog.Info("Relaying to dhcpd over the management bridge", "bridge", VLABBridge, "relay", relay.Name, "giaddr", relay.IP.Addr(), "server", server)
+	slog.Info("Relaying to dhcpd over the management bridge", "bridge", VLABMgmt, "relay", relay.Name, "giaddr", relay.IP.Addr(), "server", server)
 
 	if err := bench.RunDHCP(ctx, kube, transport, bench.DHCPOpts{
 		Layout:         bench.DHCPLayout{Servers: opts.Servers, Subnets: opts.Subnets, VPCs: opts.VPCs, MaxSubnetServers: opts.MaxSubnetServers},
