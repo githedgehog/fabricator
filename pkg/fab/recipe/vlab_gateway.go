@@ -99,8 +99,11 @@ func migrateVLABGatewayPorts(ctx context.Context, kube kclient.Client, waitRefre
 			continue
 		}
 
+		key := kclient.ObjectKeyFromObject(&gw)
 		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := kube.Get(ctx, kclient.ObjectKeyFromObject(&gw), &gw); err != nil {
+			// decoding into the migrated object would keep its new interfaces
+			gw = gwapi.Gateway{}
+			if err := kube.Get(ctx, key, &gw); err != nil {
 				return fmt.Errorf("getting: %w", err)
 			}
 
@@ -131,8 +134,10 @@ func migrateVLABGatewayPorts(ctx context.Context, kube kclient.Client, waitRefre
 			continue
 		}
 
+		key := kclient.ObjectKeyFromObject(&conn)
 		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if err := kube.Get(ctx, kclient.ObjectKeyFromObject(&conn), &conn); err != nil {
+			conn = wiringapi.Connection{}
+			if err := kube.Get(ctx, key, &conn); err != nil {
 				return fmt.Errorf("getting: %w", err)
 			}
 

@@ -5,6 +5,7 @@ package recipe
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -138,6 +139,19 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			// the first update of each object conflicts, as if the fabric controller updated it in between
 			conflicted := map[string]bool{}
 			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).WithInterceptorFuncs(interceptor.Funcs{
+				// unlike the fake client, the real one decodes into the passed object as is, keeping its map entries
+				Get: func(ctx context.Context, kube kclient.WithWatch, key kclient.ObjectKey, obj kclient.Object, opts ...kclient.GetOption) error {
+					fresh := obj.DeepCopyObject().(kclient.Object) //nolint:forcetypeassert
+					if err := kube.Get(ctx, key, fresh, opts...); err != nil {
+						return err //nolint:wrapcheck
+					}
+					raw, err := json.Marshal(fresh)
+					if err != nil {
+						return err //nolint:wrapcheck
+					}
+
+					return json.Unmarshal(raw, obj)
+				},
 				Update: func(ctx context.Context, kube kclient.WithWatch, obj kclient.Object, opts ...kclient.UpdateOption) error {
 					if tt.conflict && !conflicted[obj.GetName()] {
 						conflicted[obj.GetName()] = true
