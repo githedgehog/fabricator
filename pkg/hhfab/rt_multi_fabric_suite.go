@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 )
 
@@ -60,6 +61,22 @@ func makeMultiFabricSuite() *JUnitTestSuite {
 				NoServers: true,
 			},
 		},
+		{
+			Name: "Interconnect Transit Through Gateway",
+			F:    interconnectTransitTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Interconnect Transit Without Gateway Peering",
+			F:    interconnectTransitNoGatewayPeeringTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+				NoGateway: true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
@@ -103,6 +120,7 @@ func findRTInterconnectPairs(externals []vpcapi.External) []rtInterconnectPair {
 // interconnectScenario is what a test needs of the cluster: the pairs, and the VPCs of each Fabric
 // of the first pair in name order, so the k-th VPC of a side is the same VPC in every test
 type interconnectScenario struct {
+	externals  []vpcapi.External
 	pairs      []rtInterconnectPair
 	vpcs       [2][]*vpcapi.VPC
 	namespaces []vpcapi.IPv4Namespace
@@ -122,7 +140,7 @@ func loadInterconnectScenario(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 		return nil, fmt.Errorf("listing IPv4 namespaces: %w", err)
 	}
 
-	sc := &interconnectScenario{pairs: findRTInterconnectPairs(externals.Items), namespaces: namespaces.Items}
+	sc := &interconnectScenario{externals: externals.Items, pairs: findRTInterconnectPairs(externals.Items), namespaces: namespaces.Items}
 	if len(sc.pairs) < minPairs {
 		return nil, fmt.Errorf("%w: %d pairs, need %d", errNoInterconnect, len(sc.pairs), minPairs)
 	}
@@ -156,12 +174,14 @@ func (sc *interconnectScenario) peer(extPeerings map[string]*vpcapi.ExternalPeer
 // runInterconnectMatrix applies the External peerings and asserts the matrix: the unpeered pairs of VPCs must be isolated
 // too, so a path the model does not expect fails the test
 func (testCtx *VPCPeeringTestCtx) runInterconnectMatrix(ctx context.Context, matrix *ConnectivityMatrix, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
-	return testCtx.runPeeringMatrix(ctx, matrix, nil, extPeerings)
+	return testCtx.runPeeringMatrix(ctx, matrix, nil, extPeerings, nil)
 }
 
 // runPeeringMatrix applies the peerings, refreshes the matrix and asserts it
-func (testCtx *VPCPeeringTestCtx) runPeeringMatrix(ctx context.Context, matrix *ConnectivityMatrix, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, extPeerings, nil, true); err != nil {
+func (testCtx *VPCPeeringTestCtx) runPeeringMatrix(ctx context.Context, matrix *ConnectivityMatrix, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
+	extPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec,
+) error {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, extPeerings, gwPeerings, true); err != nil {
 		return fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
@@ -252,4 +272,72 @@ func interconnectSeparatePairsTest(ctx context.Context, testCtx *VPCPeeringTestC
 	}
 
 	return false, nil, testCtx.runInterconnectMatrix(ctx, matrix, extPeerings)
+}
+
+// loadTransitScenario is the scenario of the first pair together with the Fabric behind it that
+// reaches its internet through a Gateway: side is the Fabric whose VPCs go through the pair, and
+// transit is the gateway peering in the other one that joins the pair to that Fabric's External.
+func loadTransitScenario(ctx context.Context, testCtx *VPCPeeringTestCtx) (*interconnectScenario, int, *transitPeering, error) {
+	sc, err := loadInterconnectScenario(ctx, testCtx, 1, 1)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	gateways := &gwapi.GatewayList{}
+	if err := testCtx.kube.List(ctx, gateways); err != nil {
+		return nil, 0, nil, fmt.Errorf("listing gateways: %w", err)
+	}
+	gatewayFabrics := map[string]bool{}
+	for _, gw := range gateways.Items {
+		gatewayFabrics[fabricOrDefault(gw.Spec.Topology.Fabric)] = true
+	}
+
+	for side := range sc.vpcs {
+		transit, err := buildTransitPeering(sc.externals, sc.namespaces, sc.pairs[0].sides[side], sc.pairs[0].sides[1-side], gatewayFabrics)
+		if err != nil {
+			return nil, 0, nil, fmt.Errorf("building transit gateway peering: %w", err)
+		}
+		if transit != nil {
+			return sc, side, transit, nil
+		}
+	}
+
+	return nil, 0, nil, fmt.Errorf("%w: no Fabric behind the first pair has a gateway and an External with a NAT pool", errNoInterconnect)
+}
+
+// transitExtPeerings peers the first VPC of the Fabric that goes through the pair with its
+// interconnect External, for the address space of the other Fabric and for the internet
+func (sc *interconnectScenario) transitExtPeerings(side int) map[string]*vpcapi.ExternalPeeringSpec {
+	vpc := sc.vpcs[side][0]
+	other := sc.pairs[0].sides[1-side]
+	extPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+	appendExtPeeringSpecByName(extPeerings, vpc.Name, sc.pairs[0].sides[side].Name,
+		slices.Sorted(maps.Keys(vpc.Spec.Subnets)), append(namespaceSubnets(sc.namespaces, other), AllZeroPrefix...))
+
+	return extPeerings
+}
+
+// The first VPC of the Fabric with no Gateway is peered with its side of the first pair for the
+// internet, and the other Fabric's Gateway joins its side of the pair to its External: the VPC
+// reaches that External through the Gateway, and no other VPC does.
+func interconnectTransitTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	sc, side, transit, err := loadTransitScenario(ctx, testCtx)
+	if err != nil {
+		return skipOnNoInterconnect(err)
+	}
+
+	gwPeerings := map[string]*gwapi.PeeringSpec{transit.name: transit.spec}
+
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, nil, sc.transitExtPeerings(side), gwPeerings)
+}
+
+// The same External peering with no gateway peering in the other Fabric: the VPC has a route to the
+// interconnect and nothing past it, so it does not reach the External.
+func interconnectTransitNoGatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	sc, side, _, err := loadTransitScenario(ctx, testCtx)
+	if err != nil {
+		return skipOnNoInterconnect(err)
+	}
+
+	return false, nil, testCtx.runPeeringMatrix(ctx, matrix, nil, sc.transitExtPeerings(side), nil)
 }
