@@ -17,6 +17,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilexec "k8s.io/client-go/util/exec"
+	"k8s.io/streaming/pkg/httpstream"
 )
 
 const (
@@ -34,6 +35,12 @@ var longBackoff = wait.Backoff{
 // permissions or a command that ran and failed, fail right away instead of after all the retries
 func retriable(ctx context.Context) func(error) bool {
 	return func(err error) bool {
+		// the exec upgrade failure doesn't unwrap to the api error it carries, e.g. the pod not found once recreated
+		var upgradeErr *httpstream.UpgradeFailureError
+		if errors.As(err, &upgradeErr) && upgradeErr.Cause != nil {
+			err = upgradeErr.Cause
+		}
+
 		var exitErr utilexec.ExitError
 
 		return ctx.Err() == nil &&

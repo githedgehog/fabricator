@@ -6,6 +6,7 @@ package support
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	utilexec "k8s.io/client-go/util/exec"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -71,7 +73,15 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 				return ExecOutputs{Error: "skipped: " + skip}
 			}
 
-			return execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, command...)
+			out, err := execGatewayCommand(ctx, clientset, cfg, pod, c.quiet, command...)
+			// the pod is gone or its container is restarting even after all the retries, so don't spend the retries on
+			// each of the remaining commands too
+			if commandNotRun(err) {
+				skip = "dataplane container unreachable: " + err.Error()
+				slog.Warn("Skipping remaining gateway insights", "pod", pod.Name, "reason", skip)
+			}
+
+			return out
 		}
 
 		// show tech includes everything the dataplane cli shows, e.g. transceivers, link and lldp neighbors
@@ -140,7 +150,14 @@ func stuckContainerReason(status corev1.ContainerStatus) string {
 	return ""
 }
 
-func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, pod corev1.Pod, quiet bool, command ...string) ExecOutputs {
+// commandNotRun reports whether the exec failed before the command could run, unlike the command that ran and failed
+func commandNotRun(err error) bool {
+	var exitErr utilexec.ExitError
+
+	return err != nil && !errors.As(err, &exitErr)
+}
+
+func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, pod corev1.Pod, quiet bool, command ...string) (ExecOutputs, error) {
 	if !quiet {
 		slog.Debug("Executing in gateway dataplane", "pod", pod.Name, "cmd", command)
 	}
@@ -152,7 +169,7 @@ func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cf
 		errStr = err.Error()
 	}
 
-	return ExecOutputs{Stdout: stdout, Stderr: stderr, Error: errStr}
+	return ExecOutputs{Stdout: stdout, Stderr: stderr, Error: errStr}, err
 }
 
 func execPodContainerCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, ns, pod, container string, command []string) (string, string, error) {

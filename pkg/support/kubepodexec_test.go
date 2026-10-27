@@ -4,11 +4,28 @@
 package support
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	utilexec "k8s.io/client-go/util/exec"
+	"k8s.io/streaming/pkg/httpstream"
 )
+
+func TestCommandNotRun(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err    error
+		notRun bool
+	}{
+		"succeeded":           {nil, false},
+		"command failed":      {fmt.Errorf("retrying: %w", utilexec.CodeExitError{Err: errors.New("exit 1"), Code: 1}), false},                             //nolint:err113 // test error
+		"container not found": {fmt.Errorf("retrying: %w", &httpstream.UpgradeFailureError{Cause: errors.New(`container not found ("dataplane")`)}), true}, //nolint:err113 // test error
+	} {
+		require.Equal(t, tc.notRun, commandNotRun(tc.err), name)
+	}
+}
 
 func TestGatewayExecSkipReason(t *testing.T) {
 	waiting := func(name, reason string) corev1.PodStatus {
