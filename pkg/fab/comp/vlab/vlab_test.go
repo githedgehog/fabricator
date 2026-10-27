@@ -13,8 +13,8 @@ func TestRootPortNICs(t *testing.T) {
 	require.Equal(t, "0000:05:00.0", RootPortPCI(0))
 	require.Equal(t, "enp5s0", RootPortKernel(0))
 	// PCI bus is hex while the kernel name has it in decimal
-	require.Equal(t, "0000:13:00.0", RootPortPCI(MaxRootPorts-1))
-	require.Equal(t, "enp19s0", RootPortKernel(MaxRootPorts-1))
+	require.Equal(t, "0000:0c:00.0", RootPortPCI(MaxRootPorts-1))
+	require.Equal(t, "enp12s0", RootPortKernel(MaxRootPorts-1))
 }
 
 func TestGatewayNICs(t *testing.T) {
