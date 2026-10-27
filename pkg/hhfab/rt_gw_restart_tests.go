@@ -11,8 +11,6 @@ import (
 	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
-	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	corev1 "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,22 +33,20 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client) error {
 		return fmt.Errorf("no gateways found") //nolint:err113
 	}
 
-	selectors := map[string]kclient.MatchingLabels{}
+	gwNames := []string{}
 	killed := map[ktypes.UID]bool{}
 	for _, gw := range gws.Items {
-		sel := kclient.MatchingLabels{gwPodNameLabel: gwapi.DaemonSetName(gw.Name)}
-		selectors[gw.Name] = sel
-
-		pods := &corev1.PodList{}
-		if err := kube.List(ctx, pods, kclient.InNamespace(comp.FabNamespace), sel); err != nil {
-			return fmt.Errorf("listing pods of gateway %s: %w", gw.Name, err)
+		pods, err := listGatewayPods(ctx, kube, gw.Name)
+		if err != nil {
+			return err
 		}
-		if len(pods.Items) == 0 {
+		if len(pods) == 0 {
 			return fmt.Errorf("no pods found for gateway %s", gw.Name) //nolint:err113
 		}
+		gwNames = append(gwNames, gw.Name)
 
-		for i := range pods.Items {
-			pod := &pods.Items[i]
+		for i := range pods {
+			pod := &pods[i]
 			killed[pod.UID] = true
 			if err := kube.Delete(ctx, pod); err != nil {
 				return fmt.Errorf("deleting pod %s: %w", pod.Name, err)
@@ -58,27 +54,21 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client) error {
 			slog.Debug("Killed gateway pod", "name", pod.Name, "UID", pod.UID)
 		}
 	}
-	slog.Info("Killed gateway pods", "gateways", len(selectors), "pods", len(killed))
+	slog.Info("Killed gateway pods", "gateways", len(gwNames), "pods", len(killed))
 
 	start := time.Now()
 	for {
 		notReady := []string{}
-		for gwName, sel := range selectors {
-			pods := &corev1.PodList{}
-			if err := kube.List(ctx, pods, kclient.InNamespace(comp.FabNamespace), sel); err != nil {
-				return fmt.Errorf("listing pods of gateway %s: %w", gwName, err)
+		for _, gwName := range gwNames {
+			pods, err := listGatewayPods(ctx, kube, gwName)
+			if err != nil {
+				return err
 			}
 
-			pending := slices.ContainsFunc(pods.Items, func(pod corev1.Pod) bool {
-				if killed[pod.UID] || pod.Status.Phase != corev1.PodRunning {
-					return true
-				}
-
-				return !slices.ContainsFunc(pod.Status.Conditions, func(cond corev1.PodCondition) bool {
-					return cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue
-				})
+			pending := slices.ContainsFunc(pods, func(pod corev1.Pod) bool {
+				return killed[pod.UID] || !podReady(&pod)
 			})
-			if len(pods.Items) == 0 || pending {
+			if len(pods) == 0 || pending {
 				notReady = append(notReady, gwName)
 			}
 		}
@@ -106,13 +96,8 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client) error {
 // FRR together, as we have hit regressions where a restart broke the gateway.
 func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	skipped, reverts, err := testCtx.runNATTest(ctx, matrix, natTestSpec{
-		Name: "gateway pod restart",
-		BuildSpec: func(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error) {
-			specs := emptyPeeringSpecs()
-			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, nil)
-
-			return specs, err
-		},
+		Name:      "gateway pod restart",
+		BuildSpec: gatewayPeeringSpec,
 	})
 	if skipped || err != nil {
 		return skipped, reverts, err
@@ -130,17 +115,8 @@ func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matr
 	if err := restartGatewayPods(ctx, testCtx.kube); err != nil {
 		return false, nil, fmt.Errorf("restarting gateway pods: %w", err)
 	}
-	// Give the gateway time to react
-	slog.Info("Waiting a few seconds for gateway to react...")
-	time.Sleep(5 * time.Second)
-	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-		return false, nil, fmt.Errorf("waiting for ready after restart: %w", err)
-	}
-	if err := testCtx.waitForDatapathConverged(ctx, tcOpts, matrix, defaultDatapathConvergeTimeout, 1); err != nil {
-		return false, nil, fmt.Errorf("datapath convergence after restart: %w", err)
-	}
-	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity after restart: %w", err)
+	if err := testCtx.checkGatewayTraffic(ctx, matrix, tcOpts); err != nil {
+		return false, nil, fmt.Errorf("after restart: %w", err)
 	}
 
 	return false, nil, nil
@@ -149,5 +125,6 @@ func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matr
 func getGatewayRestartTestCases() []JUnitTestCase {
 	return []JUnitTestCase{
 		{Name: "Gateway Pod Restart", F: gatewayPodRestartTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
+		{Name: "Gateway Driver Toggle", F: gatewayDriverToggleTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
 	}
 }
