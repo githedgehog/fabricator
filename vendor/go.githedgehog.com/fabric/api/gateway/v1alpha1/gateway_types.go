@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"regexp"
@@ -62,13 +63,28 @@ type GatewaySpec struct {
 	Groups []GatewayGroupMembership `json:"groups,omitempty"`
 	// FlowTableCapacity defines the maximum number of flow entres
 	FlowTableCapacity uint32 `json:"flowTableCapacity,omitempty"`
+	// Driver is the dataplane driver for the interfaces, kernel or dpdk
+	Driver GatewayDriver `json:"driver,omitempty"`
+}
+
+type GatewayDriver string
+
+const (
+	GatewayDriverKernel GatewayDriver = "kernel"
+	GatewayDriverDPDK   GatewayDriver = "dpdk"
+)
+
+var GatewayDrivers = []GatewayDriver{
+	GatewayDriverKernel,
+	GatewayDriverDPDK,
 }
 
 // GatewayInterface defines the configuration for a gateway interface
 type GatewayInterface struct {
-	// PCI address of the interface (required for DPDK driver), e.g. 0000:00:01.0
+	// PCI address of the interface (required for dpdk driver, optional for kernel driver), e.g. 0000:00:01.0
 	PCI string `json:"pci,omitempty"`
-	// Kernel is the kernel name of the interface to use (required for kernel driver), e.g. enp2s1
+	// Kernel is the kernel name of the interface to use (kernel driver only, ignored for dpdk driver or if it's the same
+	// as the interface name), e.g. enp2s1
 	Kernel string `json:"kernel,omitempty"`
 	// IPs is the list of IP address to assign to the interface
 	IPs []string `json:"ips,omitempty"`
@@ -203,6 +219,24 @@ func (gw *Gateway) Default() {
 		gw.Spec.Workers = 4
 	}
 
+	if gw.Spec.Driver == "" {
+		// keeps the driver of the gateways created before it was explicit, it was dpdk with only PCI addresses set
+		pcis, kernels := 0, 0
+		for _, iface := range gw.Spec.Interfaces {
+			if iface.PCI != "" {
+				pcis++
+			}
+			if iface.Kernel != "" {
+				kernels++
+			}
+		}
+
+		gw.Spec.Driver = GatewayDriverKernel
+		if pcis > 0 && kernels == 0 {
+			gw.Spec.Driver = GatewayDriverDPDK
+		}
+	}
+
 	if gw.Spec.Topology.Fabric == "" {
 		gw.Spec.Topology.Fabric = wiringapi.DefaultFabric
 	}
@@ -232,9 +266,16 @@ func (gw *Gateway) Default() {
 
 var linuxIfaceNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,8}[a-zA-Z0-9]$`)
 
-// MaxGatewayNameLength leaves room for the gateway's daemonset names, gw--<name>--dataplane at most, which are used as
-// the app.kubernetes.io/name label value of their pods as well, and label values are capped at 63 characters
+// MaxGatewayNameLength leaves room for the gateway's daemonset names, gw--<name>--dataplane at most (from older releases),
+// which are used as the app.kubernetes.io/name label value of their pods as well, and label values are capped at 63
+// characters
 const MaxGatewayNameLength = 63 - len("gw--") - len("--dataplane")
+
+// DaemonSetName is the name of the daemonset running the gateway's dataplane (incl. FRR) in the gateway namespace, it's
+// the app.kubernetes.io/name label value of its pods as well
+func DaemonSetName(gwName string) string {
+	return "gw--" + gwName
+}
 
 func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
 	if fabricCfg != nil && !fabricCfg.EnableGateway {
@@ -332,10 +373,14 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 		}
 	}
 
+	if !slices.Contains(GatewayDrivers, gw.Spec.Driver) {
+		return fmt.Errorf("driver %q must be one of %v: %w", gw.Spec.Driver, GatewayDrivers, ErrInvalidGW)
+	}
+
 	if len(gw.Spec.Interfaces) == 0 {
 		return fmt.Errorf("at least one interface must be defined: %w", ErrInvalidGW)
 	}
-	pcis, kernels := 0, 0
+	pcis := map[string]string{}
 	for name, iface := range gw.Spec.Interfaces {
 		if len(name) > 15 {
 			return fmt.Errorf("interface name %s is too long: %w", name, ErrInvalidGW)
@@ -357,71 +402,30 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 			}
 		}
 
-		if iface.PCI != "" && iface.Kernel != "" {
-			return fmt.Errorf("interface %s cannot have both PCI address and kernel names: %w", name, ErrInvalidGW)
+		// same range as the dataplane accepts, 0 means unset
+		if iface.MTU != 0 && (iface.MTU < 68 || iface.MTU > math.MaxUint16) {
+			return fmt.Errorf("interface %s MTU %d must be between 68 and %d: %w", name, iface.MTU, math.MaxUint16, ErrInvalidGW)
 		}
-		// TODO enable after migrating dataplane to a new interface format
-		// if iface.PCI == "" && iface.Kernel == "" {
-		// 	return fmt.Errorf("interface %s must have either PCI address or kernel name: %w", name, ErrInvalidGW)
-		// }
+
+		// kernel name is allowed but ignored with the dpdk driver
+		if gw.Spec.Driver == GatewayDriverDPDK && iface.PCI == "" {
+			return fmt.Errorf("interface %s must have PCI address with dpdk driver: %w", name, ErrInvalidGW)
+		}
 		if iface.PCI != "" {
-			pcis++
-
-			invalidPCI := fmt.Errorf("interface %s PCI %s must be a valid PCI address (e.g. 0000:02:00.0): %w", name, iface.PCI, ErrInvalidGW)
-			if len(iface.PCI) != 12 {
-				return invalidPCI
+			if err := validatePCI(name, iface.PCI); err != nil {
+				return err
 			}
 
-			parts := strings.Split(iface.PCI, ".")
-			if len(parts) != 2 {
-				return invalidPCI
+			pci := strings.ToLower(iface.PCI)
+			if other, exist := pcis[pci]; exist {
+				return fmt.Errorf("interfaces %s and %s have the same PCI address %s: %w", other, name, iface.PCI, ErrInvalidGW)
 			}
-
-			if function, err := strconv.ParseInt(parts[1], 16, 64); err != nil {
-				return fmt.Errorf("invalid interface %s PCI address %s function: %w", name, iface.PCI, errors.Join(err, ErrInvalidGW))
-			} else if function < 0 || function > 7 {
-				return fmt.Errorf("invalid interface %s PCI address %s function (0-7): %w", name, iface.PCI, ErrInvalidGW)
-			}
-
-			parts = strings.Split(parts[0], ":")
-			if len(parts) != 3 {
-				return invalidPCI
-			}
-
-			if domain, err := strconv.ParseInt(parts[0], 16, 64); err != nil {
-				return fmt.Errorf("invalid interface %s PCI address %s domain: %w", name, iface.PCI, errors.Join(err, ErrInvalidGW))
-			} else if domain < 0 || domain > 0xFFFF {
-				return fmt.Errorf("invalid interface %s PCI address %s domain (0-FFFF): %w", name, iface.PCI, ErrInvalidGW)
-			}
-
-			if bus, err := strconv.ParseInt(parts[1], 16, 64); err != nil {
-				return fmt.Errorf("invalid interface %s PCI address %s bus: %w", name, iface.PCI, errors.Join(err, ErrInvalidGW))
-			} else if bus < 0 || bus > 0xFF {
-				return fmt.Errorf("invalid interface %s PCI address %s bus (0-FF): %w", name, iface.PCI, ErrInvalidGW)
-			}
-
-			if device, err := strconv.ParseInt(parts[2], 16, 64); err != nil {
-				return fmt.Errorf("invalid interface %s PCI address %s device: %w", name, iface.PCI, errors.Join(err, ErrInvalidGW))
-			} else if device < 0 || device > 0x1F {
-				return fmt.Errorf("invalid interface %s PCI address %s device (0-1F): %w", name, iface.PCI, ErrInvalidGW)
-			}
+			pcis[pci] = name
 		}
-		if iface.Kernel != "" {
-			kernels++
-
-			if !linuxIfaceNameRegex.MatchString(iface.Kernel) {
-				return fmt.Errorf("kernel name %s must be a valid linux interface name (2-10 characters): %w", iface.Kernel, ErrInvalidGW)
-			}
-
-			if name == iface.Kernel {
-				return fmt.Errorf("interface name %s cannot be the same as kernel interface name: %w", name, ErrInvalidGW)
-			}
+		if iface.Kernel != "" && !linuxIfaceNameRegex.MatchString(iface.Kernel) {
+			return fmt.Errorf("kernel name %s must be a valid linux interface name (2-10 characters): %w", iface.Kernel, ErrInvalidGW)
 		}
 	}
-	// TODO enable after migrating dataplane to a new interface format
-	// if pcis > 0 && kernels > 0 {
-	// 	return fmt.Errorf("cannot mix interfaces with PCI addresses and kernel names: %w", ErrInvalidGW)
-	// }
 
 	if len(gw.Spec.Neighbors) == 0 {
 		return fmt.Errorf("at least one BGP neighbor must be defined: %w", ErrInvalidGW)
@@ -543,6 +547,49 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 				return fmt.Errorf("gateway group %s already has too many members (%d), max is %d: %w", gwGroup.Name, gwGroupMembers[gwGroup.Name], len(fabricCfg.GatewayCommunities), ErrInvalidGW)
 			}
 		}
+	}
+
+	return nil
+}
+
+func validatePCI(name, pci string) error {
+	invalidPCI := fmt.Errorf("interface %s PCI %s must be a valid PCI address (e.g. 0000:02:00.0): %w", name, pci, ErrInvalidGW)
+	if len(pci) != 12 {
+		return invalidPCI
+	}
+
+	parts := strings.Split(pci, ".")
+	if len(parts) != 2 {
+		return invalidPCI
+	}
+
+	if function, err := strconv.ParseInt(parts[1], 16, 64); err != nil {
+		return fmt.Errorf("invalid interface %s PCI address %s function: %w", name, pci, errors.Join(err, ErrInvalidGW))
+	} else if function < 0 || function > 7 {
+		return fmt.Errorf("invalid interface %s PCI address %s function (0-7): %w", name, pci, ErrInvalidGW)
+	}
+
+	parts = strings.Split(parts[0], ":")
+	if len(parts) != 3 {
+		return invalidPCI
+	}
+
+	if domain, err := strconv.ParseInt(parts[0], 16, 64); err != nil {
+		return fmt.Errorf("invalid interface %s PCI address %s domain: %w", name, pci, errors.Join(err, ErrInvalidGW))
+	} else if domain < 0 || domain > 0xFFFF {
+		return fmt.Errorf("invalid interface %s PCI address %s domain (0-FFFF): %w", name, pci, ErrInvalidGW)
+	}
+
+	if bus, err := strconv.ParseInt(parts[1], 16, 64); err != nil {
+		return fmt.Errorf("invalid interface %s PCI address %s bus: %w", name, pci, errors.Join(err, ErrInvalidGW))
+	} else if bus < 0 || bus > 0xFF {
+		return fmt.Errorf("invalid interface %s PCI address %s bus (0-FF): %w", name, pci, ErrInvalidGW)
+	}
+
+	if device, err := strconv.ParseInt(parts[2], 16, 64); err != nil {
+		return fmt.Errorf("invalid interface %s PCI address %s device: %w", name, pci, errors.Join(err, ErrInvalidGW))
+	} else if device < 0 || device > 0x1F {
+		return fmt.Errorf("invalid interface %s PCI address %s device (0-1F): %w", name, pci, ErrInvalidGW)
 	}
 
 	return nil

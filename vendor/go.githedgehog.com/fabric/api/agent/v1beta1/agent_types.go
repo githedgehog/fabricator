@@ -17,7 +17,6 @@ package v1beta1
 import (
 	"fmt"
 	"slices"
-	"sort"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
@@ -82,8 +81,7 @@ type AgentSpecConfig struct {
 	ControlVIP            string                    `json:"controlVIP,omitempty"`
 	VPCPeeringDisabled    bool                      `json:"vpcPeeringDisabled,omitempty"`
 	SpineLeaf             *AgentSpecConfigSpineLeaf `json:"spineLeaf,omitempty"`
-	BaseVPCCommunity      string                    `json:"baseVPCCommunity,omitempty"`
-	VPCLoopbackSubnet     string                    `json:"vpcLoopbackSubnet,omitempty"`
+	BaseVPCCommunity      string                    `json:"baseVPCCommunity,omitempty"` // TODO: rename? now only used to mark external prefixes
 	FabricMTU             uint16                    `json:"fabricMTU,omitempty"`
 	ServerFacingMTUOffset uint16                    `json:"serverFacingMTUOffset,omitempty"`
 	ESLAGMACBase          string                    `json:"eslagMACBase,omitempty"`
@@ -92,7 +90,6 @@ type AgentSpecConfig struct {
 	MCLAGSessionSubnet    string                    `json:"mclagSessionSubnet,omitempty"`
 	GatewayASN            uint32                    `json:"gatewayASN,omitempty"`
 	SpineASN              uint32                    `json:"spineASN,omitempty"`
-	LoopbackWorkaround    bool                      `json:"loopbackWorkaround,omitempty"`
 	ProtocolSubnet        string                    `json:"protocolSubnet,omitempty"`
 	VTEPSubnet            string                    `json:"vtepSubnet,omitempty"`
 	FabricSubnet          string                    `json:"fabricSubnet,omitempty"`
@@ -389,6 +386,12 @@ type SwitchStateBGPNeighborPrefixes struct {
 	Received          uint32 `json:"rec,omitempty"`
 	ReceivedPrePolicy uint32 `json:"recPre,omitempty"`
 	Sent              uint32 `json:"sent,omitempty"`
+	// Limit is the most prefixes accepted, if there is a limit
+	Limit uint32 `json:"limit,omitempty"`
+	// LimitWarnPct is the percentage of the limit from which the switch logs a warning
+	LimitWarnPct uint8 `json:"limitWarnPct,omitempty"`
+	// LimitWarnOnly is set if the session stays open above the limit
+	LimitWarnOnly bool `json:"limitWarnOnly,omitempty"`
 }
 
 type BGPNeighborSessionState string
@@ -655,7 +658,7 @@ type Agent struct {
 
 const KindAgent = "Agent"
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // AgentList contains a list of Agent
 type AgentList struct {
@@ -676,7 +679,7 @@ func init() {
 // has the metadata without managed fields and the spec, the status isn't needed for the agent to start.
 func (a *Agent) MarshalInstallConfig() ([]byte, error) {
 	cfg := &Agent{
-		TypeMeta:   kmetav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: KindAgent},
+		APIVersion: GroupVersion.String(), Kind: KindAgent,
 		ObjectMeta: a.ObjectMeta,
 		Spec:       a.Spec,
 	}
@@ -701,7 +704,7 @@ func (a *Agent) IsFirstInRedundancyGroup() bool {
 	}
 
 	rg := append(slices.Clone(a.Spec.RedundancyGroupPeers), a.Name)
-	sort.Strings(rg)
+	slices.Sort(rg)
 
 	return rg[0] == a.Name
 }

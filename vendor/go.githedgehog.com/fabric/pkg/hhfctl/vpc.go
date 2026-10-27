@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 
@@ -48,10 +49,8 @@ func VPCCreate(ctx context.Context, printYaml bool, options *VPCCreateOptions) e
 		return fmt.Errorf("invalid mode %s, must be one of %v", options.Mode, vpcapi.VPCModes) //nolint:err113
 	}
 	vpc := &vpcapi.VPC{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      options.Name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Name:      options.Name,
+		Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCSpec{
 			Subnets: map[string]*vpcapi.VPCSubnet{
 				"default": {
@@ -101,7 +100,7 @@ func VPCCreate(ctx context.Context, printYaml bool, options *VPCCreateOptions) e
 			return errors.Wrap(err, "cannot marshal vpc")
 		}
 
-		fmt.Println(string(out))
+		fmt.Fprintln(os.Stdout, string(out))
 	}
 
 	return nil
@@ -121,10 +120,8 @@ func VPCAttach(ctx context.Context, printYaml bool, options *VPCAttachOptions) e
 	}
 
 	attach := &vpcapi.VPCAttachment{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Name:      name,
+		Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCAttachmentSpec{
 			Subnet:     options.VPCSubnet,
 			Connection: options.Connection,
@@ -165,7 +162,7 @@ func VPCAttach(ctx context.Context, printYaml bool, options *VPCAttachOptions) e
 			return errors.Wrap(err, "cannot marshal vpc attachment")
 		}
 
-		fmt.Println(string(out))
+		fmt.Fprintln(os.Stdout, string(out))
 	}
 
 	return nil
@@ -183,10 +180,8 @@ func VPCPeer(ctx context.Context, printYaml bool, options *VPCPeerOptions) error
 	}
 
 	peering := &vpcapi.VPCPeering{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Name:      name,
+		Namespace: kmetav1.NamespaceDefault,
 		Spec: vpcapi.VPCPeeringSpec{
 			Permit: []map[string]vpcapi.VPCPeer{
 				{
@@ -230,7 +225,7 @@ func VPCPeer(ctx context.Context, printYaml bool, options *VPCPeerOptions) error
 			return errors.Wrap(err, "cannot marshal vpc peering")
 		}
 
-		fmt.Println(string(out))
+		fmt.Fprintln(os.Stdout, string(out))
 	}
 
 	return nil
@@ -251,10 +246,8 @@ func VPCGwPeer(ctx context.Context, printYaml bool, options *VPCGwPeerOptions) e
 	}
 
 	peering := &gwapi.GatewayPeering{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Name:      name,
+		Namespace: kmetav1.NamespaceDefault,
 		Spec: gwapi.PeeringSpec{
 			Peering: map[string]*gwapi.PeeringEntry{
 				options.VPC1: {
@@ -301,7 +294,7 @@ func VPCGwPeer(ctx context.Context, printYaml bool, options *VPCGwPeerOptions) e
 			return errors.Wrap(err, "cannot marshal gateway peering")
 		}
 
-		fmt.Println(string(out))
+		fmt.Fprintln(os.Stdout, string(out))
 	}
 
 	return nil
@@ -310,9 +303,7 @@ func VPCGwPeer(ctx context.Context, printYaml bool, options *VPCGwPeerOptions) e
 // Defined as a separate function so it can be used in release tests
 func VPCWipeWithClient(ctx context.Context, kube kclient.Client) error {
 	delAllOpts := kclient.DeleteAllOfOptions{
-		ListOptions: kclient.ListOptions{
-			Namespace: kmetav1.NamespaceDefault,
-		},
+		Namespace: kmetav1.NamespaceDefault,
 	}
 	// delete all external peerings
 	if err := kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{}, &delAllOpts); err != nil {

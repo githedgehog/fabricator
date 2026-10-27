@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"net/netip"
-	"sort"
+	"slices"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
@@ -45,8 +45,8 @@ type IPv4NamespaceTopology struct {
 type IPv4NamespaceSpec struct {
 	// Topology is where the IPv4Namespace sits in the fabric topology
 	Topology IPv4NamespaceTopology `json:"topology,omitempty"`
-	//+kubebuilder:validation:MinItems=1
-	//+kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=20
 	// Subnets is the list of subnets to allocate VPC subnets from, couldn't overlap between each other and with Fabric reserved subnets
 	Subnets []string `json:"subnets,omitempty"`
 }
@@ -74,7 +74,7 @@ type IPv4Namespace struct {
 
 const KindIPv4Namespace = "IPv4Namespace"
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // IPv4NamespaceList contains a list of IPv4Namespace
 type IPv4NamespaceList struct {
@@ -127,7 +127,7 @@ func (ns *IPv4Namespace) Default() {
 
 	ns.Labels[wiringapi.ListLabelFabric(ns.Spec.Topology.Fabric)] = ListLabelValue
 
-	sort.Strings(ns.Spec.Subnets)
+	slices.Sort(ns.Spec.Subnets)
 }
 
 func (ns *IPv4Namespace) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) (admission.Warnings, error) {
@@ -169,4 +169,26 @@ func (ns *IPv4Namespace) Validate(ctx context.Context, kube kclient.Reader, fabr
 	}
 
 	return nil, errors.Wrapf(iputil.VerifyNoOverlapNetip(subnets), "subnets overlap with reserved subnets")
+}
+
+// CheckOutside checks that none of the prefixes is inside a subnet of the namespace, as an External drops the routes
+// within them silently. A prefix around the namespace, such as a default route, is fine
+func (ns *IPv4Namespace) CheckOutside(what string, prefixes []string) error {
+	for _, s := range ns.Spec.Subnets {
+		subnet, err := netip.ParsePrefix(s)
+		if err != nil {
+			return fmt.Errorf("invalid subnet %s in IPv4Namespace %s: %w", s, ns.Name, err)
+		}
+		for _, p := range prefixes {
+			prefix, err := netip.ParsePrefix(p)
+			if err != nil {
+				return fmt.Errorf("invalid %s %s: %w", what, p, err)
+			}
+			if iputil.IsSubset(prefix, subnet) {
+				return fmt.Errorf("%s %s is inside subnet %s of IPv4Namespace %s", what, prefix, subnet, ns.Name) //nolint:err113
+			}
+		}
+	}
+
+	return nil
 }

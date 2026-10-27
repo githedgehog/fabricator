@@ -6,8 +6,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io/fs"
-	"log/slog"
 	"math"
 	"net"
 	"net/netip"
@@ -22,7 +20,6 @@ import (
 const (
 	Path = "/config/config.yaml"
 
-	DefaultListenInterface    = "eth0"
 	DefaultHealthListen       = ":8080"
 	DefaultLeaseExpiryPadding = 5 * time.Minute
 	DefaultOfferTTL           = 5 * time.Minute
@@ -31,16 +28,17 @@ const (
 )
 
 // ServerConfig is the fabric-dhcpd configuration, fabricator renders it into the fabric-dhcpd-config ConfigMap. Any
-// missing field falls back to its default, so an older or missing ConfigMap keeps working.
+// missing optional field falls back to its default.
 type ServerConfig struct {
-	// ListenInterface is the interface (optionally with ":port") to listen for DHCP requests on, "eth0" if not set
+	// ListenInterface is the interface (optionally with ":port") to listen for DHCP requests on, required
 	ListenInterface string `json:"listenInterface,omitempty"`
 	// AnyDeviceOnMgmt allows any device, not only ONIE and Cumulus, to get an IP from the management subnet
 	AnyDeviceOnMgmt bool `json:"anyDeviceOnMgmt,omitempty"`
-	// HealthListen is the address for the liveness/readiness HTTP server, ":8080" if not set
-	HealthListen string `json:"healthListen,omitempty"`
+	// HealthListen is the address for the liveness/readiness HTTP server, ":8080" if not set. It's not in the config file,
+	// the chart passes it as a flag from the same value as the probes port.
+	HealthListen string `json:"-"`
 	// ControlVIP is the control VIP prefix (e.g. "172.30.0.1/32"), the relay target on all leaves, used as the DHCP server
-	// identifier. If not set, the source address of the route to the relay is looked up for every request.
+	// identifier, required
 	ControlVIP string `json:"controlVIP,omitempty"`
 	// LeaseExpiryPadding is added to the stored lease expiry, so renewals within it don't need a write, 5m if not set
 	LeaseExpiryPadding kmetav1.Duration `json:"leaseExpiryPadding,omitzero"`
@@ -55,22 +53,19 @@ type ServerConfig struct {
 	UpdateBurst int `json:"updateBurst,omitempty"`
 }
 
-// Load reads the config from path. A missing file means all defaults, while a file that can't be read or parsed, or
-// an invalid value, is an error.
-func Load(path string) (*ServerConfig, error) {
+// Load reads the config from path and sets healthListen, which isn't in the file. A missing file, a file that can't be
+// parsed or an invalid value is an error.
+func Load(path, healthListen string) (*ServerConfig, error) {
 	cfg := &ServerConfig{}
 
 	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		slog.Info("Config file not found, using defaults", "path", path)
-	case err != nil:
+	if err != nil {
 		return nil, fmt.Errorf("reading config file %s: %w", path, err)
-	default:
-		if err := kyaml.UnmarshalStrict(data, cfg); err != nil {
-			return nil, fmt.Errorf("unmarshalling config file %s: %w", path, err)
-		}
 	}
+	if err := kyaml.UnmarshalStrict(data, cfg); err != nil {
+		return nil, fmt.Errorf("unmarshalling config file %s: %w", path, err)
+	}
+	cfg.HealthListen = healthListen
 
 	cfg.Default()
 	if err := cfg.Validate(); err != nil {
@@ -82,9 +77,6 @@ func Load(path string) (*ServerConfig, error) {
 
 // Default sets the defaults for all fields that aren't set
 func (cfg *ServerConfig) Default() {
-	if cfg.ListenInterface == "" {
-		cfg.ListenInterface = DefaultListenInterface
-	}
 	if cfg.HealthListen == "" {
 		cfg.HealthListen = DefaultHealthListen
 	}
@@ -121,10 +113,8 @@ func (cfg *ServerConfig) Validate() error {
 		return fmt.Errorf("%w: healthListen %q: port must be 1-65535", ErrInvalidConfig, cfg.HealthListen)
 	}
 
-	if cfg.ControlVIP != "" {
-		if _, err := cfg.ControlVIPAddr(); err != nil {
-			return err
-		}
+	if _, err := cfg.ControlVIPAddr(); err != nil {
+		return err
 	}
 
 	if cfg.LeaseExpiryPadding.Duration < 0 {
@@ -146,10 +136,9 @@ func (cfg *ServerConfig) Validate() error {
 	return nil
 }
 
-// ControlVIPAddr returns the control VIP address, or an invalid netip.Addr if it isn't set
 func (cfg *ServerConfig) ControlVIPAddr() (netip.Addr, error) {
 	if cfg.ControlVIP == "" {
-		return netip.Addr{}, nil
+		return netip.Addr{}, fmt.Errorf("%w: controlVIP is required", ErrInvalidConfig)
 	}
 
 	prefix, err := netip.ParsePrefix(cfg.ControlVIP)

@@ -45,7 +45,6 @@ const (
 	ConnectionTypeFabric         = "fabric"
 	ConnectionTypeMesh           = "mesh"
 	ConnectionTypeGateway        = "gateway"
-	ConnectionTypeVPCLoopback    = "vpc-loopback"
 	ConnectionTypeExternal       = "external"
 	ConnectionTypeStaticExternal = "static-external"
 )
@@ -102,7 +101,7 @@ type ConnBundled struct {
 
 // Deprecated: ConnMCLAG defines the MCLAG connection (port channel, single server to pair of switches with multiple links)
 type ConnMCLAG struct {
-	//+kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MinItems=2
 	// Links is the list of server-to-switch links
 	Links []ServerToSwitchLink `json:"links,omitempty"`
 	// ServerFacingConnectionConfig defines any server-facing connection (unbundled, bundled, mclag, etc.) configuration
@@ -113,7 +112,7 @@ type ConnMCLAG struct {
 
 // ConnESLAG defines the ESLAG connection (port channel, single server to 2-4 switches with multiple links)
 type ConnESLAG struct {
-	//+kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MinItems=2
 	// Links is the list of server-to-switch links
 	Links []ServerToSwitchLink `json:"links,omitempty"`
 	// ServerFacingConnectionConfig defines any server-facing connection (unbundled, bundled, eslag, etc.) configuration
@@ -133,11 +132,11 @@ type SwitchToSwitchLink struct {
 // Deprecated: ConnMCLAGDomain defines the MCLAG domain connection which makes two switches into a single logical switch or
 // redundancy group and allows to use MCLAG connections to connect servers in a multi-homed way.
 type ConnMCLAGDomain struct {
-	//+kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MinItems=1
 	// PeerLinks is the list of peer links between the switches, used to pass server traffic between switch
 	PeerLinks []SwitchToSwitchLink `json:"peerLinks,omitempty"`
 
-	//+kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MinItems=1
 	// SessionLinks is the list of session links between the switches, used only to pass MCLAG control plane and BGP
 	// traffic between switches
 	SessionLinks []SwitchToSwitchLink `json:"sessionLinks,omitempty"`
@@ -147,7 +146,7 @@ type ConnMCLAGDomain struct {
 type ConnFabricLinkSwitch struct {
 	// BasePortName defines the full name of the switch port
 	BasePortName `json:",inline"`
-	//+kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
+	// +kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
 	// IP is the IP address of the switch side of the fabric link (switch port configuration)
 	IP string `json:"ip,omitempty"`
 }
@@ -168,7 +167,7 @@ type MeshLink struct {
 
 // ConnFabric defines the fabric connection (single spine to a single leaf with at least one link)
 type ConnFabric struct {
-	//+kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MinItems=1
 	// Links is the list of spine-to-leaf links
 	Links []FabricLink `json:"links,omitempty"`
 }
@@ -177,7 +176,7 @@ type ConnFabric struct {
 type ConnGatewayLinkGateway struct {
 	// BasePortName defines the full name of the gateway port
 	BasePortName `json:",inline"`
-	//+kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
+	// +kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
 	// IP is the IP address of the switch side of the fabric link (switch port configuration)
 	IP string `json:"ip,omitempty"`
 }
@@ -192,25 +191,16 @@ type GatewayLink struct {
 
 // ConnGateway defines the gateway connection (single spine to a single gateway with at least one link)
 type ConnGateway struct {
-	//+kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MinItems=1
 	// Links is the list of spine to gateway links
 	Links []GatewayLink `json:"links,omitempty"`
 }
 
 // ConnMesh defines the mesh connection (direct leaf to leaf connection with at least one link)
 type ConnMesh struct {
-	//+kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MinItems=1
 	// Links is the list of leaf to leaf links
 	Links []MeshLink `json:"links,omitempty"`
-}
-
-// ConnVPCLoopback defines the VPC loopback connection (multiple port pairs on a single switch) that enables automated
-// workaround named "VPC Loopback" that allow to avoid switch hardware limitations and traffic going through CPU in some
-// cases
-type ConnVPCLoopback struct {
-	//+kubebuilder:validation:MinItems=1
-	// Links is the list of VPC loopback links
-	Links []SwitchToSwitchLink `json:"links,omitempty"`
 }
 
 // ConnExternalLink defines the external connection link
@@ -228,10 +218,10 @@ type ConnExternal struct {
 type ConnStaticExternalLinkSwitch struct {
 	// BasePortName defines the full name of the switch port
 	BasePortName `json:",inline"`
-	//+kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
+	// +kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/([1-2]?[0-9]|3[0-2])$`
 	// IP is the IP address of the switch side of the static external connection link (switch port configuration)
 	IP string `json:"ip,omitempty"`
-	//+kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$`
+	// +kubebuilder:validation:Pattern=`^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$`
 	// NextHop is the next hop IP address for static routes that will be created for the subnets
 	NextHop string `json:"nextHop,omitempty"`
 	// Subnets is the list of subnets that will get static routes using the specified next hop
@@ -281,8 +271,6 @@ type ConnectionSpec struct {
 	Mesh *ConnMesh `json:"mesh,omitempty"`
 	// Gateway defines the gateway connection (single spine to a single gateway with at least one link)
 	Gateway *ConnGateway `json:"gateway,omitempty"`
-	// VPCLoopback defines the VPC loopback connection (multiple port pairs on a single switch) for automated workaround
-	VPCLoopback *ConnVPCLoopback `json:"vpcLoopback,omitempty"`
 	// External defines the external connection (single switch to a single external device with a single link)
 	External *ConnExternal `json:"external,omitempty"`
 	// StaticExternal defines the static external connection (single switch to a single external device with a single link)
@@ -316,7 +304,7 @@ type Connection struct {
 
 const KindConnection = "Connection"
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ConnectionList contains a list of Connection
 type ConnectionList struct {
@@ -352,15 +340,6 @@ func NewBasePortName(name string) BasePortName {
 		Port: name,
 	}
 }
-
-// +kubebuilder:object:generate=false
-type IPort interface {
-	PortName() string
-	LocalPortName() string
-	DeviceName() string
-}
-
-var _ IPort = &BasePortName{}
 
 func (pn *BasePortName) PortName() string {
 	return pn.Port
@@ -423,9 +402,6 @@ func (connSpec *ConnectionSpec) GenerateName() string {
 			role = "gateway"
 			left = connSpec.Gateway.Links[0].Switch.DeviceName()
 			right = []string{connSpec.Gateway.Links[0].Gateway.DeviceName()}
-		} else if connSpec.VPCLoopback != nil {
-			role = "vpc-loopback"
-			left = connSpec.VPCLoopback.Links[0].Switch1.DeviceName()
 		} else if connSpec.External != nil {
 			role = "external"
 			left = connSpec.External.Link.Switch.DeviceName()
@@ -459,8 +435,6 @@ func (connSpec *ConnectionSpec) Type() string {
 		return ConnectionTypeMesh
 	} else if connSpec.Gateway != nil {
 		return ConnectionTypeGateway
-	} else if connSpec.VPCLoopback != nil {
-		return ConnectionTypeVPCLoopback
 	} else if connSpec.External != nil {
 		return ConnectionTypeExternal
 	} else if connSpec.StaticExternal != nil {
@@ -627,23 +601,6 @@ func (connSpec *ConnectionSpec) Endpoints() ([]string, []string, []string, map[s
 		if len(ports) != 2*len(connSpec.Gateway.Links) {
 			return nil, nil, nil, nil, errors.Errorf("unique ports must be used for gateway connection")
 		}
-	} else if connSpec.VPCLoopback != nil {
-		nonNills++
-
-		for _, link := range connSpec.VPCLoopback.Links {
-			switches[link.Switch1.DeviceName()] = struct{}{}
-			switches[link.Switch2.DeviceName()] = struct{}{}
-			ports[link.Switch1.PortName()] = struct{}{}
-			ports[link.Switch2.PortName()] = struct{}{}
-			links[link.Switch1.PortName()] = link.Switch2.PortName()
-		}
-
-		if len(switches) != 1 {
-			return nil, nil, nil, nil, errors.Errorf("one switches must be used for vpc-loopback connection")
-		}
-		if len(ports) != 2*len(connSpec.VPCLoopback.Links) {
-			return nil, nil, nil, nil, errors.Errorf("unique ports must be used for vpc-loopback connection")
-		}
 	} else if connSpec.External != nil {
 		nonNills++
 
@@ -697,10 +654,6 @@ func (connSpec *ConnectionSpec) LinkSummary(noColor bool) []string {
 	} else if connSpec.Gateway != nil {
 		for _, link := range connSpec.Gateway.Links {
 			out = append(out, fmt.Sprintf("%s%s%s", link.Switch.PortName(), sep, link.Gateway.PortName()))
-		}
-	} else if connSpec.VPCLoopback != nil {
-		for _, link := range connSpec.VPCLoopback.Links {
-			out = append(out, fmt.Sprintf("%s%s%s", link.Switch1.PortName(), sep, link.Switch2.PortName()))
 		}
 	} else if connSpec.External != nil {
 		out = append(out, connSpec.External.Link.Switch.PortName())
@@ -1098,7 +1051,7 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			for idx, link := range cf.Links {
 				// no IPs on either side means BGP unnumbered, but a link with just one IP is broken
 				if (link.Spine.IP == "") != (link.Leaf.IP == "") {
-					return nil, errors.Errorf("fabric connection %s link %d has an IP on only one side, it must be set on both for a numbered link or on neither for an unnumbered one", conn.Name, idx) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d has an IP on only one side, it must be set on both for a numbered link or on neither for an unnumbered one", conn.Name, idx)
 				}
 				if link.Spine.IP == "" {
 					continue
@@ -1109,15 +1062,15 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing fabric connection %s link %d spine IP %s", conn.Name, idx, link.Spine.IP)
 				}
 				if spinePrefix.Bits() != 31 {
-					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix)
 				}
 
 				spineIP := spinePrefix.Addr()
 				if !fabricSubnet.Contains(spineIP) {
-					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[spineIP]; exist {
-					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP)
 				}
 				fabricIPs[spineIP] = true
 
@@ -1126,20 +1079,20 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing fabric connection %s link %d leaf IP %s", conn.Name, idx, link.Leaf.IP)
 				}
 				if leafPrefix.Bits() != 31 {
-					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix)
 				}
 
 				leafIP := leafPrefix.Addr()
 				if !fabricSubnet.Contains(leafIP) {
-					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[leafIP]; exist {
-					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP)
 				}
 				fabricIPs[leafIP] = true
 
 				if spinePrefix.Masked() != leafPrefix.Masked() {
-					return nil, errors.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+					return nil, errors.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP)
 				}
 			}
 		} else if conn.Spec.Mesh != nil {
@@ -1147,7 +1100,7 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			for idx, link := range cm.Links {
 				// no IPs on either side means BGP unnumbered, but a link with just one IP is broken
 				if (link.Leaf1.IP == "") != (link.Leaf2.IP == "") {
-					return nil, errors.Errorf("mesh connection %s link %d has an IP on only one side, it must be set on both for a numbered link or on neither for an unnumbered one", conn.Name, idx) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d has an IP on only one side, it must be set on both for a numbered link or on neither for an unnumbered one", conn.Name, idx)
 				}
 				if link.Leaf1.IP == "" {
 					continue
@@ -1158,15 +1111,15 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing mesh connection %s link %d leaf1 IP %s", conn.Name, idx, link.Leaf1.IP)
 				}
 				if leaf1Prefix.Bits() != 31 {
-					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is not a /31", conn.Name, idx, leaf1Prefix) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is not a /31", conn.Name, idx, leaf1Prefix)
 				}
 
 				leaf1IP := leaf1Prefix.Addr()
 				if !fabricSubnet.Contains(leaf1IP) {
-					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf1IP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf1IP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[leaf1IP]; exist {
-					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is already in use", conn.Name, idx, leaf1IP) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s is already in use", conn.Name, idx, leaf1IP)
 				}
 				fabricIPs[leaf1IP] = true
 
@@ -1175,20 +1128,20 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing mesh connection %s link %d leaf2 IP %s", conn.Name, idx, link.Leaf2.IP)
 				}
 				if leaf2Prefix.Bits() != 31 {
-					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is not a /31", conn.Name, idx, leaf2Prefix) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is not a /31", conn.Name, idx, leaf2Prefix)
 				}
 
 				leaf2IP := leaf2Prefix.Addr()
 				if !fabricSubnet.Contains(leaf2IP) {
-					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf2IP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf2IP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[leaf2IP]; exist {
-					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is already in use", conn.Name, idx, leaf2IP) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf2 IP %s is already in use", conn.Name, idx, leaf2IP)
 				}
 				fabricIPs[leaf2IP] = true
 
 				if leaf1Prefix.Masked() != leaf2Prefix.Masked() {
-					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s and leaf2 IP %s are not in the same subnet", conn.Name, idx, leaf1IP, leaf2IP) //nolint:goerr113
+					return nil, errors.Errorf("mesh connection %s link %d leaf1 IP %s and leaf2 IP %s are not in the same subnet", conn.Name, idx, leaf1IP, leaf2IP)
 				}
 			}
 		} else if conn.Spec.Gateway != nil {
@@ -1196,7 +1149,7 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			for idx, link := range cg.Links {
 				// unlike fabric and mesh links, gateway links can't be unnumbered yet, so both IPs are required
 				if link.Switch.IP == "" || link.Gateway.IP == "" {
-					return nil, errors.Errorf("gateway connection %s link %d is missing an IP, it must be set on both sides as unnumbered gateway links are not supported yet", conn.Name, idx) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d is missing an IP, it must be set on both sides as unnumbered gateway links are not supported yet", conn.Name, idx)
 				}
 
 				switchPrefix, err := netip.ParsePrefix(link.Switch.IP)
@@ -1204,15 +1157,15 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing gateway connection %s link %d switch IP %s", conn.Name, idx, link.Switch.IP)
 				}
 				if switchPrefix.Bits() != 31 {
-					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is not a /31", conn.Name, idx, switchPrefix) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is not a /31", conn.Name, idx, switchPrefix)
 				}
 
 				switchIP := switchPrefix.Addr()
 				if !fabricSubnet.Contains(switchIP) {
-					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is not in the fabric subnet %s", conn.Name, idx, switchIP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is not in the fabric subnet %s", conn.Name, idx, switchIP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[switchIP]; exist {
-					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is already in use", conn.Name, idx, switchIP) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d switch IP %s is already in use", conn.Name, idx, switchIP)
 				}
 				fabricIPs[switchIP] = true
 
@@ -1221,20 +1174,20 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 					return nil, errors.Wrapf(err, "parsing gateway connection %s link %d gateway IP %s", conn.Name, idx, link.Gateway.IP)
 				}
 				if gwPrefix.Bits() != 31 {
-					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is not a /31", conn.Name, idx, gwPrefix) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is not a /31", conn.Name, idx, gwPrefix)
 				}
 
 				gwIP := gwPrefix.Addr()
 				if !fabricSubnet.Contains(gwIP) {
-					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is not in the fabric subnet %s", conn.Name, idx, gwIP, fabricSubnet) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is not in the fabric subnet %s", conn.Name, idx, gwIP, fabricSubnet)
 				}
 				if _, exist := fabricIPs[gwIP]; exist {
-					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is already in use", conn.Name, idx, gwIP) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d gateway IP %s is already in use", conn.Name, idx, gwIP)
 				}
 				fabricIPs[gwIP] = true
 
 				if switchPrefix.Masked() != gwPrefix.Masked() {
-					return nil, errors.Errorf("gateway connection %s link %d switch IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, switchIP, gwIP) //nolint:goerr113
+					return nil, errors.Errorf("gateway connection %s link %d switch IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, switchIP, gwIP)
 				}
 			}
 		}
