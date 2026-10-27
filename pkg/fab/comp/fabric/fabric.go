@@ -238,7 +238,6 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		APIServer:              netip.AddrPortFrom(controlVIP.Addr(), k3s.APIPort).String(),
 		AgentRepo:              comp.JoinURLParts(registry, comp.RegistryPrefix, AgentRef),
 		VPCIRBVLANRanges:       f.Spec.Config.Fabric.VPCIRBVLANs,
-		VPCPeeringVLANRanges:   f.Spec.Config.Fabric.VPCWorkaroundVLANs,
 		TH5WorkaroundVLANRange: f.Spec.Config.Fabric.TH5WorkaroundVLANs,
 		VPCPeeringDisabled:     false, // TODO remove?
 		ReservedSubnets: []string{
@@ -247,14 +246,12 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 			string(f.Spec.Config.Fabric.FabricSubnet),
 			string(f.Spec.Config.Fabric.ProtocolSubnet),
 			string(f.Spec.Config.Fabric.VTEPSubnet),
-			string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
 			string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 			string(f.Spec.Config.Fabric.ProxyExternalSubnet),
 		},
 		Users:                    users,
 		FabricMode:               f.Spec.Config.Fabric.Mode,
 		BaseVPCCommunity:         f.Spec.Config.Fabric.BaseVPCCommunity,
-		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
 		FabricMTU:                MTU,                   // TODO use
 		ServerFacingMTUOffset:    ServerFacingMTUOffset, // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,

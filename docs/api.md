@@ -400,9 +400,6 @@ _Appears in:_
 | `proxyExternalSubnet` _Prefix_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
-| `loopbackWorkaroundDisable` _boolean_ |  |  |  |
-| `vpcWorkaroundVLANs` _VLANRange array_ |  |  |  |
-| `vpcWorkaroundSubnet` _Prefix_ |  |  |  |
 | `th5WorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
 | `eslagESIPrefix` _string_ |  |  |  |

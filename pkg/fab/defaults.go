@@ -39,15 +39,11 @@ var DefaultConfig = fabapi.FabConfig{
 		VPCIRBVLANs: []fmeta.VLANRange{
 			{From: 3000, To: 3899},
 		},
-		VPCWorkaroundVLANs: []fmeta.VLANRange{
-			{From: 100, To: 3999},
-		},
-		VPCWorkaroundSubnet: "172.30.96.0/19",    // 4096 /31 subnets: 172.30.96.1 - 172.30.127.254 // TODO make sure it's really used
-		ESLAGMACBase:        "f2:00:00:00:00:00", // TODO make sure it's really used
-		ESLAGESIPrefix:      "00:f2:00:00:",      // TODO make sure it's really used
-		MCLAGSessionSubnet:  "172.30.95.0/31",
-		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
-		DefaultAlloyConfig:  fmeta.AlloyConfig{},
+		ESLAGMACBase:       "f2:00:00:00:00:00", // TODO make sure it's really used
+		ESLAGESIPrefix:     "00:f2:00:00:",      // TODO make sure it's really used
+		MCLAGSessionSubnet: "172.30.95.0/31",
+		DefaultSwitchUsers: map[string]fabapi.SwitchUser{},
+		DefaultAlloyConfig: fmeta.AlloyConfig{},
 		TH5WorkaroundVLANs: []fmeta.VLANRange{
 			{From: 3900, To: 3999},
 		},
