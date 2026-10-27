@@ -21,7 +21,9 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -1557,4 +1559,46 @@ func makeVPCAttachment(connName, vpcName, subnetName string) *vpcapi.VPCAttachme
 			Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
 		},
 	}
+}
+
+// gatewayPeeringSpec peers two VPCs through the gateway group.
+func gatewayPeeringSpec(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error) {
+	specs := emptyPeeringSpecs()
+	err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, nil)
+
+	return specs, err
+}
+
+// listGatewayPods lists the pods of the gateway, the gateway controller labels them with the daemonset name.
+func listGatewayPods(ctx context.Context, kube kclient.Reader, gwName string) ([]corev1.Pod, error) {
+	pods := &corev1.PodList{}
+	if err := kube.List(ctx, pods, kclient.InNamespace(comp.FabNamespace), kclient.MatchingLabels{gwPodNameLabel: gwapi.DaemonSetName(gwName)}); err != nil {
+		return nil, fmt.Errorf("listing pods of gateway %s: %w", gwName, err)
+	}
+
+	return pods.Items, nil
+}
+
+func podReady(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodRunning && slices.ContainsFunc(pod.Status.Conditions, func(cond corev1.PodCondition) bool {
+		return cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue
+	})
+}
+
+// checkGatewayTraffic waits for the datapath after a gateway change and runs a short connectivity check.
+func (testCtx *VPCPeeringTestCtx) checkGatewayTraffic(ctx context.Context, matrix *ConnectivityMatrix, tcOpts TestConnectivityOpts) error {
+	// Give the gateway time to react
+	slog.Info("Waiting a few seconds for gateway to react...")
+	time.Sleep(5 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for ready: %w", err)
+	}
+	if err := testCtx.waitForDatapathConverged(ctx, tcOpts, matrix, defaultDatapathConvergeTimeout, 1); err != nil {
+		return fmt.Errorf("datapath convergence: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
+		return fmt.Errorf("testing connectivity: %w", err)
+	}
+
+	return nil
 }
