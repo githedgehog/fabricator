@@ -24,14 +24,14 @@ spec:
       {{- if .TLSSAN }}
       tlsSAN: # IPs and DNS names that will be used to access API
         {{- range .TLSSAN }}
-        - "{{ . }}"
+        - {{ . | toJson }}
         {{- end }}
       {{- else }}
       #tlsSAN: # IPs and DNS names that will be used to access API
       #  - "fabric.local"
       {{- end }}
       {{- if .JoinToken }}
-      joinToken: "{{ .JoinToken }}"
+      joinToken: {{ .JoinToken | toJson }}
       {{- else }}
       # join token that will be used for the first control node installation and joining other nodes to the cluster
       # if it wasn't set the random one will be generated, but if first control node is already installed, it could be
@@ -43,14 +43,14 @@ spec:
 
       defaultUser: # user 'core' on all control nodes
         {{- if .DefaultPasswordHash }}
-        password: "{{ .DefaultPasswordHash }}" # password hash
+        password: {{ .DefaultPasswordHash | toJson }} # password hash
         {{- else }}
         #password: "$5$8nAYPGcl4..." # password hash
         {{- end }}
         {{- if .DefaultAuthorizedKeys }}
         authorizedKeys:
           {{- range .DefaultAuthorizedKeys }}
-          - "{{ . }}"
+          - {{ . | toJson }}
           {{- end }}
         {{- else }}
         #authorizedKeys: # optional SSH authorized keys
@@ -69,14 +69,14 @@ spec:
         admin: # at least one user with name 'admin' and role 'admin'
           role: admin
           {{- if .DefaultPasswordHash }}
-          password: "{{ .DefaultPasswordHash }}" # password hash
+          password: {{ .DefaultPasswordHash | toJson }} # password hash
           {{- else }}
           #password: "$5$8nAYPGcl4..." # password hash
           {{- end }}
           {{- if .DefaultAuthorizedKeys }}
           authorizedKeys:
             {{- range .DefaultAuthorizedKeys }}
-            - "{{ . }}"
+            - {{ . | toJson }}
             {{- end }}
           {{- else }}
           #authorizedKeys: # optional SSH authorized keys
@@ -85,25 +85,25 @@ spec:
         op: # optional read-only user
           role: operator
           {{- if .DefaultPasswordHash }}
-          password: "{{ .DefaultPasswordHash }}" # password hash
+          password: {{ .DefaultPasswordHash | toJson }} # password hash
           {{- else }}
           #password: "$5$8nAYPGcl4..." # password hash
           {{- end }}
           {{- if .DefaultAuthorizedKeys }}
           authorizedKeys:
             {{- range .DefaultAuthorizedKeys }}
-            - "{{ . }}"
+            - {{ . | toJson }}
             {{- end }}
           {{- else }}
           #authorizedKeys: # optional SSH authorized keys
           #  - "ssh-ed25519 AAAAC3Nza..."
           {{- end }}
     observability:
-      defaults: "{{ .O11yDefaults }}"
+      defaults: {{ .O11yDefaults | toJson }}
       {{ if .O11yLabels }}
       labels:
         {{- range $key, $value := .O11yLabels }}
-        "{{ $key }}": "{{ $value }}"
+        {{ $key | toJson }}: {{ $value | toJson }}
         {{- end }}
       {{- end }}
     {{ if .Gateway }}
@@ -119,7 +119,7 @@ metadata:
   namespace: fab
   {{- if index .NodeManagementLinks "control-1" }}
   annotations:
-    link.hhfab.githedgehog.com/enp2s1: {{ index .NodeManagementLinks "control-1" }}
+    link.hhfab.githedgehog.com/enp2s1: {{ index .NodeManagementLinks "control-1" | toJson }}
   {{- end }}
 spec:
   bootstrap:
@@ -141,7 +141,7 @@ metadata:
   namespace: fab
   {{- if index $.NodeManagementLinks $name }}
   annotations:
-    link.hhfab.githedgehog.com/enp2s0: {{ index $.NodeManagementLinks $name }}
+    link.hhfab.githedgehog.com/enp2s0: {{ index $.NodeManagementLinks $name | toJson }}
   {{- end }}
 spec:
   roles:

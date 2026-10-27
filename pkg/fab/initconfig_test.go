@@ -103,6 +103,47 @@ func TestInitConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "input-special-chars",
+			in: fab.InitConfigInput{
+				TLSSAN:                []string{"!foo: #1"},
+				DefaultPasswordHash:   "$5$bar",
+				DefaultAuthorizedKeys: []string{`from="10.0.0.0/8" ssh-ed25519 AAAA "user\1"`},
+				O11yLabels:            map[string]string{`env: "x"`: `!prod <eu> & #1`},
+			},
+			expectedFab: fabapi.Fabricator{
+				Name:      comp.FabName,
+				Namespace: comp.FabNamespace,
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							TLSSAN: []string{"!foo: #1"},
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   "$5$bar",
+								AuthorizedKeys: []string{`from="10.0.0.0/8" ssh-ed25519 AAAA "user\1"`},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{`from="10.0.0.0/8" ssh-ed25519 AAAA "user\1"`},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{`from="10.0.0.0/8" ssh-ed25519 AAAA "user\1"`},
+								},
+							},
+						},
+						Observability: fabapi.ObservabilityConfig{
+							Labels: map[string]string{`env: "x"`: `!prod <eu> & #1`},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "input-dev",
 			in: fab.InitConfigInput{
 				TLSSAN:                []string{"foo"},
