@@ -8,7 +8,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
-// IPs for ~1000 switches, ASNs are for 433 leafs
+// IPs for ~1000 switches. ASNs use one asdot block: spines from .1, gateways from .501 and leafs .1000-.9999
 var DefaultConfig = fabapi.FabConfig{
 	Control: fabapi.ControlConfig{
 		ManagementSubnet:  "172.30.0.0/21", // 2046 hosts: 172.30.0.1 - 172.30.7.254
@@ -28,9 +28,9 @@ var DefaultConfig = fabapi.FabConfig{
 		Mode:                fmeta.FabricModeSpineLeaf,
 		ManagementDHCPStart: "172.30.4.0", // second half of the management subnet
 		ManagementDHCPEnd:   "172.30.7.254",
-		SpineASN:            65100, // TODO probably switch to 32-bit ASNs
-		LeafASNStart:        65101,
-		LeafASNEnd:          65533,             // only 432 leafs
+		SpineASN:            4200005633,        // 64087.1 in asdot
+		LeafASNStart:        4200006632,        // 64087.1000 in asdot
+		LeafASNEnd:          4200015631,        // 64087.9999 in asdot
 		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
 		VTEPSubnet:          "172.30.12.0/22",  // 1022 hosts: 172.30.12.1 - 172.30.15.254
 		ProxyExternalSubnet: "172.30.16.0/22",  // 516 /31 subnets: 172.30.16.0/31 - 172.30.19.254/31
@@ -49,6 +49,6 @@ var DefaultConfig = fabapi.FabConfig{
 		},
 	},
 	Gateway: fabapi.GatewayConfig{
-		ASN: 65534, // TODO do we need to be able to have gateways with different ASNs?
+		ASN: 4200006133, // 64087.501 in asdot
 	},
 }

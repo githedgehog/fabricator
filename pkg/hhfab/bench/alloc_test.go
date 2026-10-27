@@ -223,23 +223,23 @@ func TestAllocatorValues(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "172.30.12.0/32", vtep.String())
 
-	// Slot s owns the block starting at 4200000000 + s*1000.
+	// Slot s owns the block starting at 4210000000 + s*1000.
 	asns, err := a.ASNs(0)
 	require.NoError(t, err)
 	require.Equal(t, bench.ASNBlock{
-		Spines:    []uint32{4_200_000_001},
-		Gateways:  []uint32{4_200_000_051},
-		LeafStart: 4_200_000_100,
-		LeafEnd:   4_200_000_163,
+		Spines:    []uint32{4_210_000_001},
+		Gateways:  []uint32{4_210_000_051},
+		LeafStart: 4_210_000_100,
+		LeafEnd:   4_210_000_163,
 	}, asns)
 
 	asn, err := a.LeafASN(0, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(4_200_000_100), asn)
+	require.Equal(t, uint32(4_210_000_100), asn)
 
 	asn, err = a.LeafASN(1, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(4_200_001_100), asn)
+	require.Equal(t, uint32(4_210_001_100), asn)
 }
 
 // Each domain of a fabric is its own address unit, so a fabric with several
@@ -272,20 +272,20 @@ func TestAllocatorDomains(t *testing.T) {
 	asns, err := a.ASNs(0)
 	require.NoError(t, err)
 	require.Equal(t, bench.ASNBlock{
-		Spines:    []uint32{4_200_000_001, 4_200_000_002, 4_200_000_003},
-		Gateways:  []uint32{4_200_000_051, 4_200_000_052, 4_200_000_053},
-		LeafStart: 4_200_000_100,
-		LeafEnd:   4_200_000_100 + 3*bench.StrideLeaves - 1,
+		Spines:    []uint32{4_210_000_001, 4_210_000_002, 4_210_000_003},
+		Gateways:  []uint32{4_210_000_051, 4_210_000_052, 4_210_000_053},
+		LeafStart: 4_210_000_100,
+		LeafEnd:   4_210_000_100 + 3*bench.StrideLeaves - 1,
 	}, asns)
 
 	asn, err := a.LeafASN(0, 2, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(4_200_000_100+2*bench.StrideLeaves), asn)
+	require.Equal(t, uint32(4_210_000_100+2*bench.StrideLeaves), asn)
 
 	// The second fabric's ASNs are keyed by its slot, not its unit.
 	asn, err = a.LeafASN(1, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(4_200_001_100), asn)
+	require.Equal(t, uint32(4_210_001_100), asn)
 
 	// Addresses are keyed by unit: domain 1 of f0 sits a full stride after
 	// domain 0.
@@ -349,11 +349,14 @@ func TestAllocatorASNBlocksAreConsistent(t *testing.T) {
 		}
 	}
 
-	// All of it is in the 32-bit private range, clear of the stock 16-bit ASNs.
-	last := blocks[len(blocks)-1]
-	require.GreaterOrEqual(t, blocks[0].Spines[0], uint32(bench.ASNPrivate32Start))
-	require.LessOrEqual(t, last.LeafEnd, uint32(bench.ASNPrivate32End))
-	require.Greater(t, blocks[0].Spines[0], fab.DefaultConfig.Fabric.LeafASNEnd)
+	// All of it is in the 32-bit private range, clear of the stock default fabric.
+	require.LessOrEqual(t, blocks[len(blocks)-1].LeafEnd, uint32(bench.ASNPrivate32End))
+	def := fab.DefaultConfig
+	defLo := min(def.Fabric.SpineASN, def.Fabric.LeafASNStart, def.Gateway.ASN)
+	defHi := max(def.Fabric.SpineASN, def.Fabric.LeafASNEnd, def.Gateway.ASN)
+	for i, block := range blocks {
+		require.False(t, block.Spines[0] <= defHi && defLo <= block.LeafEnd, "slot %d ASNs overlap the default fabric's %d-%d", i, defLo, defHi)
+	}
 }
 
 // Fabric link addresses must be a /31 pair in the same subnet, which

@@ -353,7 +353,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 	var extraDomains map[string]wiringapi.FabricDomainSpec
 	if b.ExtraDomain {
-		extraDomains = map[string]wiringapi.FabricDomainSpec{VLABExtraDomain: {SpineASN: 64702, GatewayASN: 64703}}
+		extraDomains = map[string]wiringapi.FabricDomainSpec{VLABExtraDomain: {
+			SpineASN:   4200005634, // 64087.2 in asdot
+			GatewayASN: 4200006134, // 64087.502 in asdot
+		}}
 	}
 	if err := b.createDefaultFabric(ctx, f, extraDomains); err != nil {
 		return err
@@ -971,11 +974,14 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		APIVersion: wiringapi.GroupVersion.String(),
 		Name:       VLABExtraFabric,
 		Spec: wiringapi.FabricSpec{
-			LeafASNStart: 64801,
-			LeafASNEnd:   64899,
+			LeafASNStart: 4200072168, // 64088.1000 in asdot
+			LeafASNEnd:   4200081167, // 64088.9999 in asdot
 			DisableBFD:   f.Spec.Config.Fabric.DisableBFD,
 			Domains: map[string]wiringapi.FabricDomainSpec{
-				wiringapi.DefaultFabricDomain: {SpineASN: 64900, GatewayASN: 64901},
+				wiringapi.DefaultFabricDomain: {
+					SpineASN:   4200071169, // 64088.1 in asdot
+					GatewayASN: 4200071669, // 64088.501 in asdot
+				},
 			},
 		},
 	}); err != nil {
