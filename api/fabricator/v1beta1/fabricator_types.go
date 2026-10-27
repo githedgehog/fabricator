@@ -269,10 +269,6 @@ type FabricConfig struct {
 	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
 	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
 
-	LoopbackWorkaroundDisable bool              `json:"loopbackWorkaroundDisable,omitempty"` // TODO remove, kept for backward compat, ignored
-	VPCWorkaroundVLANs        []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
-	VPCWorkaroundSubnet       meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
-
 	TH5WorkaroundVLANs []fmeta.VLANRange `json:"th5WorkaroundVLANs,omitempty"`
 
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
@@ -542,8 +538,6 @@ func (f *Fabricator) Default() {
 			"9": "50001:9",
 		}
 	}
-
-	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
 
 	o11yNotNone := f.Spec.Config.Observability.Defaults != ObservabilityDefaultsNone
 	o11yMinimal := f.Spec.Config.Observability.Defaults == ObservabilityDefaultsMinimal
@@ -904,11 +898,6 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing MCLAG session subnet: %w", err)
 	}
 
-	vpcLoopSubnet, err := f.Spec.Config.Fabric.VPCWorkaroundSubnet.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing VPC workaround subnet: %w", err)
-	}
-
 	// TODO validate actual community
 	if f.Spec.Config.Fabric.BaseVPCCommunity == "" {
 		return fmt.Errorf("base VPC community is required") //nolint:err113
@@ -920,17 +909,11 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	}
 
 	// TODO validate actual VLANs and that it's a reasonable range
-	if len(f.Spec.Config.Fabric.VPCWorkaroundVLANs) == 0 {
-		return fmt.Errorf("VPC workaround VLANs are required") //nolint:err113
-	}
-
-	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:err113
 	}
 
-	// Ensure that TH5 and IRB VLANs do not overlap. VPC workaround VLANs are not a problem
-	// as they are used on subinterfaces instead
+	// Ensure that TH5 and IRB VLANs do not overlap
 	if err := fmeta.CheckVLANRangesOverlap(append(slices.Clone(f.Spec.Config.Fabric.TH5WorkaroundVLANs), f.Spec.Config.Fabric.VPCIRBVLANs...)); err != nil {
 		return fmt.Errorf("overlap between TH5 workaround VLAN ranges and IRB VLAN ranges: %w", err)
 	}
@@ -953,7 +936,6 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		fabricSubnet,
 		dummySubnet,
 		mclagSessionSubnet,
-		vpcLoopSubnet,
 	}
 
 	for someIdx, some := range reservedSubnets {

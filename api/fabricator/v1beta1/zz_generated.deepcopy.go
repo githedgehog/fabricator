@@ -431,11 +431,6 @@ func (in *FabricConfig) DeepCopyInto(out *FabricConfig) {
 		*out = make([]apimeta.VLANRange, len(*in))
 		copy(*out, *in)
 	}
-	if in.VPCWorkaroundVLANs != nil {
-		in, out := &in.VPCWorkaroundVLANs, &out.VPCWorkaroundVLANs
-		*out = make([]apimeta.VLANRange, len(*in))
-		copy(*out, *in)
-	}
 	if in.TH5WorkaroundVLANs != nil {
 		in, out := &in.TH5WorkaroundVLANs, &out.TH5WorkaroundVLANs
 		*out = make([]apimeta.VLANRange, len(*in))
