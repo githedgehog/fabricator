@@ -19,6 +19,7 @@ import (
 
 	"dario.cat/mergo"
 	"github.com/charmbracelet/keygen"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -78,8 +79,6 @@ const (
 	VLABMaxMgmtTaps = 100
 	// VLABLinkMTU leaves room above the 9100 of the fabric links, a bridge drops frames bigger than the tap they leave by
 	VLABLinkMTU = 9216
-	// VLABGatewayNICQueues is the queue pairs of the gateway's virtio-net NICs on links
-	VLABGatewayNICQueues = 8
 )
 
 type VLAB struct {
@@ -279,10 +278,46 @@ type VMSizes struct {
 }
 
 type VMConfig struct {
-	Type          VMType            `json:"type"`
-	SwitchMode    VMSwitchMode      `json:"switchMode,omitempty"`
-	SwitchProfile string            `json:"switchProfile,omitempty"`
-	NICs          map[string]string `json:"nics"`
+	Type          VMType       `json:"type"`
+	SwitchMode    VMSwitchMode `json:"switchMode,omitempty"`
+	SwitchProfile string       `json:"switchProfile,omitempty"`
+	// Queues is the queue pairs of the gateway's NICs on links, taken from the wiring on each run and never saved, so
+	// the VLAB configs of other releases keep working for both of them
+	Queues uint8             `json:"-"`
+	NICs   map[string]string `json:"nics"`
+}
+
+// gatewayNICQueues is the queue pairs a gateway's NICs on links get for the dataplane workers
+func gatewayNICQueues(workers uint8) uint8 {
+	return workers
+}
+
+// setGatewayQueues sets the NIC queues of the gateway VMs from the workers of their gateways in the wiring
+func setGatewayQueues(ctx context.Context, cfg *VLABConfig, wiring kclient.Reader) error {
+	gateways := &gwapi.GatewayList{}
+	if err := wiring.List(ctx, gateways); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+
+	workers := map[string]uint8{}
+	for _, gw := range gateways.Items {
+		workers[gw.Name] = gw.Spec.Workers
+	}
+
+	for name, vm := range cfg.VMs {
+		if vm.Type != VMTypeGateway {
+			continue
+		}
+
+		if workers[name] == 0 {
+			return fmt.Errorf("no gateway with workers for gateway VM %q", name) //nolint:err113
+		}
+
+		vm.Queues = gatewayNICQueues(workers[name])
+		cfg.VMs[name] = vm
+	}
+
+	return nil
 }
 
 type VMType string
@@ -504,6 +539,10 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 	if !createCfg {
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
+	}
+
+	if err := setGatewayQueues(ctx, vlabCfg, c.Client); err != nil {
+		return nil, fmt.Errorf("setting gateway queues: %w", err)
 	}
 
 	vlab, err := vlabFromConfig(vlabCfg, opts.VLABRunOpts)
@@ -1131,6 +1170,10 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	linkTaps := map[nicKey]string{} // the tap of each link's end not processed yet
 	for _, name := range orderedVMNames {
 		vm := cfg.VMs[name]
+		if vm.Type == VMTypeGateway && vm.Queues == 0 {
+			return nil, fmt.Errorf("no NIC queues for gateway VM %q", name) //nolint:err113
+		}
+
 		vmID := vmIDs[name]
 		maxNICID := uint(0)
 		nics := map[uint]string{}
@@ -1175,7 +1218,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
-			multiQueue := false
+			queues := 0 // of the gateway's NICs on links
 			port := getDirectNICPort(vmID, uint(nicID))
 			switch nicType {
 			case NICTypeNoop:
@@ -1203,8 +1246,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
 				}
 
-				otherType := cfg.VMs[otherVM].Type
-				if vm.Type != VMTypeGateway && otherType != VMTypeGateway {
+				other := cfg.VMs[otherVM]
+				if vm.Type != VMTypeGateway && other.Type != VMTypeGateway {
 					otherPort := getDirectNICPort(otherVMID, otherNICID)
 					netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", port, otherPort)
 
@@ -1222,11 +1265,10 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 						Taps:   2,
 						Queues: map[int]int{},
 					}
-					if vm.Type == VMTypeGateway {
-						hostLink.Queues[0] = VLABGatewayNICQueues
-					}
-					if otherType == VMTypeGateway {
-						hostLink.Queues[1] = VLABGatewayNICQueues
+					for idx, end := range []VMConfig{vm, other} {
+						if end.Type == VMTypeGateway && end.Queues > 1 {
+							hostLink.Queues[idx] = int(end.Queues)
+						}
 					}
 					links = append(links, hostLink)
 
@@ -1236,8 +1278,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 				netdev = fmt.Sprintf("tap,ifname=%s,script=no,downscript=no", tap)
 				if vm.Type == VMTypeGateway {
-					multiQueue = true
-					netdev += fmt.Sprintf(",vhost=off,queues=%d", VLABGatewayNICQueues)
+					queues = int(vm.Queues)
+					netdev += fmt.Sprintf(",vhost=off,queues=%d", queues)
 				}
 			case NICTypeUsernet:
 				if usernet > 0 {
@@ -1301,12 +1343,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
 
-				// dpdk needs a queue pair per worker plus one for the control plane, so the gateway's NICs on links
-				// are virtio-net with as many queues, the ones filling the gaps between them stay e1000 as unused
-				if multiQueue {
+				// dpdk needs a queue pair per worker, so the gateway's NICs on links are virtio-net with the queues
+				// from its gateway, the ones filling the gaps between them stay e1000 as unused
+				if queues > 0 {
 					nic = VLABVirtioNet
 					// a vector per queue each way, plus one for config changes and one for the control queue
-					link = fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*VLABGatewayNICQueues+2, VLABVirtioNetSpeed)
+					link = fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*queues+2, VLABVirtioNetSpeed)
 					// the gateway has an IOMMU for vfio-pci, virtio-net goes around it unless told otherwise and
 					// would then DMA to the guest physical addresses instead of the IOVAs DPDK gives it; only a
 					// modern (non-legacy) virtio device can be told so
