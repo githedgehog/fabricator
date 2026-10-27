@@ -319,11 +319,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 				require.NoError(t, err, name)
 				require.Equal(t, vlabcomp.GatewayPCI(uint8(nicID)), iface.PCI, name) //nolint:gosec
 
-				kernel := ""
-				if driver == GatewayDriverKernel {
-					kernel = vlabcomp.GatewayKernel(uint8(nicID)) //nolint:gosec
-				}
-				require.Equal(t, kernel, iface.Kernel, name)
+				require.Equal(t, vlabcomp.GatewayKernel(uint8(nicID)), iface.Kernel, name) //nolint:gosec
 
 				var slot uint
 				_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
