@@ -21,18 +21,29 @@ const (
 	NodeTypeHW         = "hw"
 )
 
+// Gateway VM NICs except the management one are on the root bus, so each is in its own IOMMU group for vfio-pci.
+// The igb NICs expose SR-IOV VFs at PF devfn + 0x80 with stride 2, i.e. in slots PF+16 and PF+17, and QEMU 10.x
+// rejects a PF whose VFs overflow the bus or overlap another PF's VFs, so the PF slots are spaced by 2. The first
+// slot is the one after the fixed devices (virtio rng and blk, two DMI bridges) and the last is 0xd, as slot 0xe
+// puts a VF on the q35 LPC device at slot 31.
 const (
-	// gateway VM NICs except the management one are on the root bus, so each is in its own IOMMU group for vfio-pci
-	GatewayNICBaseSlot = 0x10
-	GatewayMaxNICs     = 0x1f - GatewayNICBaseSlot // 0x1f is the q35 chipset
+	GatewayNICBaseSlot = 0x6
+	GatewayNICSlotStep = 2
+	gatewayNICLastSlot = 0xd
+	GatewayMaxNICs     = (gatewayNICLastSlot-GatewayNICBaseSlot)/GatewayNICSlotStep + 1
 )
+
+// GatewayNICSlot is the PCI slot on the root bus of the gateway VM NIC, nicID is 1-based as 0 is the management NIC.
+func GatewayNICSlot(nicID uint8) uint8 {
+	return GatewayNICBaseSlot + GatewayNICSlotStep*(nicID-1)
+}
 
 func GatewayPCI(nicID uint8) string {
 	if nicID == 0 {
 		return "0000:02:00.0"
 	}
 
-	return fmt.Sprintf("0000:00:%02x.0", GatewayNICBaseSlot+nicID-1)
+	return fmt.Sprintf("0000:00:%02x.0", GatewayNICSlot(nicID))
 }
 
 func GatewayKernel(nicID uint8) string {
@@ -40,7 +51,7 @@ func GatewayKernel(nicID uint8) string {
 		return "enp2s0"
 	}
 
-	return fmt.Sprintf("enp0s%d", GatewayNICBaseSlot+nicID-1)
+	return fmt.Sprintf("enp0s%d", GatewayNICSlot(nicID))
 }
 
 func FlatcarVersion(f fabapi.Fabricator) meta.Version {

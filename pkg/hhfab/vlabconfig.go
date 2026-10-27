@@ -1138,7 +1138,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				if nicID > vlabcomp.GatewayMaxNICs {
 					return nil, fmt.Errorf("too many NICs for gateway VM %q: %d", name, nicID) //nolint:err113
 				}
-				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", vlabcomp.GatewayNICBaseSlot+nicID-1)
+				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", vlabcomp.GatewayNICSlot(uint8(nicID)))
 			} else {
 				device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 			}
