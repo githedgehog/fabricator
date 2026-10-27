@@ -14,11 +14,11 @@ spec:
     registry:
       mode: upstream
       upstream:
-        repo: {{ .RegUpstream.Repo }}
-        prefix: {{ .RegUpstream.Prefix }}
+        repo: {{ .RegUpstream.Repo | toJson }}
+        prefix: {{ .RegUpstream.Prefix | toJson }}
         noTLSVerify: {{ .RegUpstream.NoTLSVerify }}
-        username: {{ .RegUpstream.Username }}
-        password: {{ .RegUpstream.Password }}
+        username: {{ .RegUpstream.Username | toJson }}
+        password: {{ .RegUpstream.Password | toJson }}
     {{- end }}
     control:
       {{- if .TLSSAN }}
