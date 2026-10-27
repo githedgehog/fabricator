@@ -248,8 +248,6 @@ spec:
                       leafASNStart:
                         format: int32
                         type: integer
-                      loopbackWorkaroundDisable:
-                        type: boolean
                       managementDHCPEnd:
                         type: string
                       managementDHCPStart:
@@ -338,17 +336,6 @@ spec:
                           type: object
                         type: array
                       vpcIRBVLANs:
-                        items:
-                          properties:
-                            from:
-                              type: integer
-                            to:
-                              type: integer
-                          type: object
-                        type: array
-                      vpcWorkaroundSubnet:
-                        type: string
-                      vpcWorkaroundVLANs:
                         items:
                           properties:
                             from:
