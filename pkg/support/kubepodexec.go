@@ -112,15 +112,29 @@ func gatewayExecSkipReason(pod corev1.Pod) string {
 		}
 	}
 
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name != gatewayDataplaneContainer || status.State.Waiting == nil {
-			continue
+	for _, status := range pod.Status.InitContainerStatuses {
+		if reason := stuckContainerReason(status); reason != "" {
+			return "init container " + status.Name + " " + reason
 		}
+	}
 
-		switch reason := status.State.Waiting.Reason; reason {
-		case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError", "CreateContainerError", "InvalidImageName":
-			return "dataplane container " + reason + ": " + status.State.Waiting.Message
+	for _, status := range pod.Status.ContainerStatuses {
+		if reason := stuckContainerReason(status); status.Name == gatewayDataplaneContainer && reason != "" {
+			return "dataplane container " + reason
 		}
+	}
+
+	return ""
+}
+
+func stuckContainerReason(status corev1.ContainerStatus) string {
+	if status.State.Waiting == nil {
+		return ""
+	}
+
+	switch reason := status.State.Waiting.Reason; reason {
+	case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError", "CreateContainerError", "InvalidImageName":
+		return reason + ": " + status.State.Waiting.Message
 	}
 
 	return ""

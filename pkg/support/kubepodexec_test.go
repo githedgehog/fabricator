@@ -22,9 +22,17 @@ func TestGatewayExecSkipReason(t *testing.T) {
 		status corev1.PodStatus
 		skip   string
 	}{
-		"crashloop":           {waiting("dataplane", "CrashLoopBackOff"), "dataplane container CrashLoopBackOff: msg"},
-		"image pull":          {waiting("dataplane", "ImagePullBackOff"), "dataplane container ImagePullBackOff: msg"},
-		"other container":     {waiting("frr-exporter", "CrashLoopBackOff"), ""},
+		"crashloop":       {waiting("dataplane", "CrashLoopBackOff"), "dataplane container CrashLoopBackOff: msg"},
+		"image pull":      {waiting("dataplane", "ImagePullBackOff"), "dataplane container ImagePullBackOff: msg"},
+		"other container": {waiting("frr-exporter", "CrashLoopBackOff"), ""},
+		"init container": {corev1.PodStatus{
+			InitContainerStatuses: waiting("flush-vtep", "CrashLoopBackOff").ContainerStatuses,
+			ContainerStatuses:     waiting("dataplane", "PodInitializing").ContainerStatuses,
+		}, "init container flush-vtep CrashLoopBackOff: msg"},
+		"init container running": {corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{Name: "flush-vtep", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}},
+			ContainerStatuses:     waiting("dataplane", "PodInitializing").ContainerStatuses,
+		}, ""},
 		"container creating":  {waiting("dataplane", "ContainerCreating"), ""},
 		"no container status": {corev1.PodStatus{}, ""},
 		"running": {corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
