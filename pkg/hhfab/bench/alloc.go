@@ -32,19 +32,19 @@ const (
 )
 
 // Every bench fabric is its own Fabric object with its own ASNs, taken from the
-// 32-bit private range (RFC 6996) rather than fab.yaml. That range is far
-// larger than any bench will need and disjoint from the 16-bit ASNs the stock
-// config gives the default fabric, so bench fabrics never compete with it or
-// with each other.
+// 32-bit private range (RFC 6996) rather than fab.yaml. ASNBenchStart leaves
+// the bottom of that range to the stock default fabric and the VLAB extra
+// fabric and domain, so bench fabrics never compete with them or with each
+// other.
 //
 // ASNs are per fabric rather than per unit, since the Fabric object owns them.
 // Each fabric gets a block of StrideASNs, which keeps it readable - fabric slot
-// s starts at ASNPrivate32Start + s*1000. Domain d's spine ASN is base+1+d and
+// s starts at ASNBenchStart + s*1000. Domain d's spine ASN is base+1+d and
 // its gateway ASN base+51+d, and the leaves of every domain share one range at
 // ASNLeafOffset, StrideLeaves per domain in domain order.
 const (
-	ASNPrivate32Start = 4_200_000_000
-	ASNPrivate32End   = 4_294_967_294
+	ASNBenchStart   = 4_210_000_000
+	ASNPrivate32End = 4_294_967_294
 
 	StrideASNs       = 1000
 	ASNSpineOffset   = 1
@@ -210,7 +210,7 @@ func (a *Allocator) preflight() error {
 
 	// ASNs come from the private range, not fab.yaml, so this only fails at a
 	// fabric count no address pool could carry either.
-	if last := uint64(ASNPrivate32Start) + uint64(slots)*StrideASNs - 1; last > ASNPrivate32End {
+	if last := uint64(ASNBenchStart) + uint64(slots)*StrideASNs - 1; last > ASNPrivate32End {
 		return fmt.Errorf("%d fabrics need ASNs up to %d, past the end of the 32-bit private range %d", //nolint:err113
 			slots, last, uint64(ASNPrivate32End))
 	}
@@ -362,7 +362,7 @@ func (a *Allocator) ASNs(slot uint) (ASNBlock, error) {
 
 	// Bounded by the slot check above and by the ASN capacity and domain count
 	// checks in preflight.
-	base := uint32(ASNPrivate32Start + uint64(slot)*StrideASNs) //nolint:gosec
+	base := uint32(ASNBenchStart + uint64(slot)*StrideASNs) //nolint:gosec
 
 	block := ASNBlock{
 		Spines:    make([]uint32, 0, domains),
