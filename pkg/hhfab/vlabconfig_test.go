@@ -321,14 +321,19 @@ func TestVLABGatewayNICs(t *testing.T) {
 
 				require.Equal(t, vlabcomp.GatewayKernel(uint8(nicID)), iface.Kernel, name) //nolint:gosec
 
-				var slot uint
-				_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
-				require.NoError(t, err, iface.PCI)
+				port := nicID - 1
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf("-device pcie-root-port,id=%s%d,bus=pcie.0,chassis=%d,addr=0x%x,hotplug=off ",
+					VLABRootPortPrefix, port, port+1, vlabcomp.RootPortBaseSlot+port), name)
 				require.Contains(t, vmNICs[nicID], "-device igb,", name)
-				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), name)
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=%s%d", VLABRootPortPrefix, port), name)
 			}
 		})
 	}
+}
+
+func TestVLABRootPortBaseBus(t *testing.T) {
+	// the firmware numbers the DMI-to-PCI and PCI bridge buses first as they're on the lower slots
+	require.Equal(t, 2*VLABPCIBridges+1, vlabcomp.RootPortBaseBus)
 }
 
 func TestResolveVMSizes(t *testing.T) {
