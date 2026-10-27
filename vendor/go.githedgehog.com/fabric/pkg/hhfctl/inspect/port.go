@@ -18,20 +18,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/fatih/color"
-	"github.com/mattn/go-isatty"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/util/pointer"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -53,7 +49,6 @@ type PortOut struct {
 	VPCAttachments      map[string]*vpcapi.VPCAttachmentSpec      `json:"vpcAttachments,omitempty"`
 	AttachedVPCs        map[string]*vpcapi.VPCSpec                `json:"attachedVPCs,omitempty"`
 	ExternalAttachments map[string]*vpcapi.ExternalAttachmentSpec `json:"externalAttachments,omitempty"` // if External conn
-	LoopbackWorkarounds map[string]*OutLoopbackWorkaround         `json:"loopbackWorkarounds,omitempty"` // if VPCLoopback conn
 }
 
 func (out *PortOut) MarshalText(_ PortIn, now time.Time) (string, error) {
@@ -66,7 +61,7 @@ func (out *PortOut) MarshalText(_ PortIn, now time.Time) (string, error) {
 		if err != nil {
 			return "", errors.Wrap(err, "failed to marshal Connection")
 		}
-		str.WriteString(string(data))
+		str.Write(data)
 	}
 
 	if out.InterfaceState != nil && out.InterfaceState.Counters != nil {
@@ -187,8 +182,7 @@ func (out *PortOut) MarshalText(_ PortIn, now time.Time) (string, error) {
 
 			subnet := ""
 			vlan := ""
-			vpcName := strings.SplitN(attach.Subnet, "/", 2)[0]
-			subnetName := strings.SplitN(attach.Subnet, "/", 2)[1]
+			vpcName, subnetName, _ := strings.Cut(attach.Subnet, "/")
 			if vpc, ok := out.AttachedVPCs[vpcName]; ok {
 				if vpcSubnet, ok := vpc.Subnets[subnetName]; ok {
 					subnet = vpcSubnet.Subnet
@@ -236,49 +230,6 @@ func (out *PortOut) MarshalText(_ PortIn, now time.Time) (string, error) {
 		str.WriteString("\n")
 	}
 
-	if len(out.LoopbackWorkarounds) > 0 {
-		str.WriteString("Loopback Workarounds:\n")
-
-		// TODO pass to a marshal func?
-		noColor := !isatty.IsTerminal(os.Stdout.Fd())
-
-		// TODO dedup
-		colored := color.New(color.FgCyan).SprintFunc()
-		if noColor {
-			colored = fmt.Sprint
-		}
-
-		sep := colored("←→")
-
-		loWoData := [][]string{}
-		for _, loWo := range out.LoopbackWorkarounds {
-			vpcPeerings := []string{}
-			for vpcPeeringName, vpcPeering := range loWo.VPCPeerings {
-				vpc1, vpc2, err := vpcPeering.VPCs()
-				if err != nil {
-					return "", errors.Wrapf(err, "failed to get VPCs for VPCPeering %s", vpcPeeringName)
-				}
-
-				vpcPeerings = append(vpcPeerings, fmt.Sprintf("%s (%s%s%s)", vpcPeeringName, vpc1, sep, vpc2))
-			}
-
-			extPeerings := []string{}
-			for extPeeringName, extPeering := range loWo.ExternalPeerings {
-				extPeerings = append(extPeerings, fmt.Sprintf("%s (%s%s%s)", extPeeringName, extPeering.Permit.VPC.Name, sep, extPeering.Permit.External.Name))
-			}
-
-			loWoData = append(loWoData, []string{
-				fmt.Sprintf("%s%s%s", loWo.Link.Switch1.PortName(), sep, loWo.Link.Switch2.PortName()),
-				strings.Join(vpcPeerings, "\n"),
-				strings.Join(extPeerings, "\n"),
-			})
-		}
-		str.WriteString(RenderTable(
-			[]string{"Link", "VPCPeerings", "ExternalPeerings"},
-			loWoData,
-		))
-	}
-
 	return str.String(), nil
 }
 
@@ -302,7 +253,6 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 		VPCAttachments:      map[string]*vpcapi.VPCAttachmentSpec{},
 		AttachedVPCs:        map[string]*vpcapi.VPCSpec{},
 		ExternalAttachments: map[string]*vpcapi.ExternalAttachmentSpec{},
-		LoopbackWorkarounds: map[string]*OutLoopbackWorkaround{},
 	}
 
 	conns := &wiringapi.ConnectionList{}
@@ -320,8 +270,8 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 			continue
 		}
 
-		out.ConnectionName = pointer.To(conn.Name)
-		out.Connection = pointer.To(conn.Spec)
+		out.ConnectionName = new(conn.Name)
+		out.Connection = new(conn.Spec)
 	}
 
 	skip := false
@@ -373,13 +323,7 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 
 	if out.Connection != nil && out.ConnectionName != nil {
 		conn := out.Connection
-		if conn.VPCLoopback != nil { //nolint:gocritic
-			var err error
-			out.LoopbackWorkarounds, err = loopbackWorkaroundInfo(ctx, kube, agent)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to get loopback workaround info")
-			}
-		} else if conn.Unbundled != nil || conn.Bundled != nil || conn.ESLAG != nil {
+		if conn.Unbundled != nil || conn.Bundled != nil || conn.ESLAG != nil {
 			vpcAttaches := &vpcapi.VPCAttachmentList{}
 			if err := kube.List(ctx, vpcAttaches, kclient.MatchingLabels{
 				wiringapi.LabelConnection: *out.ConnectionName,
@@ -392,7 +336,7 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 					continue
 				}
 
-				vpcName := strings.SplitN(vpcAttach.Spec.Subnet, "/", 2)[0]
+				vpcName, _, _ := strings.Cut(vpcAttach.Spec.Subnet, "/")
 				if _, exists := out.AttachedVPCs[vpcName]; !exists {
 					vpc := &vpcapi.VPC{}
 					if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
@@ -401,7 +345,7 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 					out.AttachedVPCs[vpcName] = &vpc.Spec
 				}
 
-				out.VPCAttachments[vpcAttach.Name] = pointer.To(vpcAttach.Spec)
+				out.VPCAttachments[vpcAttach.Name] = new(vpcAttach.Spec)
 			}
 		} else if conn.External != nil {
 			extAttaches := &vpcapi.ExternalAttachmentList{}
@@ -412,7 +356,7 @@ func Port(ctx context.Context, kube kclient.Reader, in PortIn) (*PortOut, error)
 			}
 
 			for _, extAttach := range extAttaches.Items {
-				out.ExternalAttachments[extAttach.Name] = pointer.To(extAttach.Spec)
+				out.ExternalAttachments[extAttach.Name] = new(extAttach.Spec)
 			}
 		}
 	}

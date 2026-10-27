@@ -34,10 +34,12 @@ import (
 	kyaml "sigs.k8s.io/yaml"
 )
 
+//nolint:iface // used outside of the package
 type Defaultable interface {
 	Default()
 }
 
+//nolint:iface // used outside of the package
 type Validatable interface {
 	Validate(ctx context.Context, kube kclient.Reader, fabricCfg *FabricConfig) (admission.Warnings, error)
 }
@@ -49,6 +51,7 @@ type Object interface {
 	Validatable
 }
 
+//nolint:iface // used outside of the package
 type ObjectList interface {
 	kclient.ObjectList
 
@@ -80,14 +83,14 @@ type FabricConfig struct {
 	APIServer                string        `json:"apiServer,omitempty"`
 	AgentRepo                string        `json:"agentRepo,omitempty"`
 	VPCIRBVLANRanges         []VLANRange   `json:"vpcIRBVLANRange,omitempty"`
-	VPCPeeringVLANRanges     []VLANRange   `json:"vpcPeeringVLANRange,omitempty"` // TODO rename (loopback workaround)
+	VPCPeeringVLANRanges     []VLANRange   `json:"vpcPeeringVLANRange,omitempty"` // Deprecated: ignored, still set by fabricator
 	TH5WorkaroundVLANRange   []VLANRange   `json:"th5WorkaroundVLANRange"`
 	VPCPeeringDisabled       bool          `json:"vpcPeeringDisabled,omitempty"`
 	ReservedSubnets          []string      `json:"reservedSubnets,omitempty"`
 	Users                    []UserCreds   `json:"users,omitempty"`
 	FabricMode               FabricMode    `json:"fabricMode,omitempty"`
-	BaseVPCCommunity         string        `json:"baseVPCCommunity,omitempty"`
-	VPCLoopbackSubnet        string        `json:"vpcLoopbackSubnet,omitempty"`
+	BaseVPCCommunity         string        `json:"baseVPCCommunity,omitempty"`  // TODO: rename? now only used to mark external prefixes
+	VPCLoopbackSubnet        string        `json:"vpcLoopbackSubnet,omitempty"` // Deprecated: ignored, still set by fabricator
 	FabricMTU                uint16        `json:"fabricMTU,omitempty"`
 	ServerFacingMTUOffset    uint16        `json:"serverFacingMTUOffset,omitempty"`
 	ESLAGMACBase             string        `json:"eslagMACBase,omitempty"`
@@ -103,7 +106,6 @@ type FabricConfig struct {
 	MCLAGSessionSubnet       string        `json:"mclagSessionSubnet,omitempty"` // TODO: deprecated, remove in future releases
 	GatewayASN               uint32        `json:"gatewayASN,omitempty"`         // Temporarily assuming that all GWs are in the same AS
 	GatewayAPISync           bool          `json:"gatewayAPISync,omitempty"`
-	LoopbackWorkaround       bool          `json:"loopbackWorkaround,omitempty"`
 	IncludeSONiCCLSPlus      bool          `json:"includeSONiCCLSPlus,omitempty"` // Include Celestica SONiC+
 	IncludeCumulus           bool          `json:"includeCumulus,omitempty"`      // Include Cumulus
 	ProtocolSubnet           string        `json:"protocolSubnet,omitempty"`
@@ -129,11 +131,15 @@ type FabricConfig struct {
 	GatewayNamespace      string              `json:"gatewayNamespace,omitempty"` // Namespace where pods for gateways are deployed
 	GatewayTolerations    []corev1.Toleration `json:"gatewayTolerations,omitempty"`
 	DataplaneRef          string              `json:"dataplaneRef,omitempty"`
-	FRRRef                string              `json:"frrRef,omitempty"`
-	ToolboxRef            string              `json:"toolboxRef,omitempty"`
+	FRRRef                string              `json:"frrRef,omitempty"`     // TODO: remove after 26.05 release
+	ToolboxRef            string              `json:"toolboxRef,omitempty"` // TODO: remove after 26.05 release
 	DataplaneMetricsPort  uint16              `json:"dataplaneMetricsPort,omitempty"`
 	FRRMetricsPort        uint16              `json:"frrMetricsPort,omitempty"`
 	DataplaneValidatorRef string              `json:"dataplaneValidatorRef,omitempty"`
+	// Hugepages requested by the gateway dataplane, the gateway nodes have to reserve them before k3s starts. The dataplane
+	// currently only uses 1G pages, 2M pages are just ignored by it. None are requested if neither is set.
+	GatewayHugePages1G int64 `json:"gatewayHugePages1G,omitempty"`
+	GatewayHugePages2M int64 `json:"gatewayHugePages2M,omitempty"`
 
 	ExtraValidators ExtraValidators `json:"-"`
 
@@ -276,16 +282,6 @@ func (cfg *FabricConfig) Init(extraValidators ExtraValidators) (*FabricConfig, e
 		// TODO check total ranges size and expose as limit for API validation
 	}
 
-	if r, err := NormalizedVLANRanges(cfg.VPCPeeringVLANRanges); err != nil {
-		return nil, errors.Wrapf(err, "config: vpcPeeringVLANRange is invalid")
-	} else { //nolint:revive
-		if len(r) == 0 {
-			return nil, errors.Errorf("config: vpcPeeringVLANRange is required")
-		}
-		cfg.VPCPeeringVLANRanges = r
-		// TODO check total ranges size and expose as limit for API validation
-	}
-
 	if r, err := NormalizedVLANRanges(cfg.TH5WorkaroundVLANRange); err != nil {
 		return nil, errors.Wrapf(err, "config: th5WorkaroundVLANRange is invalid")
 	} else { //nolint:revive
@@ -324,9 +320,12 @@ func (cfg *FabricConfig) Init(extraValidators ExtraValidators) (*FabricConfig, e
 	if cfg.BaseVPCCommunity == "" {
 		return nil, errors.Errorf("config: baseVPCCommunity is required")
 	}
-	if cfg.VPCLoopbackSubnet == "" {
-		return nil, errors.Errorf("config: vpcLoopbackSubnet is required")
+	// set as-is on switches, which would refuse an invalid one
+	baseComm, err := canonicalCommunity(cfg.BaseVPCCommunity)
+	if err != nil {
+		return nil, fmt.Errorf("config: baseVPCCommunity: %w", err)
 	}
+	cfg.BaseVPCCommunity = baseComm
 
 	if cfg.FabricMTU == 0 {
 		return nil, errors.Errorf("config: fabricMTU is required")
@@ -403,16 +402,23 @@ func (cfg *FabricConfig) Init(extraValidators ExtraValidators) (*FabricConfig, e
 		return nil, errors.Errorf("config: managementDHCPEnd is not a valid IP in managementSubnet")
 	}
 
-	for _, commStr := range cfg.GatewayCommunities {
-		parts := strings.Split(commStr, ":")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("config: gatewayCommunity community %s format is invalid", commStr) //nolint:err113
+	// up to 1 TiB each, anything above is likely a typo or a size in bytes
+	if cfg.GatewayHugePages1G < 0 || cfg.GatewayHugePages1G > 1<<10 {
+		return nil, fmt.Errorf("config: gatewayHugePages1G must be between 0 and %d", 1<<10) //nolint:err113
+	}
+	if cfg.GatewayHugePages2M < 0 || cfg.GatewayHugePages2M > 1<<19 {
+		return nil, fmt.Errorf("config: gatewayHugePages2M must be between 0 and %d", 1<<19) //nolint:err113
+	}
+
+	for idx, commStr := range cfg.GatewayCommunities {
+		commStr, err := canonicalCommunity(commStr)
+		if err != nil {
+			return nil, fmt.Errorf("config: gatewayCommunity: %w", err)
 		}
-		if _, err := strconv.ParseUint(parts[0], 10, 16); err != nil {
-			return nil, fmt.Errorf("config: gatewayCommunity community %s is invalid: %w", commStr, err)
-		}
-		if _, err := strconv.ParseUint(parts[1], 10, 16); err != nil {
-			return nil, fmt.Errorf("config: gatewayCommunity community %s is invalid: %w", commStr, err)
+		cfg.GatewayCommunities[idx] = commStr
+		// routes from externals carry baseVPCCommunity, and would pass as a gateway's
+		if commStr == cfg.BaseVPCCommunity {
+			return nil, fmt.Errorf("config: gatewayCommunity community %s is the same as baseVPCCommunity", commStr) //nolint:err113
 		}
 	}
 
@@ -431,6 +437,24 @@ func (cfg *FabricConfig) Init(extraValidators ExtraValidators) (*FabricConfig, e
 	// slog.Debug("Loaded Fabric config", "data", spew.Sdump(cfg))
 
 	return cfg, nil
+}
+
+// canonicalCommunity drops any leading zeros, as communities are compared as strings
+func canonicalCommunity(comm string) (string, error) {
+	asn, id, ok := strings.Cut(comm, ":")
+	if !ok {
+		return "", fmt.Errorf("community %s format is invalid", comm) //nolint:err113
+	}
+	asnVal, err := strconv.ParseUint(asn, 10, 16)
+	if err != nil {
+		return "", fmt.Errorf("community %s is invalid: %w", comm, err)
+	}
+	idVal, err := strconv.ParseUint(id, 10, 16)
+	if err != nil {
+		return "", fmt.Errorf("community %s is invalid: %w", comm, err)
+	}
+
+	return fmt.Sprintf("%d:%d", asnVal, idVal), nil
 }
 
 func (cfg *FabricConfig) WithReservedSubnets() error {

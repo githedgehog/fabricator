@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/pkg/errors"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -32,11 +33,9 @@ type SwitchGroupCreateOptions struct {
 
 func SwitchGroupCreate(ctx context.Context, printYaml bool, options *SwitchGroupCreateOptions) error {
 	sg := &wiringapi.SwitchGroup{
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      options.Name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
-		Spec: wiringapi.SwitchGroupSpec{},
+		Name:      options.Name,
+		Namespace: kmetav1.NamespaceDefault,
+		Spec:      wiringapi.SwitchGroupSpec{},
 	}
 
 	kube, err := kubeutil.NewClient(ctx, "", wiringapi.AddToScheme)
@@ -61,7 +60,7 @@ func SwitchGroupCreate(ctx context.Context, printYaml bool, options *SwitchGroup
 			return errors.Wrap(err, "cannot marshal sg")
 		}
 
-		fmt.Println(string(out))
+		fmt.Fprintln(os.Stdout, string(out))
 	}
 
 	return nil

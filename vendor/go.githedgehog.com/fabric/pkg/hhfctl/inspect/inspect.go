@@ -55,7 +55,7 @@ const (
 
 var OutputTypes = []OutputType{OutputTypeText, OutputTypeJSON, OutputTypeYAML}
 
-type In interface{}
+type In any
 
 type Out[TIn In] interface {
 	MarshalText(in TIn, now time.Time) (string, error)
@@ -154,17 +154,17 @@ func RenderTable(headers []string, data [][]string) string {
 	cfg := tablewriter.Config{
 		Row: tw.CellConfig{
 			Formatting: tw.CellFormatting{
-				AutoWrap:  tw.WrapNormal,
-				Alignment: tw.AlignLeft,
+				AutoWrap: tw.WrapNormal,
 			},
-			Padding: tw.CellPadding{Global: tw.Padding{Right: "    "}},
+			Alignment: tw.CellAlignment{Global: tw.AlignLeft},
+			Padding:   tw.CellPadding{Global: tw.Padding{Right: "    "}},
 		},
 		Header: tw.CellConfig{
 			Formatting: tw.CellFormatting{
-				AutoWrap:  tw.WrapNormal,
-				Alignment: tw.AlignLeft,
+				AutoWrap: tw.WrapNormal,
 			},
-			Padding: tw.CellPadding{Global: tw.Padding{Right: "    "}},
+			Alignment: tw.CellAlignment{Global: tw.AlignLeft},
+			Padding:   tw.CellPadding{Global: tw.Padding{Right: "    "}},
 		},
 	}
 	rendition := tw.Rendition{

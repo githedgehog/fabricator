@@ -193,7 +193,7 @@ type SwitchProfile struct {
 
 const KindSwitchProfile = "SwitchProfile"
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // SwitchProfileList contains a list of SwitchProfile
 type SwitchProfileList struct {
@@ -788,7 +788,7 @@ func (sp *SwitchProfileSpec) GetAllBreakoutNOSNames() (map[string]bool, error) {
 
 func (sp *SwitchProfileSpec) NormalizePortName(portName string) (string, error) {
 	if sp == nil {
-		return "", errors.Errorf("switch profile spec is nil") //nolint:goerr113
+		return "", errors.Errorf("switch profile spec is nil")
 	}
 
 	if strings.Count(portName, "/") == 2 {

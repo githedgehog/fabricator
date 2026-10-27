@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
+	"strings"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
@@ -108,7 +108,7 @@ type ExternalPeering struct {
 
 const KindExternalPeering = "ExternalPeering"
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ExternalPeeringList contains a list of ExternalPeering
 type ExternalPeeringList struct {
@@ -156,9 +156,9 @@ func (peering *ExternalPeering) Default() {
 	peering.Labels[LabelExternal] = peering.Spec.Permit.External.Name
 	peering.Labels[wiringapi.ListLabelFabric(peering.Spec.Topology.Fabric)] = ListLabelValue
 
-	sort.Strings(peering.Spec.Permit.VPC.Subnets)
-	sort.Slice(peering.Spec.Permit.External.Prefixes, func(i, j int) bool {
-		return peering.Spec.Permit.External.Prefixes[i].Prefix < peering.Spec.Permit.External.Prefixes[j].Prefix
+	slices.Sort(peering.Spec.Permit.VPC.Subnets)
+	slices.SortFunc(peering.Spec.Permit.External.Prefixes, func(a, b ExternalPeeringSpecPrefix) int {
+		return strings.Compare(a.Prefix, b.Prefix)
 	})
 }
 
@@ -182,17 +182,6 @@ func (peering *ExternalPeering) Validate(ctx context.Context, kube kclient.Reade
 		if permit.Prefix == "" {
 			return nil, errors.Errorf("external.prefixes.prefix is required")
 		}
-		/*if permit.Ge > permit.Le {
-			return nil, errors.Errorf("external.prefixes.ge must be <= external.prefixes.le")
-		}
-		if permit.Ge > 32 {
-			return nil, errors.Errorf("external.prefixes.ge must be <= 32")
-		}
-		if permit.Le > 32 {
-			return nil, errors.Errorf("external.prefixes.le must be <= 32")
-		}*/
-
-		// TODO add more validation for prefix/ge/le
 	}
 
 	if kube != nil {

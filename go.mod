@@ -39,7 +39,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.15.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.137.0
+	go.githedgehog.com/fabric v0.140.0
 	go.githedgehog.com/libmeta v0.4.0
 	go.podman.io/image/v5 v5.41.2
 	golang.org/x/crypto v0.58.0
@@ -230,7 +230,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
-	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
