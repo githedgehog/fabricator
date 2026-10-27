@@ -22,6 +22,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 func TestGetNICID(t *testing.T) {
@@ -292,6 +293,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 			b := &VLABBuilderDefault{
 				GatewayLogLevel:      "info",
 				GatewayDriver:        driver,
+				GatewayWorkers:       3,
 				DefaultSwitchProfile: meta.SwitchProfileVS,
 			}
 			f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
@@ -305,6 +307,20 @@ func TestVLABGatewayNICs(t *testing.T) {
 
 			cfg, err := createVLABConfig(t.Context(), nil, nodes, l.GetClient())
 			require.NoError(t, err)
+
+			// a gateway VM without its queues, e.g. from a VLAB config without them, can't run
+			_, err = vlabFromConfig(cfg, VLABRunOpts{})
+			require.ErrorContains(t, err, "no NIC queues for gateway VM")
+
+			require.NoError(t, setGatewayQueues(t.Context(), cfg, l.GetClient()))
+			queues := gatewayNICQueues(3)
+			require.Equal(t, queues, cfg.VMs["gateway-1"].Queues)
+
+			// the queues are never saved, so the VLAB configs of other releases keep working
+			data, err := kyaml.Marshal(cfg)
+			require.NoError(t, err)
+			require.NotContains(t, string(data), "queues")
+
 			vlab, err := vlabFromConfig(cfg, VLABRunOpts{})
 			require.NoError(t, err)
 
@@ -325,7 +341,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 				require.Contains(t, vmNICs[nicID], fmt.Sprintf("-device pcie-root-port,id=%s%d,bus=pcie.0,chassis=%d,addr=0x%x,hotplug=off ",
 					VLABRootPortPrefix, port, port+1, vlabcomp.RootPortBaseSlot+port), name)
 				require.Contains(t, vmNICs[nicID], "-device virtio-net-pci,", name)
-				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*VLABGatewayNICQueues+2, VLABVirtioNetSpeed), name)
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",mq=on,vectors=%d,speed=%s,duplex=full", 2*int(queues)+2, VLABVirtioNetSpeed), name)
 				require.Contains(t, vmNICs[nicID], ",disable-legacy=on,iommu_platform=on,", name)
 				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",bus=%s%d", VLABRootPortPrefix, port), name)
 
@@ -333,7 +349,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 				_, tap, ok := strings.Cut(vmNICs[nicID], "-netdev tap,ifname=")
 				require.True(t, ok, name)
 				tap, _, _ = strings.Cut(tap, ",")
-				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",vhost=off,queues=%d,", VLABGatewayNICQueues), name)
+				require.Contains(t, vmNICs[nicID], fmt.Sprintf(",vhost=off,queues=%d,", queues), name)
 
 				netIdx := slices.IndexFunc(vlab.Nets, func(n VLABNet) bool { return strings.HasPrefix(tap, n.Name+"p") })
 				require.GreaterOrEqual(t, netIdx, 0, tap)
@@ -341,7 +357,7 @@ func TestVLABGatewayNICs(t *testing.T) {
 				require.Equal(t, VLABNetKindLink, n.Kind, tap)
 				tapIdx := slices.IndexFunc([]string{n.TapName(0), n.TapName(1)}, func(name string) bool { return name == tap })
 				require.GreaterOrEqual(t, tapIdx, 0, tap)
-				require.Equal(t, map[int]int{tapIdx: VLABGatewayNICQueues}, n.Queues, tap)
+				require.Equal(t, map[int]int{tapIdx: int(queues)}, n.Queues, tap)
 
 				other := "-netdev tap,ifname=" + n.TapName(1-tapIdx) + ",script=no,downscript=no,id="
 				found := false
