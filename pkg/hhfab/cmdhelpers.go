@@ -185,6 +185,10 @@ func SetupVLABNet(_ context.Context, nets []VLABNet) error {
 				return fmt.Errorf("setting link down %q: %w", iface, err)
 			}
 
+			if err := disableIPv6(iface); err != nil {
+				return err
+			}
+
 			if err := netlink.LinkSetMaster(link, br); err != nil {
 				return fmt.Errorf("adding link %q to %q: %w", iface, n.Name, err)
 			}
