@@ -44,6 +44,14 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
+	// before anything uses the interfaces, e.g. the gateway dataplane its links, and before the kernel args reboot, so
+	// the naming rule is in place for it
+	if upgrade {
+		if err := ensureVLABIfaceNames(ctx); err != nil {
+			return fmt.Errorf("ensuring VLAB interface names: %w", err)
+		}
+	}
+
 	checkGateway := false
 	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
 		ubuntu, err := isUbuntu()
