@@ -158,6 +158,39 @@ queue_sonic_cmd "EVPN" "show evpn arp-cache"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Kernel datapath counters
+# ---------------------------
+# "show interface counters" only covers the ASIC, or its model on a virtual
+# switch. There every frame also crosses the kernel: the VM NIC (ethN), a
+# packet socket in syncd and the EthernetN tap, so packets dropped on the way
+# never show up there. These tell where they die: NIC driver (ethtool -S),
+# netdev and qdisc (ip -s link, tc -s qdisc), per-CPU backlog (softnet_stat,
+# hex columns: processed, dropped, time squeezed) and socket buffers (packet
+# sockets' skmem d<drops>, IP/UDP counters). GRO state is checked as the agent
+# turns it off on virtual switch ports.
+{
+    echo -e "\n=== Kernel Interface Statistics ==="
+    ip -s -s link show 2>&1
+    echo -e "\n=== Kernel Qdisc Statistics ==="
+    PATH="$PATH:/sbin:/usr/sbin" tc -s qdisc show 2>&1
+    echo -e "\n=== Kernel Softnet Statistics ==="
+    cat /proc/net/softnet_stat 2>&1
+    echo -e "\n=== Kernel Packet Sockets ==="
+    sudo -n ss -0 -a -e -m -p 2>&1
+    echo -e "\n=== Kernel Network Counters ==="
+    nstat -as 2>&1
+    for path in /sys/class/net/eth[0-9]*; do
+        [ -e "$path" ] || continue
+        nic="${path##*/}"
+        echo -e "\n--- ethtool $nic ---"
+        PATH="$PATH:/sbin:/usr/sbin" ethtool -S "$nic" 2>&1
+        PATH="$PATH:/sbin:/usr/sbin" ethtool -k "$nic" 2>&1 | grep -E 'receive-offload|segmentation-offload'
+    done
+    echo -e "\n=== Top Processes ==="
+    top -b -n 1 -w 200 2>&1 | head -40
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # Route Tables
 # ---------------------------
 queue_sonic_cmd "Routes" "show ip route"
