@@ -569,15 +569,13 @@ func IsSameEndpointNode(a, b *Endpoint) bool {
 
 type matrixTestDeps struct {
 	sshByServer map[string]*sshutil.Config
-	pings       *semaphore.Weighted
-	iperfs      *semaphore.Weighted
+	// slots are shared by all the checks of all phases, see connectivitySlots
+	slots *semaphore.Weighted
 	// probes is fixed at 1: overlapping proto-port probes made one probe's
 	// congestion look like another's ACL drop (#1937). It only covers the
 	// proto-port phase; the server-to-server phase is started into the same
-	// WaitGroup and keeps running its pings concurrently under the wider pings
-	// semaphore.
+	// WaitGroup and keeps running its pings concurrently within the slots.
 	probes         *semaphore.Weighted
-	curls          *semaphore.Weighted
 	inSources      func(string) bool
 	inDestinations func(string) bool
 	wg             *sync.WaitGroup
@@ -657,8 +655,7 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				SrcIP:    srcIP,
 				Expected: expected,
 				Bidir:    bidir,
-				Pings:    deps.pings,
-				Iperfs:   deps.iperfs,
+				Slots:    deps.slots,
 			}
 			deps.wg.Go(func() {
 				for _, e := range runPingIperfPair(ctx, opts, args) {
@@ -707,7 +704,7 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 			}
 			slog.Debug("Checking external connectivity", logArgs...)
 
-			if ce := checkCurl(ctx, opts, deps.curls, name, ssh, "1.0.0.1", expected); ce != nil {
+			if ce := checkCurl(ctx, opts, deps.slots, name, ssh, "1.0.0.1", expected); ce != nil {
 				deps.errChan <- ce
 			}
 		})
@@ -752,7 +749,7 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 				port := e.NAT.DestinationPort
 				fromName := src.Server.Name
 				deps.wg.Go(func() {
-					if ie := runMatrixIperfPortForward(ctx, opts, deps.iperfs, fromName, deps.sshByServer[fromName], target, port, expected); ie != nil {
+					if ie := runMatrixIperfPortForward(ctx, opts, deps.slots, fromName, deps.sshByServer[fromName], target, port, expected); ie != nil {
 						deps.errChan <- ie
 					}
 				})
@@ -761,7 +758,7 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 	}
 	for key, val := range extTargets {
 		deps.wg.Go(func() {
-			if ie := runMatrixIperfPortForward(ctx, opts, deps.iperfs, key.from, deps.sshByServer[key.from], key.ip, key.port, val); ie != nil {
+			if ie := runMatrixIperfPortForward(ctx, opts, deps.slots, key.from, deps.sshByServer[key.from], key.ip, key.port, val); ie != nil {
 				deps.errChan <- ie
 			}
 		})
@@ -889,15 +886,15 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 
 						switch pp.Protocol {
 						case "icmp":
-							if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
+							if pe := checkPing(ctx, opts.PingsCount, deps.slots, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
 								deps.errChan <- pe
 							}
 						case "tcp":
-							if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
+							if ie := checkTCPPort(ctx, deps.slots, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
 								deps.errChan <- ie
 							}
 						case "udp":
-							if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
+							if ie := checkUDPPort(ctx, opts, deps.slots, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
 								deps.errChan <- ie
 							}
 						default:
@@ -924,16 +921,6 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		return err
 	}
 	start := time.Now()
-
-	if opts.PingsParallel <= 0 {
-		opts.PingsParallel = 50
-	}
-	if opts.IPerfsParallel <= 0 {
-		opts.IPerfsParallel = 1
-	}
-	if opts.CurlsParallel <= 0 {
-		opts.CurlsParallel = 50
-	}
 
 	slog.Info("Testing connectivity from matrix", "endpoints", len(matrix.AllEndpoints))
 
@@ -972,10 +959,8 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	errChan := make(chan error, 2*n*n+n+protoEntries)
 	deps := &matrixTestDeps{
 		sshByServer: sshByServer,
-		pings:       semaphore.NewWeighted(opts.PingsParallel),
-		iperfs:      semaphore.NewWeighted(opts.IPerfsParallel),
+		slots:       semaphore.NewWeighted(connectivitySlots),
 		probes:      semaphore.NewWeighted(1),
-		curls:       semaphore.NewWeighted(opts.CurlsParallel),
 		inSources: func(name string) bool {
 			return len(opts.Sources) == 0 || slices.Contains(opts.Sources, name)
 		},
@@ -1042,7 +1027,7 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	return joined
 }
 
-func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from string, ssh *sshutil.Config, toIP netip.Addr, toPort uint16, expected Reachability) *IperfError {
+func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, slots *semaphore.Weighted, from string, ssh *sshutil.Config, toIP netip.Addr, toPort uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), toPort)
 	why := expectationWhy(expected)
 	logArgs := []any{"from", from, "target", target, "expected", expected.Reachable}
@@ -1055,7 +1040,7 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
 
 	if !expected.Reachable {
-		return checkTCPPort(ctx, nil, from, ssh, toIP, toPort, expected)
+		return checkTCPPort(ctx, slots, from, ssh, toIP, toPort, expected)
 	}
 
 	// Gate on TCP reachability: a successful TCP connect is the precise signal
@@ -1084,10 +1069,10 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 		}
 	}
 
-	if err := iperfs.Acquire(ctx, 1); err != nil {
-		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: fmt.Sprintf("acquiring iperf3 semaphore: %s", err)}
+	if err := slots.Acquire(ctx, iperfSlots); err != nil {
+		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: fmt.Sprintf("acquiring iperf3 slots: %s", err)}
 	}
-	defer iperfs.Release(1)
+	defer slots.Release(iperfSlots)
 
 	secs := opts.IPerfsSeconds
 	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",

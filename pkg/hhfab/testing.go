@@ -2595,18 +2595,25 @@ func whySuffix(why string) string {
 type TestConnectivityOpts struct {
 	WaitSwitchesReady bool
 	PingsCount        int
-	PingsParallel     int64
 	IPerfsSeconds     int
 	IPerfsMinSpeed    float64
-	IPerfsParallel    int64
 	IPerfsDSCP        uint8
 	IPerfsTOS         uint8
 	CurlsCount        int
-	CurlsParallel     int64
 	Sources           []string
 	Destinations      []string
 	RequireAllServers bool
 }
+
+// The checks of a connectivity test share a budget of slots. An iperf3 run takes all of them, so it never overlaps any
+// other check: virtual switches forward in userspace and its traffic makes the pings running alongside it lose packets.
+const (
+	connectivitySlots = 50
+	pingSlots         = 1
+	curlSlots         = 1
+	connectSlots      = 1
+	iperfSlots        = connectivitySlots
+)
 
 func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *TestConnectivityOpts) (map[string]*sshutil.Config, kclient.Client, func(), error) {
 	sshConfigs := map[string]*sshutil.Config{}
@@ -2670,8 +2677,7 @@ type pingIperfPairArgs struct {
 	SrcIP    netip.Addr
 	Expected Reachability
 	Bidir    bool
-	Pings    *semaphore.Weighted
-	Iperfs   *semaphore.Weighted
+	Slots    *semaphore.Weighted
 }
 
 func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingIperfPairArgs) []error {
@@ -2694,7 +2700,7 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 	}
 
 	var errs []error
-	if pe := checkPing(ctx, opts.PingsCount, args.Pings, args.From, args.To, args.FromSSH, args.ToIP, srcIP, args.Expected); pe != nil {
+	if pe := checkPing(ctx, opts.PingsCount, args.Slots, args.From, args.To, args.FromSSH, args.ToIP, srcIP, args.Expected); pe != nil {
 		return append(errs, pe)
 	}
 
@@ -2707,10 +2713,10 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 		return errs
 	}
 
-	if err := args.Iperfs.Acquire(ctx, 1); err != nil {
-		return append(errs, fmt.Errorf("acquiring iperf3 semaphore: %w", err))
+	if err := args.Slots.Acquire(ctx, iperfSlots); err != nil {
+		return append(errs, fmt.Errorf("acquiring iperf3 slots: %w", err))
 	}
-	defer args.Iperfs.Release(1)
+	defer args.Slots.Release(iperfSlots)
 
 	for _, ie := range checkIPerf(ctx, opts, args.From, args.To, args.FromSSH, args.ToIP, args.SrcIP, args.Expected, args.Bidir) {
 		errs = append(errs, ie)
@@ -2724,16 +2730,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:err113
 	}
 	start := time.Now()
-
-	if opts.PingsParallel <= 0 {
-		opts.PingsParallel = 50
-	}
-	if opts.IPerfsParallel <= 0 {
-		opts.IPerfsParallel = 1
-	}
-	if opts.CurlsParallel <= 0 {
-		opts.CurlsParallel = 50
-	}
 
 	slog.Info("Testing server to server and server to external connectivity")
 
@@ -2831,9 +2827,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items))
 
-	pings := semaphore.NewWeighted(opts.PingsParallel)
-	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
-	curls := semaphore.NewWeighted(opts.CurlsParallel)
+	slots := semaphore.NewWeighted(connectivitySlots)
 	if len(opts.Sources) == 0 {
 		opts.Sources = make([]string, len(serverIDs))
 		// copy keys of serverIDs to opts.Sources
@@ -2930,8 +2924,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						ToIP:     ipB,
 						Expected: expectedReachable,
 						Bidir:    bidir,
-						Pings:    pings,
-						Iperfs:   iperfs,
+						Slots:    slots,
 					}) {
 						errChan <- e
 					}
@@ -2984,7 +2977,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
-					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable); ce != nil {
+					if ce := checkCurl(ctx, opts, slots, serverA, client, "1.0.0.1", expectedReachable); ce != nil {
 						// only when non-nil, as a nil *CurlError would become a non-nil error
 						return ce
 					}
@@ -3448,12 +3441,12 @@ func checkPing(ctx context.Context, pingCount int, sem *semaphore.Weighted, from
 	}
 
 	if sem != nil {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
+		if err := sem.Acquire(ctx, pingSlots); err != nil {
+			pe.Msg = fmt.Sprintf("acquiring ping slots: %s", err)
 
 			return pe
 		}
-		defer sem.Release(1)
+		defer sem.Release(pingSlots)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
@@ -3830,12 +3823,12 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
 	if sem != nil {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+		if err := sem.Acquire(ctx, connectSlots); err != nil {
+			ie.ClientMsg = fmt.Sprintf("acquiring connect slots: %s", err)
 
 			return ie
 		}
-		defer sem.Release(1)
+		defer sem.Release(connectSlots)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -3943,18 +3936,16 @@ func udpProbeCmd(toIP netip.Addr, port uint16, secs int, timing udpProbeTiming) 
 // NOTE: iperf3 -u first opens a TCP control channel on the target port, so this
 // cannot distinguish "TCP denied + UDP allowed" on the same port (the control
 // channel would be blocked). Callers must avoid that combination.
-func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
+func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, slots *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
 	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
-	if sem != nil {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+	if err := slots.Acquire(ctx, iperfSlots); err != nil {
+		ie.ClientMsg = fmt.Sprintf("acquiring iperf3 slots: %s", err)
 
-			return ie
-		}
-		defer sem.Release(1)
+		return ie
 	}
+	defer slots.Release(iperfSlots)
 
 	secs := opts.IPerfsSeconds
 	if secs <= 0 {
@@ -4041,7 +4032,7 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	return nil
 }
 
-func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected Reachability) *CurlError {
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, slots *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected Reachability) *CurlError {
 	if opts.CurlsCount <= 0 {
 		return nil
 	}
@@ -4051,12 +4042,12 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		Why:      expectationWhy(expected),
 	}
 
-	if err := curls.Acquire(ctx, 1); err != nil {
-		ce.Msg = fmt.Sprintf("acquiring curl semaphore: %s", err)
+	if err := slots.Acquire(ctx, curlSlots); err != nil {
+		ce.Msg = fmt.Sprintf("acquiring curl slots: %s", err)
 
 		return ce
 	}
-	defer curls.Release(1)
+	defer slots.Release(curlSlots)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(5*opts.CurlsCount+30)*time.Second)
 	defer cancel()
