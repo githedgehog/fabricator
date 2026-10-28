@@ -46,6 +46,12 @@ set +e
         echo "PSI not available"
     fi
 
+    echo -e "\n=== CPU Time Counters (/proc/stat, cumulative jiffies: user nice system idle iowait irq softirq steal) ==="
+    head -1 /proc/stat 2>/dev/null || echo "cannot read /proc/stat"
+
+    echo -e "\n=== CPU Sampling (vmstat 1s x5) ==="
+    vmstat -w 1 5 2>/dev/null || echo "vmstat not available"
+
     echo -e "\n=== Detailed Memory Info ==="
     cat /proc/meminfo
 
