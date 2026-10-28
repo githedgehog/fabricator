@@ -2597,6 +2597,7 @@ type TestConnectivityOpts struct {
 	PingsCount        int
 	IPerfsSeconds     int
 	IPerfsMinSpeed    float64
+	IPerfsMaxSpeed    float64
 	IPerfsDSCP        uint8
 	IPerfsTOS         uint8
 	CurlsCount        int
@@ -2613,6 +2614,13 @@ const (
 	curlSlots         = 1
 	connectSlots      = 1
 	iperfSlots        = connectivitySlots
+)
+
+const (
+	// iperf3Streams is the number of parallel iperf3 streams between servers
+	iperf3Streams = 4
+	// vsIPerfsMaxSpeed is the iperf3 speed limit in Mbps per direction when all switches are VS
+	vsIPerfsMaxSpeed = 10
 )
 
 func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *TestConnectivityOpts) (map[string]*sshutil.Config, kclient.Client, func(), error) {
@@ -2648,9 +2656,11 @@ func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *
 	}
 	if allVirtual {
 		if !allCumulusVX {
-			slog.Warn("All switches are virtual, ignoring IPerf min speed")
+			slog.Warn("All switches are virtual, ignoring IPerf min speed and limiting IPerf speed", "maxSpeed", vsIPerfsMaxSpeed)
 			// Seems like we're facing some iPerf speed issues on VS so disabling the check for the speed
 			opts.IPerfsMinSpeed = 0
+			// VS forwards in userspace, so keep iperf3 from loading it much, about what it did with GRO on
+			opts.IPerfsMaxSpeed = vsIPerfsMaxSpeed
 		} else {
 			slog.Warn("All switches are Cumulus VX, setting IPerf min speed to 400")
 			// Seems like Cumulus VX shows 700+ Mbps on iPerf quite reliably
@@ -3691,7 +3701,11 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	// toolbox container on the client VM. The fresh container plus the JSON result buffer can
 	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
 	// running container's namespaces and adds only the iperf3 client process itself.
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P %d -J -c %s -t %d", opts.IPerfsSeconds+25, iperf3Streams, toIP.String(), opts.IPerfsSeconds)
+	if opts.IPerfsMaxSpeed > 0 {
+		// -b limits each stream
+		cmd += fmt.Sprintf(" -b %.0fK", opts.IPerfsMaxSpeed*1000/iperf3Streams)
+	}
 	if srcIP.IsValid() {
 		cmd += " -B " + srcIP.String()
 	}

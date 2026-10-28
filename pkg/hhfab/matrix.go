@@ -1077,6 +1077,9 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, s
 	secs := opts.IPerfsSeconds
 	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",
 		secs+25, toIP.String(), toPort, secs)
+	if opts.IPerfsMaxSpeed > 0 {
+		cmd += fmt.Sprintf(" -b %.0fK", opts.IPerfsMaxSpeed*1000)
+	}
 	if _, _, iperfErr := retrySSHCmd(ctx, ssh, cmd, from); iperfErr != nil {
 		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: iperfErr.Error()}
 	}
