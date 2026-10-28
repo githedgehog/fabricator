@@ -368,7 +368,7 @@ func Run(ctx context.Context) error {
 			Name:        "gateway-workers",
 			Usage:       "number of workers for gateway",
 			Destination: &wgGatewayWorkers,
-			Value:       8,
+			Value:       hhfab.DefaultGatewayWorkers,
 		},
 		&cli.StringFlag{
 			Name:  FlagGatewayLogLevel,
