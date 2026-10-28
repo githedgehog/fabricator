@@ -214,6 +214,18 @@ jobs:
           curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1 || { echo "Local registry failed to start"; exit 1; }
           echo "Local registry is ready"
 
+      # 1s host CPU samples so probe-time load/steal/pressure can be read from the artifact
+      - name: Start runner CPU sampler
+        run: |
+          mkdir -p _debug
+          setsid nohup timeout 6h bash -c '
+            echo "# epoch /proc/stat-cpu | /proc/pressure/cpu(some) | /proc/loadavg"
+            while true; do
+              printf "%s %s | %s | %s\n" "$(date +%s.%N)" "$(head -1 /proc/stat)" "$(head -1 /proc/pressure/cpu 2>/dev/null)" "$(cat /proc/loadavg)"
+              sleep 1
+            done
+          ' > _debug/runner-sampler.log 2>&1 < /dev/null &
+
       - name: (${{ inputs.upgradefrom }}) Install hhfab to upgrade from
         if: ${{ inputs.upgradefrom != '' }}
         run: |

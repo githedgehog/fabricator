@@ -56,7 +56,9 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
 
 - **System resources**: memory (`free`, `/proc/meminfo`), CPU count/model,
   load average, cgroup memory stats (v1 and v2), PSI pressure (memory, CPU,
-  I/O)
+  I/O), cumulative CPU jiffies from `/proc/stat` (including steal) and a
+  5-second `vmstat` sample. These are collection-time snapshots; for
+  probe-time CPU load see `runner-sampler.log` below
 - **OOM and allocation failure events**: kernel OOM kills plus refused
   allocations (`__vm_enough_memory`, page allocation failures) from `dmesg`
 - **Process state**: top memory and CPU consumers, per-QEMU-process RSS/state
@@ -64,6 +66,14 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
 - **VLAB network plumbing**: `hhbr` bridge details, all `hhtap*` tap interfaces
   (address, operstate, packet counters), bridge port states, bridge FDB/VLAN
   tables, UDP sockets used by QEMU netdev links
+
+`run-vlab.yaml` also starts a 1-second host sampler for the whole job and
+uploads it as `runner-sampler.log` next to the show-tech output. Each line is
+the epoch, the cumulative `/proc/stat` `cpu` line, the `/proc/pressure/cpu`
+`some` line and `/proc/loadavg`. Subtract consecutive `cpu` lines to get
+per-second user/system/iowait/steal, and match the epoch against the epoch
+timestamps in ping output to see host CPU at the instant of a lost ping. The
+values are host-wide, so they include other pods on the same host.
 - **Host networking**: `ip addr/route/neigh`, nftables ruleset, bridge
   netfilter sysctls
 - **QEMU health**: QMP `query-status` for every running VM, per-process
