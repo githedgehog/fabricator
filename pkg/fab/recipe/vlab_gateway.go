@@ -9,16 +9,28 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const oldVLABGatewayIfacePrefix = "enp2s"
+
+// vlabGatewayMigrationBackoff makes up to 12 attempts, waiting 0.5s before the first retry and 1.5 times longer before
+// each next one, ±10%, so ~1.5 minutes of waits in total with the last one ~30s. It ends well within
+// vlabGatewayMigrationTimeout, which is there for an attempt that hangs, e.g. waiting for the fabric controller.
+var vlabGatewayMigrationBackoff = wait.Backoff{
+	Steps:    12,
+	Duration: 500 * time.Millisecond,
+	Factor:   1.5,
+	Jitter:   0.1,
+}
 
 // migrateVLABGateways moves the kernel driver gateways of VLAB VMs from the enp2sN interfaces to the portN ones, as
 // their NICs are on the root bus now. If any needs it, it waits for the fabric controller of the version to refresh
@@ -30,9 +42,35 @@ func migrateVLABGateways(ctx context.Context, kube kclient.Client, fabricVersion
 		return nil
 	}
 
-	return migrateVLABGatewayPorts(ctx, kube, func() error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	return retryMigrateVLABGatewayPorts(ctx, kube, vlabGatewayMigrationBackoff, func() error {
 		return waitFabricCtrlInitialized(ctx, kube, fabricVersion)
 	})
+}
+
+// retryMigrateVLABGatewayPorts retries the whole migration on any error until the backoff or ctx ends: the fabric
+// controller may be initialized before its webhooks have endpoints, or get restarted, e.g. by reloader, and a retry
+// finishes a partial migration
+func retryMigrateVLABGatewayPorts(ctx context.Context, kube kclient.Client, backoff wait.Backoff, waitRefreshed func() error) error {
+	attempt := 0
+	if err := retry.OnError(backoff, func(error) bool {
+		return ctx.Err() == nil
+	}, func() error {
+		attempt++
+
+		err := migrateVLABGatewayPorts(ctx, kube, waitRefreshed)
+		if err != nil {
+			slog.Warn("Failed to migrate VLAB gateways", "attempt", attempt, "err", err)
+		}
+
+		return err
+	}); err != nil {
+		return fmt.Errorf("migrating VLAB gateways after %d attempts: %w", attempt, err)
+	}
+
+	return nil
 }
 
 // migrateVLABGatewayPorts migrates the gateways and then the connections separately, so a retry finishes a partial
