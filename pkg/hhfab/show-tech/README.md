@@ -123,6 +123,9 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Services and logs**: `k3s.service` status, `sshd` status, k3s logs (last
   hour), `systemd-networkd` logs, kernel logs, kernel network messages from
   `dmesg`
+- **Link events (upgrade)**: timestamped `ip monitor link address route` trace
+  that hhfab records on control nodes while an upgrade runs
+  (`/var/log/hh-linkmon.log`), `not recorded` otherwise
 
 ### server.sh - server VM (Flatcar Linux)
 

@@ -1150,6 +1150,10 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return err
 				}
 
+				if vm.Type == VMTypeControl && opts.AutoUpgrade {
+					startLinkMonitor(ctx, ssh, vm.Name)
+				}
+
 				err = ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info)
 				if err != nil && opts.AutoUpgrade {
 					rebooted, rerr := waitNodeReboot(ctx, ssh, bootID)
@@ -1297,6 +1301,25 @@ func sshBootID(ctx context.Context, ssh *sshutil.Config) (string, error) {
 	}
 
 	return strings.TrimSpace(out), nil
+}
+
+// linkMonitorLog is where startLinkMonitor records link events, show-tech/control.sh reads the same path; each start
+// begins a fresh trace
+const linkMonitorLog = "/var/log/hh-linkmon.log"
+
+// startLinkMonitor records timestamped link, address and route events on the node until it reboots, so a show-tech can
+// order them against what k3s and the upgrade did; the trace is best effort and never fails the upgrade
+func startLinkMonitor(ctx context.Context, ssh *sshutil.Config, name string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := fmt.Sprintf("sudo systemctl stop hh-linkmon 2>/dev/null; sudo systemctl reset-failed hh-linkmon 2>/dev/null; sudo rm -f %s; "+
+		"sudo systemd-run --quiet --unit=hh-linkmon sh -c 'exec ip -timestamp monitor link address route >> %s 2>&1' && "+
+		"sleep 1 && systemctl is-active --quiet hh-linkmon",
+		linkMonitorLog, linkMonitorLog)
+	if out, stderr, err := ssh.Run(ctx, cmd); err != nil {
+		slog.Warn("Failed to start link event monitor", "vm", name, "err", err, "out", out, "stderr", stderr)
+	}
 }
 
 // waitNodeReboot checks if the installer rebooted the node during the run that started with the boot id, it's the

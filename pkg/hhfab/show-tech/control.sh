@@ -124,6 +124,14 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== k3s.service logs (last hour) ==="
     journalctl -u k3s.service --no-pager --since "1 hour ago"
 
+    echo -e "\n=== Link events (upgrade) ==="
+    # written by hhfab (startLinkMonitor) while a control node upgrade runs, absent otherwise
+    if [ -f /var/log/hh-linkmon.log ]; then
+        cat /var/log/hh-linkmon.log
+    else
+        echo "not recorded"
+    fi
+
     echo -e "\n=== systemd-networkd logs ==="
     journalctl -u systemd-networkd
 
