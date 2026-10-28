@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,21 +24,6 @@ const (
 	tuntapMultiQueue = netlink.TuntapFlag(0x100)  // IFF_MULTI_QUEUE
 	tuntapNoPI       = netlink.TuntapFlag(0x1000) // IFF_NO_PI
 )
-
-// groupFwdMask makes a bridge port pass the link-local frames (STP, LACP, LLDP and the rest) a bridge keeps to
-// itself by default, so VMs get them as if wired directly, all but the pause frames the kernel never forwards
-const groupFwdMask = 0xfffd
-
-// setGroupFwdMask writes the mask over sysfs, netlink's LinkSetBRSlaveGroupFwdMask is Linux only and would break the
-// non-Linux builds
-func setGroupFwdMask(port string) error {
-	path := filepath.Join("/sys/class/net", port, "brport", "group_fwd_mask")
-	if err := os.WriteFile(path, []byte(strconv.Itoa(groupFwdMask)), 0o644); err != nil { //nolint:gosec // sysfs
-		return fmt.Errorf("setting group forward mask of %q: %w", port, err)
-	}
-
-	return nil
-}
 
 // disableIPv6 keeps the host off the VMs' links, an IPv6 link-local address has it sending ND and MLD into them and
 // accepting router advertisements from the switches
@@ -164,7 +148,7 @@ func SetupVLABNet(_ context.Context, nets []VLABNet) error {
 				return fmt.Errorf("adding tap %q to %q: %w", name, n.Name, err)
 			}
 
-			if err := setGroupFwdMask(name); err != nil {
+			if err := setGroupFwdMask(tap); err != nil {
 				return err
 			}
 
@@ -193,7 +177,7 @@ func SetupVLABNet(_ context.Context, nets []VLABNet) error {
 				return fmt.Errorf("adding link %q to %q: %w", iface, n.Name, err)
 			}
 
-			if err := setGroupFwdMask(iface); err != nil {
+			if err := setGroupFwdMask(link); err != nil {
 				return err
 			}
 
