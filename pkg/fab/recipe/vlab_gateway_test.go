@@ -6,7 +6,9 @@ package recipe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -18,6 +20,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -58,6 +61,8 @@ func TestMigrateVLABGatewayIfaces(t *testing.T) {
 	require.Error(t, err)
 }
 
+var errNoWebhookEndpoints = errors.New(`failed calling webhook: no endpoints available for service "fabric-webhook-service"`)
+
 func TestMigrateVLABGatewayPorts(t *testing.T) {
 	oldGw := func(name string) *gwapi.Gateway {
 		return &gwapi.Gateway{
@@ -89,12 +94,13 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 	}
 
 	for _, tt := range []struct {
-		name     string
-		objs     []kclient.Object
-		conflict bool
-		wantIfc  string
-		wantPort string
-		wantWait bool
+		name        string
+		objs        []kclient.Object
+		conflict    bool
+		unavailable bool
+		wantIfc     string
+		wantPort    string
+		wantWait    bool
 	}{
 		{
 			name:     "full",
@@ -110,6 +116,14 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			wantIfc:  "port1",
 			wantPort: "gateway-1/port1",
 			wantWait: true,
+		},
+		{
+			name:        "unavailable",
+			objs:        []kclient.Object{oldGw("gateway-1"), conn("gateway-1/enp2s1")},
+			unavailable: true,
+			wantIfc:     "port1",
+			wantPort:    "gateway-1/port1",
+			wantWait:    true,
 		},
 		{
 			name:     "partial",
@@ -136,8 +150,9 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			require.NoError(t, gwapi.AddToScheme(scheme))
 			require.NoError(t, wiringapi.AddToScheme(scheme))
 			require.NoError(t, fabapi.AddToScheme(scheme))
-			// the first update of each object conflicts, as if the fabric controller updated it in between
-			conflicted := map[string]bool{}
+			// the first update of each object conflicts, as if the fabric controller updated it in between, or fails, as
+			// if its webhook had no endpoints yet
+			failed := map[string]bool{}
 			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).WithInterceptorFuncs(interceptor.Funcs{
 				// unlike the fake client, the real one decodes into the passed object as is, keeping its map entries
 				Get: func(ctx context.Context, kube kclient.WithWatch, key kclient.ObjectKey, obj kclient.Object, opts ...kclient.GetOption) error {
@@ -153,8 +168,12 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 					return json.Unmarshal(raw, obj)
 				},
 				Update: func(ctx context.Context, kube kclient.WithWatch, obj kclient.Object, opts ...kclient.UpdateOption) error {
-					if tt.conflict && !conflicted[obj.GetName()] {
-						conflicted[obj.GetName()] = true
+					if (tt.conflict || tt.unavailable) && !failed[obj.GetName()] {
+						failed[obj.GetName()] = true
+
+						if tt.unavailable {
+							return kapierrors.NewInternalError(errNoWebhookEndpoints)
+						}
 
 						return kapierrors.NewConflict(schema.GroupResource{}, obj.GetName(), nil)
 					}
@@ -164,7 +183,7 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			}).Build()
 
 			waited := false
-			require.NoError(t, migrateVLABGatewayPorts(t.Context(), kube, func() error {
+			require.NoError(t, retryMigrateVLABGatewayPorts(t.Context(), kube, wait.Backoff{Steps: 3, Duration: time.Millisecond}, func() error {
 				waited = true
 
 				return nil
@@ -180,4 +199,28 @@ func TestMigrateVLABGatewayPorts(t *testing.T) {
 			require.Equal(t, tt.wantPort, c.Spec.Gateway.Links[0].Gateway.Port)
 		})
 	}
+}
+
+func TestRetryMigrateVLABGatewayPortsFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, gwapi.AddToScheme(scheme))
+	require.NoError(t, wiringapi.AddToScheme(scheme))
+	require.NoError(t, fabapi.AddToScheme(scheme))
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&gwapi.Gateway{
+		Name: "gateway-1", Namespace: kmetav1.NamespaceDefault,
+		Spec: gwapi.GatewaySpec{
+			Driver:     gwapi.GatewayDriverKernel,
+			Interfaces: map[string]gwapi.GatewayInterface{"enp2s1": {}},
+		},
+	}).WithInterceptorFuncs(interceptor.Funcs{
+		Update: func(_ context.Context, _ kclient.WithWatch, _ kclient.Object, _ ...kclient.UpdateOption) error {
+			return kapierrors.NewInternalError(errNoWebhookEndpoints)
+		},
+	}).Build()
+
+	err := retryMigrateVLABGatewayPorts(t.Context(), kube, wait.Backoff{Steps: 3, Duration: time.Millisecond}, func() error {
+		return nil
+	})
+	require.ErrorContains(t, err, "after 3 attempts")
+	require.True(t, kapierrors.IsInternalError(err))
 }
