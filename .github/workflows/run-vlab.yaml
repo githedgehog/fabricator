@@ -116,6 +116,8 @@ env:
   HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
   # lets the new hhfab handle wiring from the release being upgraded from, empty when not upgrading
   HHFAB_UPGRADE_FROM: ${{ inputs.upgradefrom }}
+  # DPDK gateways busy-poll every worker and the VLABs share the hosts, so CI runs fewer than the default
+  VLAB_GATEWAY_WORKERS: 3
 
 jobs:
   run:
@@ -227,7 +229,7 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }}
-          old/hhfab vlab gen -v --eslag-leaf-groups="2,2" --orphan-leafs-count=1 ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          old/hhfab vlab gen -v --gateway-workers="$VLAB_GATEWAY_WORKERS" --eslag-leaf-groups="2,2" --orphan-leafs-count=1 ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: (${{ inputs.upgradefrom }}) Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom != '' && inputs.hybrid }}
@@ -326,7 +328,7 @@ jobs:
             VLAB_ESLAG_GROUPS=""
             VLAB_ORPHAN_LEAVES=3
           fi
-          bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS \
+          bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --gateway-workers="$VLAB_GATEWAY_WORKERS" \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
             --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
             --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \

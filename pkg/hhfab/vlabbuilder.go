@@ -33,6 +33,10 @@ const (
 	VLABInterconnectAnnotation = "hhfab.githedgehog.com/interconnect"
 )
 
+// DefaultGatewayWorkers is the number of dataplane workers of VLAB gateways. DPDK busy-polls each of them, so every
+// worker keeps a host core busy.
+const DefaultGatewayWorkers = 4
+
 const (
 	GatewayDriverKernel = "kernel"
 	GatewayDriverDPDK   = "dpdk"
@@ -167,7 +171,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			b.GatewayDriver = GatewayDriverKernel
 		}
 		if b.GatewayWorkers == 0 {
-			b.GatewayWorkers = 8
+			b.GatewayWorkers = DefaultGatewayWorkers
 		}
 
 		if !slices.Contains(GatewayDrivers, b.GatewayDriver) {
