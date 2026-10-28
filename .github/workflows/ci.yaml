@@ -298,7 +298,7 @@ jobs:
             || matrix.upgradefrom && contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
           )
           || github.event_name == 'workflow_dispatch'
-          && matrix.hybrid && inputs.hlab != true
+          && !!matrix.hybrid && inputs.hlab != true
         }}
       fabricatorref: ${{ github.ref }}
       fabricmode: spine-leaf
