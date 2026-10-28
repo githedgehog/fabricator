@@ -90,6 +90,12 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   table, and zebra's EVPN MAC (detail), Ethernet Segment (detail) and ARP
   cache views via `docker exec bgp vtysh`, to tell a MAC the ASIC holds from
   one zebra has learned and can originate as a type-2 route
+- **Kernel datapath counters**: per-interface stats (`ip -s -s link`), qdisc
+  stats, per-CPU softnet backlog drops, packet sockets with their buffer drops
+  (`ss -0`), IP/UDP counters (`nstat`), and per-NIC driver stats and GRO/GSO/TSO
+  state (`ethtool -S/-k`) for the `ethN` NICs, plus a `top` snapshot. On a
+  virtual switch every frame crosses these, and drops there are missing from
+  the interface counters
 - **Platform**: environment sensors, fan status, firmware, PSU summary, SSD
   health, temperature
 - **Broadcom ASIC** (`bcmcmd`): port status, PHY info, L2/L3 tables, ACLs
