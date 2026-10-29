@@ -126,9 +126,9 @@ jobs:
       - name: Test hlab diagram generation
         run: |
           source "./lab-ci/envs/env-ci-1.l/source.sh"
-          just run hhfab init -f --dev --gateway=true \
-            -w "./lab-ci/envs/env-ci-1.l/wiring.yaml" \
-            -w "./lab-ci/envs/env-ci-1.l/wiring-gateway.yaml"
+          just run hhfab init -f --dev --gateways=2 \
+            -w "./lab-ci/envs/env-ci-1.l/wiring.tmpl.yaml" \
+            --set gateway=kernel
 
           # Generate diagrams in all formats and save to test-diagrams directory
           just run hhfab diagram -f mermaid -o test-diagrams/hlab-diagram.mmd -v
