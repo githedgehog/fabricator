@@ -13,8 +13,13 @@ import (
 	"github.com/Masterminds/sprig/v3"
 )
 
-// noValue is what text/template prints for a missing map key under missingkey=zero.
-const noValue = "<no value>"
+const (
+	// leftDelim starts every action, incl. comments and the trimming forms, as the default
+	// delimiters are never changed
+	leftDelim = "{{"
+	// noValue is what text/template prints for a missing map key under missingkey=zero.
+	noValue = "<no value>"
+)
 
 // FromTemplate renders tmplText with sprig functions. Referencing a key that isn't present
 // in data is an error.
@@ -26,6 +31,12 @@ func FromTemplate(name, tmplText string, data any) (string, error) {
 // referencing a key that isn't present in data yields an empty string instead of an error,
 // so the `default` and `if .Values.x` idioms work, and `required` makes a value mandatory.
 func FromTemplateLenient(name, tmplText string, data any) (string, error) {
+	// text without any actions renders as is, returning it right away keeps it byte for byte
+	// as the "<no value>" cleanup below would otherwise drop it from the text itself
+	if !strings.Contains(tmplText, leftDelim) {
+		return tmplText, nil
+	}
+
 	out, err := fromTemplate(name, tmplText, data, "missingkey=zero")
 	if err != nil {
 		return "", err
