@@ -340,8 +340,13 @@ func importFabricGateway(c InitConfig, tmplData TemplateData) error {
 			return fmt.Errorf("importing %q: target %q: %w", source, relName, ErrExist)
 		}
 
-		if _, err := apiutil.NewLoader().Load(apiutil.FabricGatewayGVKs, data); err != nil {
+		objs, err := apiutil.NewLoader().Load(apiutil.FabricGatewayGVKs, data)
+		if err != nil {
 			return fmt.Errorf("importing %q: loading: %w", source, err)
+		}
+		// most likely a template that rendered nothing, e.g. a loop over a value that isn't set
+		if len(objs) == 0 {
+			return fmt.Errorf("importing %q: no objects", source) //nolint:err113
 		}
 
 		if err := os.WriteFile(target, data, 0o600); err != nil { //nolint:gosec // the user picks the workdir, the import name is checked to be a file name

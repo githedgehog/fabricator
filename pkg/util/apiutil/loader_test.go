@@ -35,6 +35,34 @@ metadata:
 	require.Equal(t, wiringapi.ListLabelValue, group.Labels[wiringapi.ListLabelFabric(wiringapi.DefaultFabric)])
 }
 
+// Documents with only blank lines and comments are skipped, e.g. the ones a template loop
+// leaves before a leading '---'.
+func TestLoadSkipsEmptyDocs(t *testing.T) {
+	t.Parallel()
+
+	objs, err := apiutil.NewLoader().Load(apiutil.FabricGatewayGVKs, []byte(`
+
+---
+apiVersion: wiring.githedgehog.com/v1beta1
+kind: SwitchGroup
+metadata:
+  name: eslag-1
+---
+  # only a comment
+---
+apiVersion: wiring.githedgehog.com/v1beta1
+kind: SwitchGroup
+metadata:
+  name: eslag-2
+---
+
+`))
+	require.NoError(t, err)
+	require.Len(t, objs, 2)
+	require.Equal(t, "eslag-1", objs[0].GetName())
+	require.Equal(t, "eslag-2", objs[1].GetName())
+}
+
 // Only wiring kinds are accepted, as with LoadAdd for them.
 func TestLoadAddWiringRejectsOtherKinds(t *testing.T) {
 	t.Parallel()
