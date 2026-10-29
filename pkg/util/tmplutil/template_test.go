@@ -80,6 +80,36 @@ func TestFromTemplateLenient(t *testing.T) {
 			data:     map[string]any{"name": "leaf"},
 			expected: "LEAF",
 		},
+		{
+			name:     "required passes a present value through",
+			tmpl:     `{{ required "vip is required" .vip }}`,
+			data:     map[string]any{"vip": "172.30.0.1/32"},
+			expected: "172.30.0.1/32",
+		},
+		{
+			name:     "required accepts zero and false, only missing and empty are errors",
+			tmpl:     `{{ required "a" .zero }}-{{ required "b" .off }}`,
+			data:     map[string]any{"zero": 0, "off": false},
+			expected: "0-false",
+		},
+		{
+			name:     "dig reads a nested key with a default when a parent is missing",
+			tmpl:     `{{ dig "leafs" "count" 4 . }}`,
+			data:     map[string]any{},
+			expected: "4",
+		},
+		{
+			name:     "dig reads a nested key that is present",
+			tmpl:     `{{ dig "leafs" "count" 4 . }}`,
+			data:     map[string]any{"leafs": map[string]any{"count": 2}},
+			expected: "2",
+		},
+		{
+			name:     "quote keeps a value a YAML string",
+			tmpl:     `name: {{ .name | quote }}`,
+			data:     map[string]any{"name": "yes"},
+			expected: `name: "yes"`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -98,6 +128,19 @@ func TestFromTemplateLenientNestedMissingStillErrors(t *testing.T) {
 
 	_, err := tmplutil.FromTemplateLenient("test", "{{ .a.b }}", map[string]any{})
 	require.Error(t, err)
+}
+
+func TestFromTemplateLenientRequired(t *testing.T) {
+	t.Parallel()
+
+	for name, data := range map[string]map[string]any{
+		"missing key":  {},
+		"nil value":    {"vip": nil},
+		"empty string": {"vip": ""},
+	} {
+		_, err := tmplutil.FromTemplateLenient("test", `{{ required "vip is required" .vip }}`, data)
+		require.ErrorContains(t, err, "vip is required", "for %s", name)
+	}
 }
 
 func TestFromTemplateLenientParseError(t *testing.T) {

@@ -13,31 +13,49 @@ import (
 
 	"github.com/samber/lo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/version"
 	kyaml "sigs.k8s.io/yaml"
 )
 
-// WiringTemplateData is the context available to a templated wiring file. Values is a map,
-// so referencing an absent key yields an empty string (Helm-like); the rest are Go structs,
-// where an unknown field is a template error.
-type WiringTemplateData struct {
-	// Values is what --wiring-values and --wiring-set produced
+// TemplateData is the context available to a templated config or wiring file. Values is a
+// map, so referencing an absent key yields an empty string (Helm-like); the rest are Go
+// structs, where an unknown field is a template error.
+type TemplateData struct {
+	// Values is what --values and --set produced
 	Values map[string]any
 	// Version is the hhfab version, component versions live under Fab.Status.Versions
 	Version string
 	// Release is the user-facing release version of the whole project, e.g. "26.04.0"
 	Release string
-	// Fab is the fabricator, with defaults merged in and versions calculated
+	// Fab is the fabricator, with defaults merged in and versions calculated. For the config
+	// it only holds the defaults, for the wiring it's the config after evaluation.
 	Fab fabapi.Fabricator
-	// Controls and Nodes are the control and fab nodes from the same config, keyed by name.
-	// Look one up with `index .Controls "control-1"` and iterate with
-	// `range $name, $c := .Controls` -- text/template ranges maps in key order, so the
-	// iteration is deterministic.
+	// Controls and Nodes are the control and fab nodes from the same config, keyed by name,
+	// and empty for the config itself. Look one up with `index .Controls "control-1"` and
+	// iterate with `range $name, $c := .Controls` -- text/template ranges maps in key order,
+	// so the iteration is deterministic.
 	Controls map[string]fabapi.ControlNode
 	Nodes    map[string]fabapi.FabNode
 }
 
+// defaultsTemplateData is the context for rendering the config itself: it can't depend on
+// the config being rendered, so Fab only holds the default config and release versions.
+func defaultsTemplateData(values map[string]any) (TemplateData, error) {
+	data := TemplateData{Values: values, Version: version.Version, Release: fab.Release}
+	data.Fab.Name = fabapi.FabName
+	data.Fab.Namespace = fabapi.FabNamespace
+	data.Fab.Spec.Config = *fab.DefaultConfig.DeepCopy()
+	if err := data.Fab.CalculateVersions(fab.Versions); err != nil {
+		return TemplateData{}, fmt.Errorf("calculating default versions: %w", err)
+	}
+	data.setNodes(nil, nil)
+
+	return data, nil
+}
+
 // setNodes fills in Controls and Nodes, keying the slices GetFabAndNodes returns by name.
-func (d *WiringTemplateData) setNodes(controls []fabapi.ControlNode, nodes []fabapi.FabNode) {
+func (d *TemplateData) setNodes(controls []fabapi.ControlNode, nodes []fabapi.FabNode) {
 	d.Controls = lo.SliceToMap(controls, func(c fabapi.ControlNode) (string, fabapi.ControlNode) {
 		return c.Name, c
 	})
@@ -46,25 +64,25 @@ func (d *WiringTemplateData) setNodes(controls []fabapi.ControlNode, nodes []fab
 	})
 }
 
-// LoadWiringValues builds the template values used to render imported wiring files. Values
-// files are merged left-to-right, then the k=v entries from sets are applied on top. The
-// result is never nil.
-func LoadWiringValues(valuesFiles, sets []string) (map[string]any, error) {
+// LoadTemplateValues builds the template values used to render the imported config and
+// wiring files. Values files are merged left-to-right, then the k=v entries from sets are
+// applied on top. The result is never nil.
+func LoadTemplateValues(valuesFiles, sets []string) (map[string]any, error) {
 	values := map[string]any{}
 
 	for _, valuesFile := range valuesFiles {
 		data, err := os.ReadFile(valuesFile)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("wiring values %q: %w", valuesFile, ErrNotExist)
+				return nil, fmt.Errorf("values %q: %w", valuesFile, ErrNotExist)
 			}
 
-			return nil, fmt.Errorf("wiring values %q: reading: %w", valuesFile, err)
+			return nil, fmt.Errorf("values %q: reading: %w", valuesFile, err)
 		}
 
 		parsed := map[string]any{}
 		if err := kyaml.Unmarshal(data, &parsed); err != nil {
-			return nil, fmt.Errorf("wiring values %q: parsing: %w", valuesFile, err)
+			return nil, fmt.Errorf("values %q: parsing: %w", valuesFile, err)
 		}
 
 		normalizeNumbers(parsed)
@@ -72,7 +90,7 @@ func LoadWiringValues(valuesFiles, sets []string) (map[string]any, error) {
 	}
 
 	for _, set := range sets {
-		parsed, err := parseWiringSet(set)
+		parsed, err := parseSet(set)
 		if err != nil {
 			return nil, err
 		}
@@ -83,22 +101,22 @@ func LoadWiringValues(valuesFiles, sets []string) (map[string]any, error) {
 	return values, nil
 }
 
-// parseWiringSet turns a single --wiring-set entry into a (possibly nested) map, e.g.
+// parseSet turns a single --set entry into a (possibly nested) map, e.g.
 // "fabric.leaves.count=4" becomes {"fabric": {"leaves": {"count": 4}}}.
-func parseWiringSet(set string) (map[string]any, error) {
+func parseSet(set string) (map[string]any, error) {
 	key, value, found := strings.Cut(set, "=")
 	if !found {
-		return nil, fmt.Errorf("wiring set %q: should be '<key>=<value>'", set) //nolint:err113
+		return nil, fmt.Errorf("set %q: should be '<key>=<value>'", set) //nolint:err113
 	}
 
 	path := strings.Split(key, ".")
 	if slices.Contains(path, "") {
-		return nil, fmt.Errorf("wiring set %q: empty key part", set) //nolint:err113
+		return nil, fmt.Errorf("set %q: empty key part", set) //nolint:err113
 	}
 
 	var parsed any
 	if err := kyaml.Unmarshal([]byte(value), &parsed); err != nil {
-		return nil, fmt.Errorf("wiring set %q: parsing value: %w", set, err)
+		return nil, fmt.Errorf("set %q: parsing value: %w", set, err)
 	}
 
 	res := map[string]any{}
