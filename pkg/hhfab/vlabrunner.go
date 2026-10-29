@@ -1057,13 +1057,18 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	}
 
 	ftp, cleanup, err := ssh.NewSftp()
-	if cleanup != nil {
-		defer cleanup() //nolint:errcheck
-	}
+	// closes the current client as it's re-created on reconnects
+	defer func() {
+		if ftp != nil {
+			_ = ftp.Close()
+		}
+		if cleanup != nil {
+			_ = cleanup()
+		}
+	}()
 	if err != nil {
 		return fmt.Errorf("creating sftp: %w", err)
 	}
-	defer ftp.Close()
 
 	slog.Debug("SSH is ready", "vm", vm.Name, "type", vm.Type)
 
@@ -1163,14 +1168,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					if rebooted {
 						slog.Info("Node rebooted to apply kernel args, re-running "+mode, "vm", vm.Name, "type", vm.Type)
 
+						_ = ftp.Close()
+						_ = cleanup()
+
 						ftp, cleanup, err = ssh.NewSftp()
-						if cleanup != nil {
-							defer cleanup() //nolint:errcheck
-						}
 						if err != nil {
 							return fmt.Errorf("re-creating sftp: %w", err)
 						}
-						defer ftp.Close()
 
 						err = ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info)
 					}
@@ -1197,12 +1201,34 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 
 			installed := false
+			reconnects := 0
 			for !installed {
 				select {
 				case <-ctx.Done():
 					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-time.After(5 * time.Second):
 					marker, err := sshReadMarker(ftp)
+					// gateways are reached through the control node, it may drop the session while setting up k3s networking
+					if errors.Is(err, sftp.ErrSSHFxConnectionLost) && reconnects < 3 {
+						reconnects++
+						slog.Debug("Reconnecting sftp to check install marker", "vm", vm.Name, "type", vm.Type, "attempt", reconnects, "err", err)
+
+						newFtp, newCleanup, err := ssh.NewSftp()
+						if err != nil {
+							if newCleanup != nil {
+								_ = newCleanup()
+							}
+							slog.Debug("Failed to reconnect sftp", "vm", vm.Name, "type", vm.Type, "err", err)
+
+							continue
+						}
+
+						_ = ftp.Close()
+						_ = cleanup()
+						ftp, cleanup = newFtp, newCleanup
+
+						continue
+					}
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
 							continue
