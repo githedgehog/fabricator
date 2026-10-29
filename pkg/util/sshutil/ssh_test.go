@@ -10,10 +10,12 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/crypto/ssh"
@@ -48,6 +50,9 @@ func silentListener(t *testing.T) sshutil.Remote {
 
 	return sshutil.Remote{User: "core", Host: "127.0.0.1", Port: uint(addr.Port)}
 }
+
+// hangCommand makes echoServer close the command output and keep the session running.
+const hangCommand = "hang"
 
 // stallConn stops reading once stalled, like a jump host that hangs after accepting a forward.
 type stallConn struct {
@@ -119,18 +124,30 @@ func serveEcho(conn *stallConn, config *ssh.ServerConfig, stall bool) {
 			go func() {
 				defer ch.Close()
 				for req := range reqs {
-					if req.Type != "exec" {
+					switch req.Type {
+					case "exec":
+						exec := struct{ Command string }{}
+						_ = ssh.Unmarshal(req.Payload, &exec)
+						_ = req.Reply(true, nil)
+						_, _ = io.WriteString(ch, exec.Command+"\n")
+						if exec.Command == hangCommand {
+							// closes the output and keeps running
+							_ = ch.CloseWrite()
+							<-conn.done
+
+							return
+						}
+						_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
+
+						return
+					case "subsystem":
+						_ = req.Reply(true, nil)
+						_ = sftp.NewRequestServer(ch, sftp.InMemHandler()).Serve()
+
+						return
+					default:
 						_ = req.Reply(false, nil)
-
-						continue
 					}
-					exec := struct{ Command string }{}
-					_ = ssh.Unmarshal(req.Payload, &exec)
-					_ = req.Reply(true, nil)
-					_, _ = io.WriteString(ch, exec.Command+"\n")
-					_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
-
-					return
 				}
 			}()
 		case "direct-tcpip":
@@ -203,6 +220,74 @@ func TestRunThroughProxy(t *testing.T) {
 	out, _, err := cfg.Run(t.Context(), "hedgehog")
 	require.NoError(t, err)
 	require.Equal(t, "hedgehog\n", out)
+}
+
+func TestRunLongLine(t *testing.T) {
+	t.Parallel()
+
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Password: "x"}
+
+	line := strings.Repeat("x", 100*1024)
+	out, _, err := cfg.Run(t.Context(), line)
+	require.NoError(t, err)
+	require.Equal(t, line+"\n", out)
+}
+
+func TestRunHonoursContextWhenCommandClosesOutput(t *testing.T) {
+	t.Parallel()
+
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Password: "x"}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, _, err := cfg.Run(ctx, hangCommand)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestSftp(t *testing.T) {
+	t.Parallel()
+
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Password: "x"}
+
+	ftp, cleanup, err := cfg.NewSftp(t.Context())
+	require.NoError(t, err)
+	defer cleanup() //nolint:errcheck
+
+	f, err := ftp.Create("/marker")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("hedgehog"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	f, err = ftp.Open("/marker")
+	require.NoError(t, err)
+	data, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, "hedgehog", string(data))
+}
+
+func TestSftpClosedOnCancel(t *testing.T) {
+	t.Parallel()
+
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Password: "x"}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ftp, cleanup, err := cfg.NewSftp(ctx)
+	require.NoError(t, err)
+	defer cleanup() //nolint:errcheck
+
+	_, err = ftp.Stat("/")
+	require.NoError(t, err)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		_, err := ftp.Stat("/")
+
+		return err != nil
+	}, 5*time.Second, 50*time.Millisecond)
 }
 
 func TestRunHonoursSSHTimeoutWhenProxyStalls(t *testing.T) {

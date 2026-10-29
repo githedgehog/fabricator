@@ -1207,7 +1207,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				case <-ctx.Done():
 					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-time.After(5 * time.Second):
+					// sftp reads take no context, closing the connection aborts one stuck on a hung node and reconnects
+					readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
+					closeConn := cleanup
+					stopRead := context.AfterFunc(readCtx, func() { _ = closeConn() })
 					marker, err := sshReadMarker(ftp)
+					stopRead()
+					readCancel()
 					// gateways are reached through the control node, it may drop the session while setting up k3s networking;
 					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost
 					if err != nil && !errors.Is(err, os.ErrNotExist) && reconnects < 3 {
@@ -1384,6 +1390,7 @@ func sshReadMarker(client *sftp.Client) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("checking for install marker: %w", err)
 	}
+	defer f.Close()
 
 	rawMarker, err := io.ReadAll(f)
 	if err != nil {

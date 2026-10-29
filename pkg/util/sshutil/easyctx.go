@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -159,51 +160,49 @@ func streamContext(ctx context.Context, c *Config, command string) (<-chan strin
 		return stdoutChan, stderrChan, errChan, fmt.Errorf("connecting: %w", err)
 	}
 
+	// reads lines with no length limit, a bufio.Scanner stops on a long one and the remote then blocks writing
+	readLines := func(r io.Reader, out chan<- string) {
+		defer close(out)
+
+		br := bufio.NewReader(r)
+		for {
+			line, err := br.ReadString('\n')
+			if line != "" {
+				select {
+				case out <- strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"):
+				case <-ctx.Done():
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+
 	go func() {
 		defer close(errChan)
-		defer closeClient() //nolint:errcheck
+		// closing the client first unblocks everything, session close then has nothing to send
 		defer session.Close()
+		defer closeClient() //nolint:errcheck
 
-		res := make(chan struct{}, 1)
+		res := make(chan error, 1)
 		resWg := sync.WaitGroup{}
 
-		resWg.Go(func() {
-			defer close(stdoutChan)
-
-			stdoutScanner := bufio.NewScanner(outReader)
-			for stdoutScanner.Scan() {
-				select {
-				case stdoutChan <- stdoutScanner.Text():
-				case <-ctx.Done():
-					return
-				}
-			}
-		})
-
-		resWg.Go(func() {
-			defer close(stderrChan)
-
-			stderrScanner := bufio.NewScanner(errReader)
-			for stderrScanner.Scan() {
-				select {
-				case stderrChan <- stderrScanner.Text():
-				case <-ctx.Done():
-					return
-				}
-			}
-		})
+		resWg.Go(func() { readLines(outReader, stdoutChan) })
+		resWg.Go(func() { readLines(errReader, stderrChan) })
 
 		go func() {
 			resWg.Wait()
-			// close all of our open resources
-			res <- struct{}{}
+			// the remote may close its output and keep running, closing the client on cancellation unblocks it
+			res <- session.Wait()
 		}()
 
 		select {
 		case <-ctx.Done():
 			errChan <- fmt.Errorf("cancelled: %w", ctx.Err())
-		case <-res:
-			errChan <- session.Wait()
+		case err := <-res:
+			errChan <- err
 		}
 	}()
 

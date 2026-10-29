@@ -121,7 +121,8 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 	}
 }
 
-// NewSftp returns an sftp client and a cleanup func closing its connection, both nil on error.
+// NewSftp returns an sftp client and a cleanup func closing its connection, both nil on error. sftp calls take no
+// context, so the connection is closed once ctx is done to unblock them.
 func (c *Config) NewSftp(ctx context.Context) (*sftp.Client, func() error, error) {
 	var sftpClient *sftp.Client
 	closeClient, err := c.connect(ctx, func(client *ssh.Client) error {
@@ -136,7 +137,13 @@ func (c *Config) NewSftp(ctx context.Context) (*sftp.Client, func() error, error
 		return nil, nil, fmt.Errorf("connecting: %w", err)
 	}
 
-	return sftpClient, closeClient, nil
+	stop := context.AfterFunc(ctx, func() { _ = closeClient() })
+
+	return sftpClient, func() error {
+		stop()
+
+		return closeClient()
+	}, nil
 }
 
 func UploadPathWith(ftp *sftp.Client, localPath string, remotePath string) error {
@@ -193,7 +200,7 @@ func DownloadPathWith(ftp *sftp.Client, remotePath string, localPath string) err
 	}
 
 	if err := local.Sync(); err != nil {
-		return fmt.Errorf("syncing local file: %w", local.Sync())
+		return fmt.Errorf("syncing local file: %w", err)
 	}
 
 	return nil
