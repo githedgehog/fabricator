@@ -78,14 +78,17 @@ func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) err
 		return client.Close, nil
 	}
 
+	// closing the proxy first, closing the client sends a message through it that may block if it stopped answering
 	return func() error {
-		return errors.Join(client.Close(), proxy.Close())
+		proxyErr := proxy.Close()
+
+		return errors.Join(client.Close(), proxyErr)
 	}, nil
 }
 
 // connectVia dials the remote, through the proxy if not nil, and runs the SSH handshake and setup on the connection,
 // closing it if ctx is done first. A connection through the proxy is a channel, closing it doesn't unblock reads if the
-// proxy stops answering, so the proxy is closed as well.
+// proxy stops answering and sends a message that may block, so the proxy is closed first.
 func connectVia(ctx context.Context, proxy *ssh.Client, remote Remote, config *ssh.ClientConfig, setup func(client *ssh.Client) error) (*ssh.Client, error) {
 	addr := net.JoinHostPort(remote.Host, strconv.FormatUint(uint64(remote.Port), 10))
 
@@ -99,10 +102,10 @@ func connectVia(ctx context.Context, proxy *ssh.Client, remote Remote, config *s
 		return nil, fmt.Errorf("dialing %s: %w", addr, err)
 	}
 	stop := context.AfterFunc(ctx, func() {
-		_ = conn.Close()
 		if proxy != nil {
 			_ = proxy.Close()
 		}
+		_ = conn.Close()
 	})
 
 	var client *ssh.Client

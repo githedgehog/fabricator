@@ -1212,7 +1212,10 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					closeConn := cleanup
 					stopRead := context.AfterFunc(readCtx, func() { _ = closeConn() })
 					marker, err := sshReadMarker(ftp)
-					stopRead()
+					if !stopRead() && err == nil {
+						// the read completed as the connection was closed, reconnect for the next one
+						err = fmt.Errorf("reading install marker: %w", readCtx.Err())
+					}
 					readCancel()
 					// gateways are reached through the control node, it may drop the session while setting up k3s networking;
 					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost
