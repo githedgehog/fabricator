@@ -1056,7 +1056,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:err113
 	}
 
-	ftp, cleanup, err := ssh.NewSftp()
+	ftp, cleanup, err := ssh.NewSftp(ctx)
 	// closes the current client as it's re-created on reconnects; ssh goes first as closing sftp waits for its reader
 	defer func() {
 		if cleanup != nil {
@@ -1171,7 +1171,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 						_ = cleanup()
 						_ = ftp.Close()
 
-						ftp, cleanup, err = ssh.NewSftp()
+						ftp, cleanup, err = ssh.NewSftp(ctx)
 						if err != nil {
 							return fmt.Errorf("re-creating sftp: %w", err)
 						}
@@ -1214,7 +1214,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 						reconnects++
 						slog.Debug("Reconnecting sftp to check install marker", "vm", vm.Name, "type", vm.Type, "attempt", reconnects, "err", err)
 
-						newFtp, newCleanup, err := ssh.NewSftp()
+						newFtp, newCleanup, err := ssh.NewSftp(ctx)
 						if err != nil {
 							if newCleanup != nil {
 								_ = newCleanup()

@@ -12,7 +12,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/appleboy/easyssh-proxy"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -29,40 +28,15 @@ type Config struct {
 	Remote Remote
 	Proxy  *Remote
 
-	SSHKey     string
-	SSHKeyPath string
-	Password   string
+	SSHKey   string
+	Password string
+	// SSHTimeout bounds connecting: dials, handshakes and session or sftp setup
 	SSHTimeout time.Duration
-
-	ssh *easyssh.MakeConfig
 }
 
 func (c *Config) init() error {
 	if c.SSHTimeout == 0 {
 		c.SSHTimeout = 60 * time.Second
-	}
-
-	if c.ssh == nil {
-		c.ssh = &easyssh.MakeConfig{
-			User:     c.Remote.User,
-			Server:   c.Remote.Host,
-			Port:     fmt.Sprintf("%d", c.Remote.Port),
-			Key:      c.SSHKey,
-			KeyPath:  c.SSHKeyPath,
-			Password: c.Password,
-			Timeout:  c.SSHTimeout,
-		}
-
-		if c.Proxy != nil {
-			c.ssh.Proxy = easyssh.DefaultConfig{
-				User:    c.Proxy.User,
-				Server:  c.Proxy.Host,
-				Port:    fmt.Sprintf("%d", c.Proxy.Port),
-				Key:     c.SSHKey,
-				KeyPath: c.SSHKeyPath,
-				Timeout: c.SSHTimeout,
-			}
-		}
 	}
 
 	return nil
@@ -101,7 +75,7 @@ func (c *Config) Run(ctx context.Context, cmd string) (string, string, error) {
 		return "", "", fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	outStr, errStr, err := runContext(ctx, c.ssh, cmd)
+	outStr, errStr, err := runContext(ctx, c, cmd)
 	if err != nil {
 		return outStr, errStr, fmt.Errorf("running command: %w", err)
 	}
@@ -126,7 +100,7 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 		return fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	stdoutCh, stderrCh, errCh, err := streamContext(ctx, c.ssh, cmd)
+	stdoutCh, stderrCh, errCh, err := streamContext(ctx, c, cmd)
 	if err != nil {
 		return fmt.Errorf("streaming command: %w", err)
 	}
@@ -159,27 +133,25 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 	}
 }
 
-func (c *Config) NewSftp() (*sftp.Client, func() error, error) {
+func (c *Config) NewSftp(ctx context.Context) (*sftp.Client, func() error, error) {
 	if err := c.init(); err != nil {
 		return nil, nil, fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	session, client, err := c.ssh.Connect()
+	var sftpClient *sftp.Client
+	client, err := c.connect(ctx, func(client *ssh.Client) error {
+		var err error
+		if sftpClient, err = sftp.NewClient(client); err != nil {
+			return fmt.Errorf("creating new sftp client: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("connecting: %w", err)
 	}
-	_ = session.Close()
 
-	cleanup := func() error {
-		return client.Close()
-	}
-
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		return nil, cleanup, fmt.Errorf("creating new sftp client: %w", err)
-	}
-
-	return sftpClient, cleanup, nil
+	return sftpClient, client.Close, nil
 }
 
 func UploadPathWith(ftp *sftp.Client, localPath string, remotePath string) error {
@@ -202,8 +174,8 @@ func UploadPathWith(ftp *sftp.Client, localPath string, remotePath string) error
 	return nil
 }
 
-func (c *Config) UploadPath(localPath string, remotePath string) error {
-	ftp, cleanup, err := c.NewSftp()
+func (c *Config) UploadPath(ctx context.Context, localPath string, remotePath string) error {
+	ftp, cleanup, err := c.NewSftp(ctx)
 	if cleanup != nil {
 		defer cleanup() //nolint:errcheck
 	}
@@ -239,8 +211,8 @@ func DownloadPathWith(ftp *sftp.Client, remotePath string, localPath string) err
 	return nil
 }
 
-func (c *Config) DownloadPath(remotePath string, localPath string) error {
-	ftp, cleanup, err := c.NewSftp()
+func (c *Config) DownloadPath(ctx context.Context, remotePath string, localPath string) error {
+	ftp, cleanup, err := c.NewSftp(ctx)
 	if cleanup != nil {
 		defer cleanup() //nolint:errcheck
 	}
