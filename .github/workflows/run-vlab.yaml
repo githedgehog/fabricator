@@ -458,7 +458,7 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         with:
-          name: fab-${{ github.run_id }}-${{ env.slug }}
+          name: fab-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.slug }}
           path: fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Setup tmate session for debug
