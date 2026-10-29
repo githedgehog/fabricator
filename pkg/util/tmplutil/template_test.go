@@ -81,6 +81,12 @@ func TestFromTemplateLenient(t *testing.T) {
 			expected: "LEAF",
 		},
 		{
+			name:     "a template with only a comment is rendered without it",
+			tmpl:     "{{- /* note */ -}}\na: 1\n",
+			data:     map[string]any{},
+			expected: "a: 1\n",
+		},
+		{
 			name:     "required passes a present value through",
 			tmpl:     `{{ required "vip is required" .vip }}`,
 			data:     map[string]any{"vip": "172.30.0.1/32"},
@@ -128,6 +134,20 @@ func TestFromTemplateLenientNestedMissingStillErrors(t *testing.T) {
 
 	_, err := tmplutil.FromTemplateLenient("test", "{{ .a.b }}", map[string]any{})
 	require.Error(t, err)
+}
+
+// A literal "<no value>" survives in text without actions, e.g. in a password in a plain
+// config, but not in a template, where it can't be told apart from a missing key.
+func TestFromTemplateLenientLiteralNoValue(t *testing.T) {
+	t.Parallel()
+
+	out, err := tmplutil.FromTemplateLenient("test", "password: abc<no value>def\n", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, "password: abc<no value>def\n", out)
+
+	out, err = tmplutil.FromTemplateLenient("test", "password: abc<no value>def{{ .missing }}\n", map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, "password: abcdef\n", out)
 }
 
 func TestFromTemplateLenientRequired(t *testing.T) {
