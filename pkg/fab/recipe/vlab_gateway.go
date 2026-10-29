@@ -23,8 +23,8 @@ import (
 const oldVLABGatewayIfacePrefix = "enp2s"
 
 // vlabGatewayMigrationBackoff makes up to 12 attempts, waiting 0.5s before the first retry and 1.5 times longer before
-// each next one, ±10%, so ~1.5 minutes of waits in total with the last one ~30s. It ends well within
-// vlabGatewayMigrationTimeout, which is there for an attempt that hangs, e.g. waiting for the fabric controller.
+// each next one, ±10%, so ~1.5 minutes of waits in total with the last one ~30s. It ends well within the 5 minutes
+// timeout of the whole migration, which is there for an attempt that hangs, e.g. waiting for the fabric controller.
 var vlabGatewayMigrationBackoff = wait.Backoff{
 	Steps:    12,
 	Duration: 500 * time.Millisecond,
