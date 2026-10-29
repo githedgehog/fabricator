@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,8 +49,26 @@ func silentListener(t *testing.T) sshutil.Remote {
 	return sshutil.Remote{User: "core", Host: "127.0.0.1", Port: uint(addr.Port)}
 }
 
-// echoServer is an SSH server accepting any credentials that echoes exec'd commands back and forwards direct-tcpip.
-func echoServer(t *testing.T) sshutil.Remote {
+// stallConn stops reading once stalled, like a jump host that hangs after accepting a forward.
+type stallConn struct {
+	net.Conn
+	stalled atomic.Bool
+	done    <-chan struct{}
+}
+
+func (c *stallConn) Read(b []byte) (int, error) {
+	if c.stalled.Load() {
+		<-c.done
+
+		return 0, io.EOF
+	}
+
+	return c.Conn.Read(b) //nolint:wrapcheck
+}
+
+// echoServer is an SSH server accepting any credentials that echoes exec'd commands back and forwards direct-tcpip,
+// or stalls on the forward if stall is set.
+func echoServer(t *testing.T, stall bool) sshutil.Remote {
 	t.Helper()
 
 	_, hostKey, err := ed25519.GenerateKey(nil)
@@ -73,7 +92,7 @@ func echoServer(t *testing.T) sshutil.Remote {
 			if err != nil {
 				return
 			}
-			go serveEcho(conn, config)
+			go serveEcho(&stallConn{Conn: conn, done: t.Context().Done()}, config, stall)
 		}
 	}()
 
@@ -82,7 +101,7 @@ func echoServer(t *testing.T) sshutil.Remote {
 	return sshutil.Remote{User: "core", Host: "127.0.0.1", Port: uint(addr.Port)}
 }
 
-func serveEcho(conn net.Conn, config *ssh.ServerConfig) {
+func serveEcho(conn *stallConn, config *ssh.ServerConfig, stall bool) {
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
 	if err != nil {
 		return
@@ -135,6 +154,11 @@ func serveEcho(conn net.Conn, config *ssh.ServerConfig) {
 				continue
 			}
 			go ssh.DiscardRequests(reqs)
+			if stall {
+				conn.stalled.Store(true)
+
+				continue
+			}
 			go func() {
 				_, _ = io.Copy(ch, target)
 				_ = ch.Close()
@@ -163,7 +187,7 @@ func clientKey(t *testing.T) string {
 func TestRun(t *testing.T) {
 	t.Parallel()
 
-	cfg := &sshutil.Config{Remote: echoServer(t), Password: "x"}
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Password: "x"}
 
 	out, _, err := cfg.Run(t.Context(), "hedgehog")
 	require.NoError(t, err)
@@ -173,12 +197,24 @@ func TestRun(t *testing.T) {
 func TestRunThroughProxy(t *testing.T) {
 	t.Parallel()
 
-	proxy := echoServer(t)
-	cfg := &sshutil.Config{Remote: echoServer(t), Proxy: &proxy, SSHKey: clientKey(t)}
+	proxy := echoServer(t, false)
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Proxy: &proxy, SSHKey: clientKey(t)}
 
 	out, _, err := cfg.Run(t.Context(), "hedgehog")
 	require.NoError(t, err)
 	require.Equal(t, "hedgehog\n", out)
+}
+
+func TestRunHonoursSSHTimeoutWhenProxyStalls(t *testing.T) {
+	t.Parallel()
+
+	proxy := echoServer(t, true)
+	cfg := &sshutil.Config{Remote: echoServer(t, false), Proxy: &proxy, SSHKey: clientKey(t), SSHTimeout: 200 * time.Millisecond}
+
+	start := time.Now()
+	_, _, err := cfg.Run(t.Context(), "hedgehog")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), 5*time.Second)
 }
 
 func TestRunHonoursContextDuringHandshake(t *testing.T) {

@@ -1216,9 +1216,6 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 						newFtp, newCleanup, err := ssh.NewSftp(ctx)
 						if err != nil {
-							if newCleanup != nil {
-								_ = newCleanup()
-							}
 							slog.Debug("Failed to reconnect sftp", "vm", vm.Name, "type", vm.Type, "err", err)
 
 							continue

@@ -8,6 +8,7 @@ package sshutil
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,8 +17,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
-
-type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // clientConfig returns the SSH client config to log in as user with the configured key and password.
 func (c *Config) clientConfig(user, password string) (*ssh.ClientConfig, error) {
@@ -41,9 +40,10 @@ func (c *Config) clientConfig(user, password string) (*ssh.ClientConfig, error) 
 }
 
 // connect connects to the remote, through the proxy if set, and runs setup on the new client. The context and SSH timeout
-// bound the dials, handshakes and setup; the connection is closed to abort them once either expires.
-func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) error) (*ssh.Client, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.SSHTimeout)
+// bound the dials, handshakes and setup; the connection is closed to abort them once either expires. It returns a func
+// closing the client and the proxy connection.
+func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) error) (func() error, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 
 	config, err := c.clientConfig(c.Remote.User, c.Password)
@@ -51,7 +51,6 @@ func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) err
 		return nil, err
 	}
 
-	dial := (&net.Dialer{}).DialContext
 	var proxy *ssh.Client
 	if c.Proxy != nil {
 		proxyConfig, err := c.clientConfig(c.Proxy.User, "")
@@ -59,14 +58,13 @@ func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) err
 			return nil, err
 		}
 
-		proxy, err = connectVia(ctx, dial, *c.Proxy, proxyConfig, nil)
+		proxy, err = connectVia(ctx, nil, *c.Proxy, proxyConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("connecting to proxy: %w", err)
 		}
-		dial = proxy.DialContext
 	}
 
-	client, err := connectVia(ctx, dial, c.Remote, config, setup)
+	client, err := connectVia(ctx, proxy, c.Remote, config, setup)
 	if err != nil {
 		if proxy != nil {
 			_ = proxy.Close()
@@ -75,25 +73,36 @@ func (c *Config) connect(ctx context.Context, setup func(client *ssh.Client) err
 		return nil, err
 	}
 
-	if proxy != nil {
-		go func() {
-			_ = client.Wait()
-			_ = proxy.Close()
-		}()
+	if proxy == nil {
+		return client.Close, nil
 	}
 
-	return client, nil
+	return func() error {
+		return errors.Join(client.Close(), proxy.Close())
+	}, nil
 }
 
-// connectVia dials the remote and runs the SSH handshake and setup on the connection, closing it if ctx is done first.
-func connectVia(ctx context.Context, dial dialFunc, remote Remote, config *ssh.ClientConfig, setup func(client *ssh.Client) error) (*ssh.Client, error) {
+// connectVia dials the remote, through the proxy if not nil, and runs the SSH handshake and setup on the connection,
+// closing it if ctx is done first. A connection through the proxy is a channel, closing it doesn't unblock reads if the
+// proxy stops answering, so the proxy is closed as well.
+func connectVia(ctx context.Context, proxy *ssh.Client, remote Remote, config *ssh.ClientConfig, setup func(client *ssh.Client) error) (*ssh.Client, error) {
 	addr := net.JoinHostPort(remote.Host, strconv.FormatUint(uint64(remote.Port), 10))
+
+	dial := (&net.Dialer{}).DialContext
+	if proxy != nil {
+		dial = proxy.DialContext
+	}
 
 	conn, err := dial(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dialing %s: %w", addr, err)
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		if proxy != nil {
+			_ = proxy.Close()
+		}
+	})
 
 	var client *ssh.Client
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
@@ -124,11 +133,12 @@ func connectVia(ctx context.Context, dial dialFunc, remote Remote, config *ssh.C
 func streamContext(ctx context.Context, c *Config, command string) (<-chan string, <-chan string, <-chan error, error) {
 	stdoutChan := make(chan string)
 	stderrChan := make(chan string)
-	errChan := make(chan error)
+	// buffered as the reader may be gone on cancellation
+	errChan := make(chan error, 1)
 
 	var session *ssh.Session
 	var outReader, errReader io.Reader
-	client, err := c.connect(ctx, func(client *ssh.Client) error {
+	closeClient, err := c.connect(ctx, func(client *ssh.Client) error {
 		var err error
 		if session, err = client.NewSession(); err != nil {
 			return fmt.Errorf("opening session: %w", err)
@@ -151,7 +161,7 @@ func streamContext(ctx context.Context, c *Config, command string) (<-chan strin
 
 	go func() {
 		defer close(errChan)
-		defer client.Close()
+		defer closeClient() //nolint:errcheck
 		defer session.Close()
 
 		res := make(chan struct{}, 1)
@@ -162,7 +172,11 @@ func streamContext(ctx context.Context, c *Config, command string) (<-chan strin
 
 			stdoutScanner := bufio.NewScanner(outReader)
 			for stdoutScanner.Scan() {
-				stdoutChan <- stdoutScanner.Text()
+				select {
+				case stdoutChan <- stdoutScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 
@@ -171,7 +185,11 @@ func streamContext(ctx context.Context, c *Config, command string) (<-chan strin
 
 			stderrScanner := bufio.NewScanner(errReader)
 			for stderrScanner.Scan() {
-				stderrChan <- stderrScanner.Text()
+				select {
+				case stderrChan <- stderrScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 
