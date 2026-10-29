@@ -337,19 +337,24 @@ jobs:
 
       - name: Init hhfab for hybrid mode
         env:
+          INPUT_GATEWAY: ${{ inputs.gateway }}
           INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
         run: |
           # shellcheck source=/dev/null
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          # the wiring template takes the gateway driver, or nothing for no gateway
+          GATEWAY=""
+          if [[ "$INPUT_GATEWAY" == "true" ]]; then
+            GATEWAY="${INPUT_GATEWAY_DRIVER:-kernel}"
+          fi
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }} \
-            -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml" \
-            ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }} \
-            ${INPUT_GATEWAY_DRIVER:+--ws gatewayDriver="$INPUT_GATEWAY_DRIVER"}
+            -w "./lab-ci/envs/$KUBE_NODE/wiring.tmpl.yaml" \
+            --set gateway="$GATEWAY"
 
       - name: Print hhfab versions and generate diagrams
         run: |
