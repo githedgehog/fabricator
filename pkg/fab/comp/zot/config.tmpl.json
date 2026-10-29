@@ -45,6 +45,7 @@
         {
           "urls": ["https://{{ .UpstreamURL }}"],
           "onDemand": true,
+          "responseHeaderTimeout": "5m",
           "tlsVerify": {{ .UpstreamTLSVerify }},
           "content": [
             {
