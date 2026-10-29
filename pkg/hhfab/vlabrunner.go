@@ -1057,13 +1057,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	}
 
 	ftp, cleanup, err := ssh.NewSftp()
-	// closes the current client as it's re-created on reconnects
+	// closes the current client as it's re-created on reconnects; ssh goes first as closing sftp waits for its reader
 	defer func() {
-		if ftp != nil {
-			_ = ftp.Close()
-		}
 		if cleanup != nil {
 			_ = cleanup()
+		}
+		if ftp != nil {
+			_ = ftp.Close()
 		}
 	}()
 	if err != nil {
@@ -1168,8 +1168,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					if rebooted {
 						slog.Info("Node rebooted to apply kernel args, re-running "+mode, "vm", vm.Name, "type", vm.Type)
 
-						_ = ftp.Close()
 						_ = cleanup()
+						_ = ftp.Close()
 
 						ftp, cleanup, err = ssh.NewSftp()
 						if err != nil {
@@ -1223,8 +1223,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 							continue
 						}
 
-						_ = ftp.Close()
 						_ = cleanup()
+						_ = ftp.Close()
 						ftp, cleanup = newFtp, newCleanup
 
 						continue
