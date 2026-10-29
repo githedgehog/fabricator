@@ -1208,8 +1208,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-time.After(5 * time.Second):
 					marker, err := sshReadMarker(ftp)
-					// gateways are reached through the control node, it may drop the session while setting up k3s networking
-					if errors.Is(err, sftp.ErrSSHFxConnectionLost) && reconnects < 3 {
+					// gateways are reached through the control node, it may drop the session while setting up k3s networking;
+					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost
+					if err != nil && !errors.Is(err, os.ErrNotExist) && reconnects < 3 {
 						reconnects++
 						slog.Debug("Reconnecting sftp to check install marker", "vm", vm.Name, "type", vm.Type, "attempt", reconnects, "err", err)
 
