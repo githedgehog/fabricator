@@ -193,7 +193,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, l *slog.Logger, 
 	}
 	defer includeF.Close()
 
-	if err := apiutil.PrintInclude(ctx, b.Client, includeF); err != nil {
+	if err := apiutil.PrintIncludeInstalled(ctx, b.Client, includeF); err != nil {
 		return fmt.Errorf("printing include: %w", err)
 	}
 
@@ -312,7 +312,7 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("hashing fab: %w", err)
 	}
 
-	if err := apiutil.PrintInclude(ctx, b.Client, h); err != nil {
+	if err := apiutil.PrintIncludeInstalled(ctx, b.Client, h); err != nil {
 		return "", fmt.Errorf("hashing include: %w", err)
 	}
 

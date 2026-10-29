@@ -37,6 +37,16 @@ on:
         type: string
         required: false
         default: ""
+      addfabric:
+        description: "Generate a second Fabric left out of the install and add it to the running VLAB"
+        type: boolean
+        required: false
+        default: false
+      multidomain:
+        description: "Generate a second domain in the Fabric, with a leaf shared by both"
+        type: boolean
+        required: false
+        default: false
       includeonie:
         description: "Include ONIE into installer"
         type: boolean
@@ -108,7 +118,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && (inputs.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
+  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && (inputs.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.addfabric && '-mf' || '' }}${{ inputs.multidomain && '-md' || '' }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
@@ -160,6 +170,8 @@ jobs:
           echo "  Fabric mode: ${{ inputs.fabricmode }}"
           echo "  Mesh: ${{ inputs.mesh }}"
           echo "  Gateway: ${{ inputs.gateway }}"
+          echo "  Add fabric: ${{ inputs.addfabric }}"
+          echo "  Multi domain: ${{ inputs.multidomain }}"
           echo "  Include ONIE: ${{ inputs.includeonie }}"
           echo "  Build mode: ${{ inputs.buildmode }}"
           echo "  VPC mode: ${{ inputs.vpcmode }}"
@@ -172,6 +184,18 @@ jobs:
           echo "  Pause on failure: ${{ inputs.pause_on_failure }}"
           echo "Calculated:"
           echo "  Slug: ${{ env.slug }}"
+
+      - name: Check inputs
+        if: ${{ (inputs.addfabric || inputs.multidomain) && (inputs.hybrid || inputs.upgradefrom != '') }}
+        run: |
+          echo "addfabric and multidomain need a fresh virtual VLAB, they cannot be combined with hybrid or upgradefrom"
+          exit 1
+
+      - name: Check inputs combination
+        if: ${{ inputs.addfabric && inputs.multidomain }}
+        run: |
+          echo "addfabric and multidomain cannot be combined, the generator does not interconnect Fabrics that have an extra domain"
+          exit 1
 
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -308,6 +332,8 @@ jobs:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_MESH: ${{ inputs.mesh }}
           INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
+          INPUT_ADD_FABRIC: ${{ inputs.addfabric }}
+          INPUT_MULTI_DOMAIN: ${{ inputs.multidomain }}
         if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
         run: |
           bin/hhfab init -v --dev \
@@ -319,6 +345,10 @@ jobs:
           VLAB_ORPHAN_LEAVES=1
           VLAB_MESH_LINKS=0
           VLAB_UNBUNDLED_SERVERS=2
+          VLAB_MULTIHOMED_SERVERS=1
+          VLAB_STATIC_PROXY_EXTERNALS=1
+          VLAB_ADD_FABRIC_ARGS=()
+          VLAB_DOMAIN_ARGS=()
           if [[ "$INPUT_MESH" == "true" ]]; then
             VLAB_MESH_LINKS=3
           fi
@@ -326,11 +356,32 @@ jobs:
             VLAB_ESLAG_GROUPS=""
             VLAB_ORPHAN_LEAVES=3
           fi
+          if [[ "$INPUT_ADD_FABRIC" == "true" ]]; then
+            # two Fabrics have to fit the runner, so one server per leaf and no ESLAG
+            VLAB_ESLAG_GROUPS=""
+            VLAB_ORPHAN_LEAVES=2
+            VLAB_UNBUNDLED_SERVERS=1
+            VLAB_MULTIHOMED_SERVERS=0
+            VLAB_STATIC_PROXY_EXTERNALS=0
+            # two interconnect pairs on the same leaves, so the run checks that VPCs on separate pairs cannot reach each other
+            VLAB_ADD_FABRIC_ARGS=(--add-fabric --interconnect-fabrics --interconnect-links=2 --bundled-servers=0)
+          fi
+          if [[ "$INPUT_MULTI_DOMAIN" == "true" ]]; then
+            # a second domain doubles the spines, so one server per leaf. The ESLAG group stays in the default
+            # domain, the orphan leaves are in the second domain, and the last one is shared by both domains
+            VLAB_ORPHAN_LEAVES=3
+            VLAB_UNBUNDLED_SERVERS=1
+            VLAB_MULTIHOMED_SERVERS=0
+            VLAB_STATIC_PROXY_EXTERNALS=0
+            VLAB_DOMAIN_ARGS=(--extra-domain --shared-leafs-count=1 --bundled-servers=0)
+          fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
-            --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
-            --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \
+            --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=$VLAB_MULTIHOMED_SERVERS \
+            --externals-bgp=1 --externals-static=1 --externals-static-proxy=$VLAB_STATIC_PROXY_EXTERNALS --external-orphan-connections=1 \
             ${INPUT_GATEWAY_DRIVER:+--gateway-driver="$INPUT_GATEWAY_DRIVER"} \
+            "${VLAB_ADD_FABRIC_ARGS[@]}" \
+            "${VLAB_DOMAIN_ARGS[@]}" \
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
@@ -362,6 +413,8 @@ jobs:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_BUILD_MODE: ${{ inputs.buildmode }}
           INPUT_RT_REGEX: ${{ inputs.releasetest_regex }}
+          INPUT_ADD_FABRIC: ${{ inputs.addfabric }}
+          INPUT_MULTI_DOMAIN: ${{ inputs.multidomain }}
         id: test-current
         run: |
           if [[ "${{ inputs.hybrid }}" == "true" ]]; then
@@ -372,8 +425,16 @@ jobs:
           HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           export HHFAB_JOIN_TOKEN
 
+          HHFAB_PRE_ARGS=()
           HHFAB_TEST_ARGS=(--ready=release-test)
-          if [[ "${{ inputs.releasetest }}" == "true" ]]; then
+          if [[ "$INPUT_ADD_FABRIC" == "true" ]]; then
+            # the second Fabric is added before anything inspects the VLAB, then its servers get their VPCs and peerings
+            HHFAB_PRE_ARGS=(--ready=add-fabric)
+            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
+          elif [[ "$INPUT_MULTI_DOMAIN" == "true" ]]; then
+            # the release tests assume one domain, so the peerings come from the cluster and the matrix checks them
+            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
+          elif [[ "${{ inputs.releasetest }}" == "true" ]]; then
             if [[ -n "$INPUT_RT_REGEX" ]]; then
               HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
               if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
@@ -391,6 +452,7 @@ jobs:
             --vpc-mode="$INPUT_VPC_MODE" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
+            "${HHFAB_PRE_ARGS[@]}" \
             --ready=inspect \
             --ready=inspect-pods \
             "${HHFAB_TEST_ARGS[@]}" \
