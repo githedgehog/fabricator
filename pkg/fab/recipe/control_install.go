@@ -136,7 +136,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+	if err := installFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
 		return nil, fmt.Errorf("copying k3s bin: %w", err)
 	}
 
@@ -148,23 +148,23 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 		return nil, fmt.Errorf("creating k3s static dir %q: %w", k3s.ChartsDir, err)
 	}
 
-	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+	if err := installFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying k3s airgap: %w", err)
 	}
 
-	if err := copyFile(certmanager.AirgapImageName, filepath.Join(k3s.ImagesDir, certmanager.AirgapImageName), 0o644); err != nil {
+	if err := installFile(certmanager.AirgapImageName, filepath.Join(k3s.ImagesDir, certmanager.AirgapImageName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying cert-manager airgap image: %w", err)
 	}
 
-	if err := copyFile(certmanager.AirgapChartName, filepath.Join(k3s.ChartsDir, certmanager.AirgapChartName), 0o644); err != nil {
+	if err := installFile(certmanager.AirgapChartName, filepath.Join(k3s.ChartsDir, certmanager.AirgapChartName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying cert-manager airgap chart: %w", err)
 	}
 
-	if err := copyFile(zot.AirgapImageName, filepath.Join(k3s.ImagesDir, zot.AirgapImageName), 0o644); err != nil {
+	if err := installFile(zot.AirgapImageName, filepath.Join(k3s.ImagesDir, zot.AirgapImageName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying zot airgap image: %w", err)
 	}
 
-	if err := copyFile(zot.AirgapChartName, filepath.Join(k3s.ChartsDir, zot.AirgapChartName), 0o644); err != nil {
+	if err := installFile(zot.AirgapChartName, filepath.Join(k3s.ChartsDir, zot.AirgapChartName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying zot airgap chart: %w", err)
 	}
 

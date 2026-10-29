@@ -180,7 +180,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("installing ssh configuration: %w", err)
 	}
 
-	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
+	if err := installFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
@@ -451,7 +451,7 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 	}
 
 	// TODO remove if it'll be managed by control agent?
-	if err := copyFile(f8r.CtlBinName, filepath.Join(f8r.BinDir, f8r.CtlDestBinName), 0o755); err != nil {
+	if err := installFile(f8r.CtlBinName, filepath.Join(f8r.BinDir, f8r.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying hhfabctl bin: %w", err)
 	}
 
@@ -532,7 +532,7 @@ func (c *ControlUpgrade) installFabricCtl() error {
 	slog.Info("Installing kubectl-fabric")
 
 	// TODO remove if it'll be managed by control agent?
-	if err := copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
+	if err := installFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying fabricctl bin: %w", err)
 	}
 
@@ -642,7 +642,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 	if upgrade {
 		slog.Info("Upgrading K8s", "from", actual, "to", desired)
 
-		if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+		if err := installFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
 			return fmt.Errorf("copying k3s bin: %w", err)
 		}
 
@@ -650,7 +650,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 			return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
 		}
 
-		if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+		if err := installFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
 			return fmt.Errorf("copying k3s airgap: %w", err)
 		}
 	} else {
@@ -773,7 +773,7 @@ func (c *ControlUpgrade) installK9s() error {
 		}
 	}
 
-	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
+	if err := installFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 

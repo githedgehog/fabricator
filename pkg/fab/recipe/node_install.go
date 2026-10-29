@@ -156,7 +156,7 @@ func (c *NodeInstallUpgrade) joinK8s(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+	if err := installFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k3s bin: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func (c *NodeInstallUpgrade) joinK8s(ctx context.Context) error {
 		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
 	}
 
-	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+	if err := installFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
 		return fmt.Errorf("copying k3s airgap: %w", err)
 	}
 
