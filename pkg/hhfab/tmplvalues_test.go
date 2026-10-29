@@ -289,13 +289,12 @@ func TestImportFabricGatewayTemplated(t *testing.T) {
 			expectedObjs: []string{"leaf-0"},
 		},
 		{
-			// lenient rendering makes `int nil` 0, so `until 0` emits nothing at all and
-			// the loader rejects the empty document -- it still fails loudly, just not
-			// where you'd first expect
-			name:        "missing leafCount renders nothing and fails to load",
+			// lenient rendering makes `int nil` 0, so `until 0` emits nothing at all, and
+			// a wiring file with no objects is rejected rather than imported empty
+			name:        "missing leafCount renders nothing and fails to import",
 			sourceName:  "topo.tmpl.yaml",
 			values:      map[string]any{},
-			errContains: "Kind' is missing",
+			errContains: "no objects",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

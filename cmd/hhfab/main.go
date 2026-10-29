@@ -686,15 +686,15 @@ func Run(ctx context.Context) error {
 					    description: {{ .Values.description | quote }}
 					  It can't undo how --set parsed a value though: '--set description=yes' is already the bool true
 					  and renders as "true", pass '--set description="yes"' for the string.
-					- End each object generated in a loop with '---' and trim the whitespace before actions with '{{-',
-					  so no empty documents are left behind (they fail to load):
+					- Separate objects generated in a loop with '---' and trim the whitespace before actions with '{{-'
+					  to keep the output tidy (documents left empty or with only comments are skipped):
 					    {{- range $i := until (int (dig "leafs" "count" 2 .Values)) }}
+					    ---
 					    apiVersion: wiring.githedgehog.com/v1beta1
 					    kind: Switch
 					    metadata:
 					      name: leaf-{{ $i }}
 					    ...
-					    ---
 					    {{- end }}
 					- In the wiring, derive from the evaluated config rather than repeating it in values, e.g.
 					  '{{ .Fab.Spec.Config.Fabric.Mode }}' or '{{ len .Nodes }}' -- the config itself only sees defaults.

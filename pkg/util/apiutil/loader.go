@@ -52,6 +52,10 @@ func (l *Loader) Load(gvks []schema.GroupVersionKind, data []byte) ([]kclient.Ob
 			return nil, fmt.Errorf("object %d: reading: %w", idx, err)
 		}
 
+		if isEmptyDoc(buf) {
+			continue
+		}
+
 		rObj, _, err := l.decoder.Decode(buf, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("object %d: decoding: %w", idx, err)
@@ -79,6 +83,20 @@ func (l *Loader) Load(gvks []schema.GroupVersionKind, data []byte) ([]kclient.Ob
 	}
 
 	return res, nil
+}
+
+// isEmptyDoc reports whether a YAML document holds only blank lines and comments, e.g. what's
+// left before a leading '---' or between two separators with a comment in between. The YAML
+// reader only drops documents with nothing at all in them.
+func isEmptyDoc(doc []byte) bool {
+	for line := range bytes.Lines(doc) {
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 && line[0] != '#' {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (l *Loader) LoadAdd(ctx context.Context, gvks []schema.GroupVersionKind, data []byte) error {
