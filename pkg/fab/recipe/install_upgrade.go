@@ -456,27 +456,42 @@ func waitURL(ctx context.Context, url string, ca string) error {
 	}
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
+func installFile(src, dst string, mode os.FileMode) error {
 	srcF, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening %q: %w", src, err)
 	}
 	defer srcF.Close()
 
-	dstF, err := os.Create(dst)
+	// write next to dst and rename over it, so a running binary (e.g. open k9s) can be replaced
+	tmpF, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("creating %q: %w", dst, err)
+		return fmt.Errorf("creating temp file for %q: %w", dst, err)
 	}
-	defer dstF.Close()
+	defer os.Remove(tmpF.Name())
+	defer tmpF.Close()
 
-	if _, err := io.Copy(dstF, srcF); err != nil {
+	if _, err := io.Copy(tmpF, srcF); err != nil {
 		return fmt.Errorf("copying file %q to %q: %w", src, dst, err)
 	}
 
-	if mode != 0 {
-		if err := os.Chmod(dst, mode); err != nil {
-			return fmt.Errorf("chmod %q: %w", dst, err)
-		}
+	if mode == 0 {
+		mode = 0o644
+	}
+	if err := tmpF.Chmod(mode); err != nil {
+		return fmt.Errorf("chmod %q: %w", tmpF.Name(), err)
+	}
+
+	if err := tmpF.Sync(); err != nil {
+		return fmt.Errorf("syncing %q: %w", tmpF.Name(), err)
+	}
+
+	if err := tmpF.Close(); err != nil {
+		return fmt.Errorf("closing %q: %w", tmpF.Name(), err)
+	}
+
+	if err := os.Rename(tmpF.Name(), dst); err != nil {
+		return fmt.Errorf("renaming %q to %q: %w", tmpF.Name(), dst, err)
 	}
 
 	return nil
@@ -541,19 +556,19 @@ func installBashCompletion(_ context.Context, workDir string, version string) er
 
 	bashCompletionSrc := filepath.Join(workDir, "bash-completion", "bash_completion")
 	bashCompletionDst := filepath.Join(installDir, "bash_completion")
-	if err := copyFile(bashCompletionSrc, bashCompletionDst, 0o644); err != nil {
+	if err := installFile(bashCompletionSrc, bashCompletionDst, 0o644); err != nil {
 		return fmt.Errorf("copying bash_completion file: %w", err)
 	}
 
 	compatSrc := filepath.Join(workDir, "bash-completion", "000_bash_completion_compat.bash")
 	compatDst := filepath.Join(bashCompletionDir, "000_bash_completion_compat.bash")
-	if err := copyFile(compatSrc, compatDst, 0o644); err != nil {
+	if err := installFile(compatSrc, compatDst, 0o644); err != nil {
 		return fmt.Errorf("copying bash_completion.d compat file: %w", err)
 	}
 
 	licenseSrc := filepath.Join(workDir, "bash-completion", "COPYING")
 	licenseDst := filepath.Join(installDir, "COPYING")
-	if err := copyFile(licenseSrc, licenseDst, 0o644); err != nil {
+	if err := installFile(licenseSrc, licenseDst, 0o644); err != nil {
 		return fmt.Errorf("copying license file: %w", err)
 	}
 
