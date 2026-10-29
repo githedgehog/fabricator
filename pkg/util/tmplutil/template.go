@@ -5,6 +5,7 @@ package tmplutil
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"text/template"
@@ -23,7 +24,7 @@ func FromTemplate(name, tmplText string, data any) (string, error) {
 
 // FromTemplateLenient renders tmplText with sprig functions using Helm-like semantics:
 // referencing a key that isn't present in data yields an empty string instead of an error,
-// so the `default` and `if .Values.x` idioms work.
+// so the `default` and `if .Values.x` idioms work, and `required` makes a value mandatory.
 func FromTemplateLenient(name, tmplText string, data any) (string, error) {
 	out, err := fromTemplate(name, tmplText, data, "missingkey=zero")
 	if err != nil {
@@ -35,8 +36,24 @@ func FromTemplateLenient(name, tmplText string, data any) (string, error) {
 	return strings.ReplaceAll(out, noValue, ""), nil
 }
 
+// required is Helm's function of the same name, it isn't part of sprig: it fails rendering
+// with msg if val is missing (nil) or an empty string, and passes it through otherwise.
+func required(msg string, val any) (any, error) {
+	if val == nil {
+		return nil, errors.New(msg) //nolint:err113
+	}
+	if str, ok := val.(string); ok && str == "" {
+		return nil, errors.New(msg) //nolint:err113
+	}
+
+	return val, nil
+}
+
 func fromTemplate(name, tmplText string, data any, missingKey string) (string, error) {
-	tmpl, err := template.New(name).Funcs(sprig.FuncMap()).Option(missingKey).Parse(tmplText)
+	funcs := sprig.FuncMap()
+	funcs["required"] = required
+
+	tmpl, err := template.New(name).Funcs(funcs).Option(missingKey).Parse(tmplText)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}

@@ -6,15 +6,17 @@ package hhfab
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
-func TestLoadWiringValues(t *testing.T) {
+func TestLoadTemplateValues(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
@@ -176,7 +178,7 @@ func TestLoadWiringValues(t *testing.T) {
 				files = append(files, path)
 			}
 
-			actual, err := LoadWiringValues(files, test.sets)
+			actual, err := LoadTemplateValues(files, test.sets)
 			if test.err {
 				require.Error(t, err)
 
@@ -190,10 +192,10 @@ func TestLoadWiringValues(t *testing.T) {
 	}
 }
 
-func TestLoadWiringValuesMissingFile(t *testing.T) {
+func TestLoadTemplateValuesMissingFile(t *testing.T) {
 	t.Parallel()
 
-	_, err := LoadWiringValues([]string{filepath.Join(t.TempDir(), "nope.yaml")}, nil)
+	_, err := LoadTemplateValues([]string{filepath.Join(t.TempDir(), "nope.yaml")}, nil)
 	require.ErrorIs(t, err, ErrNotExist)
 }
 
@@ -311,7 +313,7 @@ func TestImportFabricGatewayTemplated(t *testing.T) {
 				wiring = source + ":" + test.importName
 			}
 
-			err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{wiring}}, WiringTemplateData{Values: test.values})
+			err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{wiring}}, TemplateData{Values: test.values})
 			if test.errContains != "" {
 				require.ErrorContains(t, err, test.errContains)
 
@@ -363,7 +365,7 @@ spec:
 
 	// with no values at all: `default` and `if` must work, and a bare missing key must
 	// render as empty rather than a literal "<no value>"
-	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{Values: map[string]any{}}))
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, TemplateData{Values: map[string]any{}}))
 
 	data, err := os.ReadFile(filepath.Join(dir, IncludeDir, "topo.yaml"))
 	require.NoError(t, err)
@@ -395,7 +397,7 @@ spec:
 	source := filepath.Join(dir, "topo.yaml")
 	require.NoError(t, os.WriteFile(source, []byte(plain), 0o600))
 
-	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{}))
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, TemplateData{}))
 
 	data, err := os.ReadFile(filepath.Join(dir, IncludeDir, "topo.yaml"))
 	require.NoError(t, err)
@@ -421,7 +423,7 @@ spec:
 	require.NoError(t, os.WriteFile(source, []byte(plain), 0o600))
 
 	for _, name := range []string{"../escaped", "sub/topo", "/abs/topo"} {
-		err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source + ":" + name}}, WiringTemplateData{})
+		err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source + ":" + name}}, TemplateData{})
 		require.ErrorContains(t, err, "should be a file name", "for %q", name)
 	}
 	require.NoFileExists(t, filepath.Join(dir, "escaped.yaml"), "the import must not escape the include dir")
@@ -454,7 +456,7 @@ spec:
 	source := filepath.Join(dir, "ctx.tmpl.yaml")
 	require.NoError(t, os.WriteFile(source, []byte(tmpl), 0o600))
 
-	tmplData := WiringTemplateData{Values: map[string]any{}, Version: "v1.2.3", Release: "26.04.0"}
+	tmplData := TemplateData{Values: map[string]any{}, Version: "v1.2.3", Release: "26.04.0"}
 	tmplData.Fab.Name = "default"
 	tmplData.Fab.Spec.Config.Fabric.Mode = meta.FabricModeSpineLeaf
 	// deliberately out of order, to prove range iterates in key order
@@ -490,6 +492,115 @@ spec:
 	require.Len(t, objs, 1)
 }
 
+// devConfig is the config 'hhfab init --dev' generates, plain YAML with no template actions
+func devConfig(t *testing.T) string {
+	t.Helper()
+
+	data, err := fab.InitConfig(t.Context(), fab.InitConfigInput{Dev: true})
+	require.NoError(t, err)
+
+	return string(data)
+}
+
+func TestImportConfigPlainUnchanged(t *testing.T) {
+	t.Parallel()
+
+	plain := devConfig(t)
+	source := filepath.Join(t.TempDir(), "fab.yaml")
+	require.NoError(t, os.WriteFile(source, []byte(plain), 0o600))
+
+	data, tmplData, err := importConfig(t.Context(), source, map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, plain, string(data), "a config with no template actions must round-trip byte for byte")
+	require.Equal(t, fabapi.FabName, tmplData.Fab.Name)
+	require.Contains(t, tmplData.Controls, "control-1")
+}
+
+func TestImportConfigDefaultsThenActual(t *testing.T) {
+	t.Parallel()
+
+	const overriddenAPI = "v9.9.9"
+
+	// the config template sees the defaults and sets the override from the values, the wiring
+	// rendered after it sees the override and the control node from the config
+	cfg := devConfig(t)
+	cfg = strings.Replace(cfg, "  name: default\n", `  name: default
+  annotations:
+    defaultAPI: "{{ .Fab.Status.Versions.Fabric.API }}"
+    controls: "{{ len .Controls }}"
+`, 1)
+	cfg = strings.Replace(cfg, "spec:\n  config:\n", `spec:
+  overrides:
+    versions:
+      fabric:
+        api: "{{ .Values.api }}"
+  config:
+`, 1)
+
+	const wiringTmpl = `apiVersion: wiring.githedgehog.com/v1beta1
+kind: Switch
+metadata:
+  name: sw
+  annotations:
+    api: "{{ .Fab.Status.Versions.Fabric.API }}"
+    controls: "{{ len .Controls }}"
+spec:
+  role: server-leaf
+`
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, IncludeDir), 0o700))
+
+	cfgSource := filepath.Join(dir, "fab.tmpl.yaml")
+	require.NoError(t, os.WriteFile(cfgSource, []byte(cfg), 0o600))
+	wiringSource := filepath.Join(dir, "topo.tmpl.yaml")
+	require.NoError(t, os.WriteFile(wiringSource, []byte(wiringTmpl), 0o600))
+
+	data, tmplData, err := importConfig(t.Context(), cfgSource, map[string]any{"api": overriddenAPI})
+	require.NoError(t, err)
+
+	out := string(data)
+	require.NotContains(t, out, "{{", "template actions left unrendered")
+	require.Contains(t, out, `defaultAPI: "`+string(fab.Versions.Fabric.API)+`"`, "config sees the default versions")
+	require.Contains(t, out, `controls: "0"`, "config sees no control nodes")
+	require.Contains(t, out, `api: "`+overriddenAPI+`"`)
+	require.Equal(t, overriddenAPI, string(tmplData.Fab.Status.Versions.Fabric.API))
+
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{wiringSource}}, tmplData))
+
+	wiring, err := os.ReadFile(filepath.Join(dir, IncludeDir, "topo.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(wiring), `api: "`+overriddenAPI+`"`, "wiring sees the actual versions")
+	require.Contains(t, string(wiring), `controls: "1"`, "wiring sees the control nodes")
+}
+
+func TestImportConfigRenderError(t *testing.T) {
+	t.Parallel()
+
+	source := filepath.Join(t.TempDir(), "fab.tmpl.yaml")
+	require.NoError(t, os.WriteFile(source, []byte("{{ .unclosed "), 0o600))
+
+	_, _, err := importConfig(t.Context(), source, map[string]any{})
+	require.ErrorContains(t, err, source)
+	require.ErrorContains(t, err, "rendering template")
+}
+
+func TestInitValuesWithoutImport(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	err := Init(t.Context(), InitConfig{
+		WorkDir:  dir,
+		CacheDir: filepath.Join(dir, "cache"),
+		Set:      []string{"leafCount=4"},
+		Dev:      true,
+	})
+	require.ErrorContains(t, err, "--values and --set")
+	require.NoFileExists(t, filepath.Join(dir, FabConfigFile))
+	require.NoFileExists(t, filepath.Join(dir, RegistryConfigFile))
+}
+
 func TestImportFabricGatewayRejectsBadExtension(t *testing.T) {
 	t.Parallel()
 
@@ -499,7 +610,7 @@ func TestImportFabricGatewayRejectsBadExtension(t *testing.T) {
 	source := filepath.Join(dir, "topo.yml")
 	require.NoError(t, os.WriteFile(source, []byte("{}\n"), 0o600))
 
-	err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{})
+	err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, TemplateData{})
 	require.ErrorContains(t, err, "extension")
 	require.NotContains(t, err.Error(), "reading", "should be rejected before reading")
 }

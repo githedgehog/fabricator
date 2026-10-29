@@ -110,8 +110,8 @@ type InitConfig struct {
 	ImportConfig       string
 	Force              bool
 	Wiring             []string
-	WiringValues       []string
-	WiringSet          []string
+	Values             []string
+	Set                []string
 	ImportHostUpstream bool
 	fab.InitConfigInput
 }
@@ -122,9 +122,13 @@ func Init(ctx context.Context, c InitConfig) error {
 	}
 
 	// do it before anything is written so a bad values file fails early
-	wiringValues, err := LoadWiringValues(c.WiringValues, c.WiringSet)
+	values, err := LoadTemplateValues(c.Values, c.Set)
 	if err != nil {
 		return err
+	}
+
+	if (len(c.Values) > 0 || len(c.Set) > 0) && c.ImportConfig == "" && len(c.Wiring) == 0 {
+		return fmt.Errorf("--values and --set only render the config (-c) and wiring (-w) being imported, but none is passed") //nolint:err113
 	}
 
 	_, err = os.Stat(filepath.Join(c.WorkDir, FabConfigFile))
@@ -160,28 +164,12 @@ func Init(ctx context.Context, c InitConfig) error {
 	}
 
 	var fabCfgData []byte
-	tmplData := WiringTemplateData{Values: wiringValues, Version: version.Version, Release: fab.Release}
+	tmplData := TemplateData{Values: values, Version: version.Version, Release: fab.Release}
 	if c.ImportConfig != "" {
-		fabCfgData, err = os.ReadFile(c.ImportConfig)
+		fabCfgData, tmplData, err = importConfig(ctx, c.ImportConfig, values)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("import config %q: %w", c.ImportConfig, ErrNotExist)
-			}
-
-			return fmt.Errorf("reading config %q to import: %w", c.ImportConfig, err)
+			return err
 		}
-
-		l := apiutil.NewLoader()
-		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfgData); err != nil {
-			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
-		}
-
-		f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
-		if err != nil {
-			return fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", c.ImportConfig, err)
-		}
-		tmplData.Fab = f
-		tmplData.setNodes(controls, nodes)
 
 		slog.Info("Imported config", "source", c.ImportConfig)
 	} else {
@@ -219,7 +207,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		slog.Info("Generated initial config")
 	}
 
-	if err := os.WriteFile(filepath.Join(c.WorkDir, FabConfigFile), fabCfgData, 0o600); err != nil { //nolint:gosec // the user picks the workdir
+	if err := os.WriteFile(filepath.Join(c.WorkDir, FabConfigFile), fabCfgData, 0o600); err != nil { // the user picks the workdir
 		return fmt.Errorf("writing fab config: %w", err)
 	}
 
@@ -253,7 +241,55 @@ func Init(ctx context.Context, c InitConfig) error {
 	return nil
 }
 
-func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
+// importConfig reads and renders the config to import with the default template data, and
+// returns the rendered config with the template data for the wiring, built from it.
+func importConfig(ctx context.Context, source string, values map[string]any) ([]byte, TemplateData, error) {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, TemplateData{}, fmt.Errorf("import config %q: %w", source, ErrNotExist)
+		}
+
+		return nil, TemplateData{}, fmt.Errorf("reading config %q to import: %w", source, err)
+	}
+
+	tmplData, err := defaultsTemplateData(values)
+	if err != nil {
+		return nil, TemplateData{}, err
+	}
+
+	data, err = renderTemplate(source, data, tmplData)
+	if err != nil {
+		return nil, TemplateData{}, fmt.Errorf("importing config %q: %w", source, err)
+	}
+
+	l := apiutil.NewLoader()
+	if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, data); err != nil {
+		return nil, TemplateData{}, fmt.Errorf("loading config to import %q: loading: %w", source, err)
+	}
+
+	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	if err != nil {
+		return nil, TemplateData{}, fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", source, err)
+	}
+	tmplData.Fab = f
+	tmplData.setNodes(controls, nodes)
+
+	return data, tmplData, nil
+}
+
+// renderTemplate renders the imported config or wiring file, plain YAML without any actions
+// is an identity transform through text/template.
+func renderTemplate(source string, data []byte, tmplData TemplateData) ([]byte, error) {
+	rendered, err := tmplutil.FromTemplateLenient(source, string(data), tmplData)
+	if err != nil {
+		return nil, fmt.Errorf("rendering template: %w", err)
+	}
+
+	return []byte(rendered), nil
+}
+
+func importFabricGateway(c InitConfig, tmplData TemplateData) error {
 	for _, wiringFile := range c.Wiring {
 		name := ""
 		source := ""
@@ -289,12 +325,10 @@ func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 			return fmt.Errorf("importing %q: reading: %w", source, err)
 		}
 
-		// plain YAML without any actions is an identity transform through text/template
-		rendered, err := tmplutil.FromTemplateLenient(source, string(data), tmplData)
+		data, err = renderTemplate(source, data, tmplData)
 		if err != nil {
-			return fmt.Errorf("importing %q: rendering template: %w", source, err)
+			return fmt.Errorf("importing %q: %w", source, err)
 		}
-		data = []byte(rendered)
 
 		target := filepath.Join(c.WorkDir, IncludeDir, name)
 		relName := filepath.Join(IncludeDir, name)

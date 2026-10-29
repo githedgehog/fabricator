@@ -44,10 +44,10 @@ const (
 	FlagNameConfig                = "config"
 	FlagNameForce                 = "force"
 	FlagNameWiring                = "wiring"
-	FlagNameWiringValues          = "wiring-values"
-	FlagNameWiringSet             = "wiring-set"
+	FlagNameValues                = "values"
+	FlagNameSet                   = "set"
 	FlagNameImportHostUpstream    = "import-host-upstream"
-	FlagCatGenConfig              = "Generate initial config (ignored when importing):"
+	FlagCatGenConfig              = "Generate initial config (ignored with -c, template that config instead):"
 	FlagNameDefaultPasswordHash   = "default-password-hash"
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
 	FlagNameTLSSAN                = "tls-san"
@@ -635,27 +635,35 @@ func Run(ctx context.Context) error {
 					existing file with -c/--config. Wiring files passed with -w/--wiring are validated and copied into
 					include/, where 'hhfab validate', 'hhfab build' and 'hhfab vlab up' pick them up later.
 
-					Templated wiring:
+					Templates:
 
-					Every -w file is rendered as a Go text/template with sprig functions before it is validated, so a
-					wiring file with no template actions is imported unchanged. Name a template '<name>.tmpl.yaml' or
-					'<name>.yaml.tmpl' and it is imported as 'include/<name>.yaml' -- keeping the .tmpl would make later
-					commands re-read it as plain YAML. Rendering happens only here, at import time, so include/ always
-					ends up holding plain YAML.
+					The -c config and every -w file are rendered as a Go text/template with sprig functions before they
+					are validated, whatever their names, so a file with no template actions is imported unchanged. The
+					config is always written as fab.yaml. Name a wiring template '<name>.tmpl.yaml' or '<name>.yaml.tmpl'
+					and it is imported as 'include/<name>.yaml' -- keeping the .tmpl would make later commands re-read it
+					as plain YAML. Rendering happens only here, at import time, so fab.yaml and include/ always end up
+					holding plain YAML. Literal '{{' and '}}' have to be escaped, e.g. '{{ "{{" }}'.
 
-					Pass values with --wv/--wiring-values (YAML files, repeatable, merged left to right) and
-					--ws/--wiring-set (KEY=VALUE, applied last, repeatable). Keys may be dotted to nest, so
-					'--ws fabric.leafs.count=4' sets .Values.fabric.leafs.count. Values are parsed as YAML scalars:
-					4 is an int, 1.5 a float, and both true and yes are bools -- quote to force a string, e.g.
-					'--ws version="4"'. A list has to come from a values file, --ws cannot express one.
+					Pass values with --values (YAML files, repeatable, merged left to right) and --set (KEY=VALUE,
+					applied last, repeatable); they are shared by the config and the wiring and need -c or -w to be
+					passed. Keys may be dotted to nest, so '--set fabric.leafs.count=4' sets .Values.fabric.leafs.count.
+					Values are parsed as YAML scalars: 4 is an int, 1.5 a float, and both true and yes are bools --
+					quote to force a string, e.g. '--set version="4"'. A list has to come from a values file, --set
+					cannot express one.
 
 					Template context:
 
-					.Values             values from --wiring-values and --wiring-set
+					.Values             values from --values and --set
 					.Version            hhfab version, e.g. v0.49.3 ("(devel)" in dev builds)
 					.Release            user-facing release of the whole project, e.g. 26.04.0
 					.Fab                the Fabricator, with defaults merged in and versions calculated
 					.Controls .Nodes    control and fab nodes from the same config, keyed by name
+
+					The config can't depend on itself, so when rendering it .Fab only holds the defaults: the default
+					config and the component versions of this release (with no ONIE versions), before any spec.config
+					or spec.overrides.versions from the config being rendered; .Controls and .Nodes are empty. The
+					wiring is rendered after the config is evaluated, so there .Fab, .Controls and .Nodes are the actual
+					ones, including the overrides. .Values, .Version and .Release are the same for both.
 
 					.Values is a map, so referencing a key that was never set renders empty and the Helm idioms work:
 					'{{ .Values.count | default 4 }}' and '{{ if .Values.gw }}'. Everything else is a Go struct, so a
@@ -663,9 +671,39 @@ func Run(ctx context.Context) error {
 					a node up with 'index .Controls "control-1"' and iterate with 'range $name, $c := .Controls' --
 					map iteration is in key order, so the output is stable.
 
+					Good practices:
+
+					- Make the values you can't do without mandatory with 'required' (as in Helm). A missing or misspelled
+					  value renders empty, and an empty field in the config silently falls back to the default, so
+					  '--set vpi=...' would install with the default VIP. 'required' fails the init instead:
+					    controlVIP: {{ required "set vip, e.g. --set vip=172.30.0.1/32" .Values.vip }}
+					- Give optional values a default in the template, so a values file only has to hold what differs:
+					    {{ .Values.spines | default 2 }}
+					- Only the last key may be missing: '.Values.leafs.count' is an error when leafs was never set at
+					  all. Use 'dig' for optional nested values:
+					    {{ dig "leafs" "count" 2 .Values }}
+					- Quote strings, so YAML doesn't re-type them (yes, on, 1.10, 0755) or trip on ':' and '#':
+					    description: {{ .Values.description | quote }}
+					  It can't undo how --set parsed a value though: '--set description=yes' is already the bool true
+					  and renders as "true", pass '--set description="yes"' for the string.
+					- End each object generated in a loop with '---' and trim the whitespace before actions with '{{-',
+					  so no empty documents are left behind (they fail to load):
+					    {{- range $i := until (int (dig "leafs" "count" 2 .Values)) }}
+					    apiVersion: wiring.githedgehog.com/v1beta1
+					    kind: Switch
+					    metadata:
+					      name: leaf-{{ $i }}
+					    ...
+					    ---
+					    {{- end }}
+					- In the wiring, derive from the evaluated config rather than repeating it in values, e.g.
+					  '{{ .Fab.Spec.Config.Fabric.Mode }}' or '{{ len .Nodes }}' -- the config itself only sees defaults.
+					- Keep per-environment values in files ('--values prod.yaml') and use --set for one-off overrides.
+					- Review what was rendered: fab.yaml and include/ hold the result, and 'hhfab validate' checks it.
+
 					Example command:
 
-					$ hhfab init --dev -w topo.tmpl.yaml --wv prod.yaml --ws leafs.count=4
+					$ hhfab init -c fab.tmpl.yaml -w topo.tmpl.yaml --values prod.yaml --set leafs.count=4
 
 					Example template expressions:
 
@@ -691,7 +729,7 @@ func Run(ctx context.Context) error {
 					&cli.StringFlag{
 						Name:    FlagNameConfig,
 						Aliases: []string{"c"},
-						Usage:   "use existing config file `PATH`",
+						Usage:   "use existing config file `PATH`; rendered as a Go template with sprig funcs, values available as .Values",
 						EnvVars: []string{"HHFAB_CONFIG"},
 					},
 					&cli.BoolFlag{
@@ -706,16 +744,14 @@ func Run(ctx context.Context) error {
 						Usage:   "include wiring diagram `FILE` with ext .yaml, .tmpl.yaml or .yaml.tmpl (any Fabric API objects); rendered as a Go template with sprig funcs, values available as .Values",
 					},
 					&cli.StringSliceFlag{
-						Name:    FlagNameWiringValues,
-						Aliases: []string{"wv"},
-						Usage:   "read wiring template values from YAML `FILE`, repeatable and merged left-to-right",
-						EnvVars: []string{"HHFAB_WIRING_VALUES"},
+						Name:    FlagNameValues,
+						Usage:   "read config and wiring template values from YAML `FILE`, repeatable and merged left-to-right",
+						EnvVars: []string{"HHFAB_VALUES"},
 					},
 					&cli.StringSliceFlag{
-						Name:    FlagNameWiringSet,
-						Aliases: []string{"ws"},
-						Usage:   "set wiring template value `KEY=VALUE` (e.g. leafs.count=4), applied on top of --wiring-values; values are parsed as YAML scalars (quote to force a string), use --wiring-values for lists",
-						EnvVars: []string{"HHFAB_WIRING_SET"},
+						Name:    FlagNameSet,
+						Usage:   "set config and wiring template value `KEY=VALUE` (e.g. leafs.count=4), applied on top of --values; values are parsed as YAML scalars (quote to force a string), use --values for lists",
+						EnvVars: []string{"HHFAB_SET"},
 					},
 					&cli.StringFlag{
 						Category: FlagCatGenConfig,
@@ -877,8 +913,8 @@ func Run(ctx context.Context) error {
 						ImportConfig:          c.String(FlagNameConfig),
 						Force:                 c.Bool(FlagNameForce),
 						Wiring:                c.StringSlice(FlagNameWiring),
-						WiringValues:          c.StringSlice(FlagNameWiringValues),
-						WiringSet:             c.StringSlice(FlagNameWiringSet),
+						Values:                c.StringSlice(FlagNameValues),
+						Set:                   c.StringSlice(FlagNameSet),
 						ImportHostUpstream:    c.Bool(FlagNameImportHostUpstream),
 						FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
 						TLSSAN:                c.StringSlice(FlagNameTLSSAN),
