@@ -648,8 +648,8 @@ func Run(ctx context.Context) error {
 					applied last, repeatable); they are shared by the config and the wiring and need -c or -w to be
 					passed. Keys may be dotted to nest, so '--set fabric.leafs.count=4' sets .Values.fabric.leafs.count.
 					Values are parsed as YAML scalars: 4 is an int, 1.5 a float, and both true and yes are bools --
-					quote to force a string, e.g. '--set version="4"'. A list has to come from a values file, --set
-					cannot express one.
+					quote to force a string, keeping the quotes from the shell, e.g. --set 'version="4"'. A list has to
+					come from a values file, --set cannot express one.
 
 					Template context:
 
@@ -685,7 +685,7 @@ func Run(ctx context.Context) error {
 					- Quote strings, so YAML doesn't re-type them (yes, on, 1.10, 0755) or trip on ':' and '#':
 					    description: {{ .Values.description | quote }}
 					  It can't undo how --set parsed a value though: '--set description=yes' is already the bool true
-					  and renders as "true", pass '--set description="yes"' for the string.
+					  and renders as "true", pass --set 'description="yes"' for the string.
 					- Separate objects generated in a loop with '---' and trim the whitespace before actions with '{{-'
 					  to keep the output tidy (documents left empty or with only comments are skipped):
 					    {{- range $i := until (int (dig "leafs" "count" 2 .Values)) }}
