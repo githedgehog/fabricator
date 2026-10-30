@@ -27,15 +27,6 @@ import (
 // Runner executes a command on the control node and returns its stdout.
 type Runner func(ctx context.Context, cmd string) (string, error)
 
-// HeartbeatPeriod mirrors the switch agent's heartbeat interval. It is
-// redeclared rather than imported because depguard forbids importing
-// go.githedgehog.com/fabric/pkg/agent.
-const HeartbeatPeriod = 15 * time.Second
-
-// heartbeatStale is how long without a heartbeat before an agent is considered
-// stale. It matches what WaitReady and inspect use.
-const heartbeatStale = time.Minute
-
 // compactionWindow is k3s's default etcd compaction interval. Every heartbeat
 // writes a full Agent object and each revision is retained until compaction, so
 // the live history is roughly one window's worth of writes.
@@ -204,9 +195,9 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agen
 
 	// Each heartbeat rewrites the whole object and every revision is kept until
 	// compaction, so this is roughly the live history etcd carries.
-	perWindow := total * int(compactionWindow/HeartbeatPeriod)
+	perWindow := total * int(compactionWindow/fabapi.DefaultAgentHeartbeatInterval)
 	fmt.Fprintf(w, "  etcd history/%s  %s at one heartbeat per %s\n",
-		compactionWindow, humanBytes(perWindow), HeartbeatPeriod)
+		compactionWindow, humanBytes(perWindow), fabapi.DefaultAgentHeartbeatInterval)
 
 	return agents, nil
 }
@@ -223,7 +214,7 @@ func healthFabric(ctx context.Context, kube kclient.Client, agents *agentapi.Age
 		switch {
 		case agent.Status.LastHeartbeat.IsZero():
 			noHeartbeat++
-		case time.Since(agent.Status.LastHeartbeat.Time) > heartbeatStale:
+		case time.Since(agent.Status.LastHeartbeat.Time) > fabapi.AgentHeartbeatStale(agent.Spec.Config.HeartbeatInterval):
 			stale++
 		}
 
@@ -234,7 +225,7 @@ func healthFabric(ctx context.Context, kube kclient.Client, agents *agentapi.Age
 
 	fmt.Fprintf(w, "  %-20s %d\n", "agents", len(agents.Items))
 	fmt.Fprintf(w, "  %-20s %d\n", "never heartbeated", noHeartbeat)
-	fmt.Fprintf(w, "  %-20s %d\n", fmt.Sprintf("stale (>%s)", heartbeatStale), stale)
+	fmt.Fprintf(w, "  %-20s %d\n", "stale heartbeat", stale)
 	fmt.Fprintf(w, "  %-20s %d\n", "spec not applied", notApplied)
 
 	pods := &coreapi.PodList{}

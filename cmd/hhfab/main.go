@@ -2146,7 +2146,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 									&cli.DurationFlag{
 										Name:  FlagBenchInterval,
 										Usage: "heartbeat interval, matching the real agent by default",
-										Value: bench.HeartbeatPeriod,
+										Value: fabapi.DefaultAgentHeartbeatInterval,
 									},
 									&cli.DurationFlag{
 										Name:  FlagBenchApplyDelay,

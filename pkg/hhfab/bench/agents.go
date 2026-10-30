@@ -21,6 +21,7 @@ import (
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	coreapi "k8s.io/api/core/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
@@ -118,7 +119,7 @@ type AgentsOpts struct {
 // sees is N distinct identities rather than one client multiplexing.
 func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error {
 	if opts.Interval <= 0 {
-		opts.Interval = HeartbeatPeriod
+		opts.Interval = fabapi.DefaultAgentHeartbeatInterval
 	}
 	if opts.APIVia == "" {
 		opts.APIVia = APIViaBridgeIP
