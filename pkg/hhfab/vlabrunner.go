@@ -1218,7 +1218,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 					readCancel()
 					// gateways are reached through the control node, it may drop the session while setting up k3s networking;
-					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost
+					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost;
+					// up to 3 reconnects in a row, a successful read resets the count
 					if err != nil && !errors.Is(err, os.ErrNotExist) && reconnects < 3 {
 						reconnects++
 						slog.Debug("Reconnecting sftp to check install marker", "vm", vm.Name, "type", vm.Type, "attempt", reconnects, "err", err)
@@ -1238,6 +1239,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
+							reconnects = 0
+
 							continue
 						}
 
