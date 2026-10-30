@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"dario.cat/mergo"
 	"github.com/go-playground/validator/v10"
@@ -289,8 +290,18 @@ type FabricConfig struct {
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
 
+	AgentHeartbeatInterval uint32 `json:"agentHeartbeatInterval,omitempty"` // seconds, 15 to 3600, default 15
+	AgentEnforceInterval   uint32 `json:"agentEnforceInterval,omitempty"`   // seconds, 120 to 86400, default 120
+
 	Observability *fmeta.Observability `json:"observability,omitempty"`
 }
+
+const (
+	DefaultAgentHeartbeatInterval = 15 * time.Second
+	MaxAgentHeartbeatInterval     = time.Hour
+	DefaultAgentEnforceInterval   = 2 * time.Minute
+	MaxAgentEnforceInterval       = 24 * time.Hour
+)
 
 type SwitchUser struct {
 	PasswordHash   string   `json:"password,omitempty"`
@@ -522,6 +533,14 @@ func (f *Fabricator) Default() {
 
 	if f.Spec.Config.Fabric.ProxyExternalSubnet == "" {
 		f.Spec.Config.Fabric.ProxyExternalSubnet = "172.30.16.0/22"
+	}
+
+	if f.Spec.Config.Fabric.AgentHeartbeatInterval == 0 {
+		f.Spec.Config.Fabric.AgentHeartbeatInterval = uint32(DefaultAgentHeartbeatInterval / time.Second)
+	}
+
+	if f.Spec.Config.Fabric.AgentEnforceInterval == 0 {
+		f.Spec.Config.Fabric.AgentEnforceInterval = uint32(DefaultAgentEnforceInterval / time.Second)
 	}
 
 	if len(f.Spec.Config.Gateway.Communities) == 0 {
@@ -925,6 +944,14 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 
 	if f.Spec.Config.Fabric.ESLAGESIPrefix == "" {
 		return fmt.Errorf("ESLAG ESI prefix is required") //nolint:err113
+	}
+
+	if hb := time.Duration(f.Spec.Config.Fabric.AgentHeartbeatInterval) * time.Second; hb < DefaultAgentHeartbeatInterval || hb > MaxAgentHeartbeatInterval {
+		return fmt.Errorf("agent heartbeat interval must be between %s and %s", DefaultAgentHeartbeatInterval, MaxAgentHeartbeatInterval) //nolint:err113
+	}
+
+	if enf := time.Duration(f.Spec.Config.Fabric.AgentEnforceInterval) * time.Second; enf < DefaultAgentEnforceInterval || enf > MaxAgentEnforceInterval {
+		return fmt.Errorf("agent enforce interval must be between %s and %s", DefaultAgentEnforceInterval, MaxAgentEnforceInterval) //nolint:err113
 	}
 
 	// TODO validate Alloy config

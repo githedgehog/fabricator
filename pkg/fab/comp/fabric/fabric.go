@@ -271,6 +271,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
 		L2ProxyExternalSubnet:    string(f.Spec.Config.Fabric.ProxyExternalSubnet),
 		DisableBFD:               f.Spec.Config.Fabric.DisableBFD,
+		AgentHeartbeatInterval:   f.Spec.Config.Fabric.AgentHeartbeatInterval,
+		AgentEnforceInterval:     f.Spec.Config.Fabric.AgentEnforceInterval,
 		IncludeSONiCCLSPlus:      f.Spec.Config.Fabric.IncludeCLSP,
 		IncludeCumulus:           f.Spec.Config.Fabric.IncludeCumulus,
 		SpineASN:                 f.Spec.Config.Fabric.SpineASN,
