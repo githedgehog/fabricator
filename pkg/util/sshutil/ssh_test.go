@@ -61,14 +61,19 @@ type stallConn struct {
 	done    <-chan struct{}
 }
 
+// Read drops what a read in progress gets once stalled, so the server doesn't see anything sent after that.
 func (c *stallConn) Read(b []byte) (int, error) {
+	n, err := 0, error(nil)
+	if !c.stalled.Load() {
+		n, err = c.Conn.Read(b)
+	}
 	if c.stalled.Load() {
 		<-c.done
 
 		return 0, io.EOF
 	}
 
-	return c.Conn.Read(b) //nolint:wrapcheck
+	return n, err //nolint:wrapcheck
 }
 
 // echoServer is an SSH server accepting any credentials that echoes exec'd commands back and forwards direct-tcpip,
