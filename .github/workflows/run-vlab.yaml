@@ -357,6 +357,7 @@ jobs:
           bin/hhfab diagram --format=mermaid
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+      # The ds4000 switches on hybrid don't send LLDP on the gateway uplinks after the port breakout, see fabricator #1760
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
         env:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
@@ -390,6 +391,7 @@ jobs:
             --build-mode="$INPUT_BUILD_MODE" \
             --vpc-mode="$INPUT_VPC_MODE" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
+            ${{ inputs.hybrid && '--inspect-gateway-lldp-strict=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
             --ready=inspect-pods \
