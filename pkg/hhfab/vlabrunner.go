@@ -115,6 +115,7 @@ type VLABRunOpts struct {
 	ReleaseTestOnReadyOnly   bool
 	InterfaceMTU             uint16
 	InspectPodsStrict        bool
+	InspectGatewayLLDPStrict bool
 }
 
 type OnReady string
@@ -798,6 +799,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitAppliedFor: 30 * time.Second,
 						Strict:         !opts.AutoUpgrade,
 						Attempts:       3,
+
+						GatewayLLDPStrict: opts.InspectGatewayLLDPStrict,
 					}
 					slog.Debug("Running inspect", "opts", inspectOpts)
 					if err := c.Inspect(ctx, vlab, inspectOpts); err != nil {
