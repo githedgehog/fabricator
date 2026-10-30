@@ -51,8 +51,12 @@ func silentListener(t *testing.T) sshutil.Remote {
 	return sshutil.Remote{User: "core", Host: "127.0.0.1", Port: uint(addr.Port)}
 }
 
-// hangCommand makes echoServer close the command output and keep the session running.
-const hangCommand = "hang"
+const (
+	// hangCommand makes echoServer close the command output and keep the session running.
+	hangCommand = "hang"
+	// stallSftpUser makes echoServer accept the sftp subsystem and never answer it.
+	stallSftpUser = "stall-sftp"
+)
 
 // stallConn stops reading once stalled, like a jump host that hangs after accepting a forward.
 type stallConn struct {
@@ -147,6 +151,12 @@ func serveEcho(conn *stallConn, config *ssh.ServerConfig, stall bool) {
 						return
 					case "subsystem":
 						_ = req.Reply(true, nil)
+						if sconn.User() == stallSftpUser {
+							// never answers the sftp init
+							<-conn.done
+
+							return
+						}
 						_ = sftp.NewRequestServer(ch, sftp.InMemHandler()).Serve()
 
 						return
@@ -272,6 +282,23 @@ func TestSftp(t *testing.T) {
 	data, err := io.ReadAll(f)
 	require.NoError(t, err)
 	require.Equal(t, "hedgehog", string(data))
+}
+
+func TestNewSftpHonoursContextDuringInit(t *testing.T) {
+	t.Parallel()
+
+	remote := echoServer(t, false)
+	remote.User = stallSftpUser
+	cfg := &sshutil.Config{Remote: remote, Password: "x"}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	start := time.Now()
+	_, cleanup, err := cfg.NewSftp(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, cleanup)
+	require.Less(t, time.Since(start), 5*time.Second)
 }
 
 func TestSftpClosedOnCancel(t *testing.T) {
