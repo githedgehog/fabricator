@@ -232,7 +232,7 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 			ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
 
 			// make sure last heartbeat is recent enough
-			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
 
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough

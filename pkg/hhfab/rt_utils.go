@@ -21,6 +21,7 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	corev1 "k8s.io/api/core/v1"
@@ -628,7 +629,7 @@ func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, ap
 			return fmt.Errorf("getting agent %q: %w", swName, err)
 		}
 		ready = ag.Status.LastAppliedGen == ag.Generation
-		ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+		ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
 		if appliedFor > 0 {
 			ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
 		}

@@ -303,6 +303,13 @@ const (
 	MaxAgentEnforceInterval       = 24 * time.Hour
 )
 
+// AgentHeartbeatStale returns how long an agent with the given heartbeat
+// interval (seconds, as in its spec, 0 for the default) can go without a
+// heartbeat before it's considered stale.
+func AgentHeartbeatStale(interval uint32) time.Duration {
+	return 4 * max(DefaultAgentHeartbeatInterval, time.Duration(interval)*time.Second)
+}
+
 type SwitchUser struct {
 	PasswordHash   string   `json:"password,omitempty"`
 	Role           string   `json:"role,omitempty"`
