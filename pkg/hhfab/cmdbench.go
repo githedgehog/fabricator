@@ -713,7 +713,7 @@ func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, ski
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting fabric config: %w", err)
 	}
-	if fabricCfg, err = fabricCfg.Init(fmeta.ExtraValidators{Peering: valid.Peering}); err != nil {
+	if fabricCfg, err = fabricCfg.Init(fmeta.ExtraValidators{Peering: valid.Peering, Connection: valid.Connection}); err != nil {
 		return nil, nil, fmt.Errorf("initializing fabric config: %w", err)
 	}
 

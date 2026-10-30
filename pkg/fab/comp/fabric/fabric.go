@@ -299,7 +299,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		GatewayHugePages2M:    gateway.HugePages2M,
 
 		ExtraValidators: fmeta.ExtraValidators{
-			Peering: valid.Peering,
+			Peering:    valid.Peering,
+			Connection: valid.Connection,
 		},
 	}, nil
 }

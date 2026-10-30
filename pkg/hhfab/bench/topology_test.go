@@ -32,7 +32,7 @@ func fabricConfig(t *testing.T) *fmeta.FabricConfig {
 	cfg, err := fabriccomp.GetFabricConfig(defaultFab())
 	require.NoError(t, err)
 
-	cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering})
+	cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering, Connection: valid.Connection})
 	require.NoError(t, err)
 
 	return cfg
