@@ -100,6 +100,8 @@ type FabricConfig struct {
 	Alloy                    AlloyConfig   `json:"alloy,omitempty"` // TODO: not used anymore, remove in future releases
 	AlloyTargets             alloy.Targets `json:"alloyTargets,omitempty"`
 	Observability            Observability `json:"observability,omitempty"`
+	AgentHeartbeatInterval   uint32        `json:"agentHeartbeatInterval,omitempty"` // seconds, default and minimum 15
+	AgentEnforceInterval     uint32        `json:"agentEnforceInterval,omitempty"`   // seconds, default and minimum 120
 	ControlProxyURL          string        `json:"controlProxyURL,omitempty"`
 	DefaultMaxPathsEBGP      uint32        `json:"defaultMaxPathsEBGP,omitempty"`
 	AllowExtraSwitchProfiles bool          `json:"allowExtraSwitchProfiles,omitempty"`
@@ -221,10 +223,13 @@ type ObservabilityUnix struct {
 }
 
 type ExtraValidators struct {
-	Peering PeeringValidator
+	Peering    PeeringValidator
+	Connection ConnectionValidator
 }
 
 type PeeringValidator func(ctx context.Context, kube kclient.Reader, peering kclient.Object) error
+
+type ConnectionValidator func(ctx context.Context, kube kclient.Reader, conn kclient.Object) error
 
 func (cfg *FabricConfig) ParsedReservedSubnets() []netip.Prefix {
 	return cfg.reservedSubnets
