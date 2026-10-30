@@ -4274,6 +4274,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		FabricConns:   true,
 		ExternalConns: true,
 		ServerConns:   true,
+		GatewayConns:  true,
 	}
 	var lldpOut inspect.Out[inspect.LLDPIn]
 	var lldpErr error
@@ -4293,6 +4294,10 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		lldpOut, lldpErr = inspect.LLDP(ctx, kube, lldpIn)
 
 		if lldpErr == nil {
+			if len(gatewayLLDPErrorsOf(lldpOut)) > 0 {
+				continue
+			}
+
 			if withErrors, ok := lldpOut.(inspect.WithErrors); ok {
 				if len(withErrors.Errors()) == 0 {
 					break
@@ -4315,6 +4320,11 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 			// LLDP neighbor discovery is unreliable on some switch platforms, so
 			// a missing neighbor is reported but doesn't fail the inspection.
 			slog.Warn("Inspecting LLDP reveals some errors", "errors", we.Errors())
+		}
+		// unlike the other neighbors, a wired gateway that isn't seen fails the inspection
+		if gwErrs := gatewayLLDPErrorsOf(lldpOut); len(gwErrs) > 0 {
+			slog.Error("Inspecting LLDP: gateways missing from the neighbors", "errors", gwErrs)
+			fail = true
 		}
 	}
 
