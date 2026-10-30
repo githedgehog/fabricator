@@ -132,6 +132,12 @@ spec:
                     type: object
                   fabric:
                     properties:
+                      agentEnforceInterval:
+                        format: int32
+                        type: integer
+                      agentHeartbeatInterval:
+                        format: int32
+                        type: integer
                       allowExtraSwitchProfiles:
                         type: boolean
                       baseVPCCommunity:

@@ -413,6 +413,8 @@ _Appears in:_
 | `includeCumulus` _boolean_ |  |  |  |
 | `allowExtraSwitchProfiles` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
+| `agentHeartbeatInterval` _integer_ |  |  |  |
+| `agentEnforceInterval` _integer_ |  |  |  |
 | `observability` _Observability_ |  |  |  |
 
 
