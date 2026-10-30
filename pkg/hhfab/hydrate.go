@@ -67,7 +67,8 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 		return fmt.Errorf("getting fabric config: %w", err)
 	}
 	if fabricCfg, err = fabricCfg.Init(fmeta.ExtraValidators{
-		Peering: valid.Peering,
+		Peering:    valid.Peering,
+		Connection: valid.Connection,
 	}); err != nil {
 		return fmt.Errorf("initializing fabric config: %w", err)
 	}

@@ -351,7 +351,7 @@ func TestDHCPObjectsValidate(t *testing.T) {
 			require.NoError(t, l.Add(ctx, obj))
 		}
 
-		cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering})
+		cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering, Connection: valid.Connection})
 		require.NoError(t, err)
 		require.NoError(t, apiutil.ValidateFabricGateway(ctx, l, cfg), "pxe %q", pxeURL)
 	}
