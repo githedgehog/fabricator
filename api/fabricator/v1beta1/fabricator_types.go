@@ -290,8 +290,10 @@ type FabricConfig struct {
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
 
-	AgentHeartbeatInterval uint32 `json:"agentHeartbeatInterval,omitempty"` // seconds, 15 to 3600, default 15
-	AgentEnforceInterval   uint32 `json:"agentEnforceInterval,omitempty"`   // seconds, 120 to 86400, default 120
+	// AgentHeartbeatInterval is how often switch agents report their status and refresh metrics, in seconds: 15 (default) to 3600
+	AgentHeartbeatInterval uint32 `json:"agentHeartbeatInterval,omitempty"`
+	// AgentEnforceInterval is how often switch agents re-apply their full config, in seconds: 120 (default) to 86400
+	AgentEnforceInterval uint32 `json:"agentEnforceInterval,omitempty"`
 
 	Observability *fmeta.Observability `json:"observability,omitempty"`
 }

@@ -413,8 +413,8 @@ _Appears in:_
 | `includeCumulus` _boolean_ |  |  |  |
 | `allowExtraSwitchProfiles` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
-| `agentHeartbeatInterval` _integer_ |  |  |  |
-| `agentEnforceInterval` _integer_ |  |  |  |
+| `agentHeartbeatInterval` _integer_ | AgentHeartbeatInterval is how often switch agents report their status and refresh metrics, in seconds: 15 (default) to 3600 |  |  |
+| `agentEnforceInterval` _integer_ | AgentEnforceInterval is how often switch agents re-apply their full config, in seconds: 120 (default) to 86400 |  |  |
 | `observability` _Observability_ |  |  |  |
 
 

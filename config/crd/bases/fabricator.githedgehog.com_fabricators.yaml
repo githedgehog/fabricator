@@ -133,9 +133,15 @@ spec:
                   fabric:
                     properties:
                       agentEnforceInterval:
+                        description: 'AgentEnforceInterval is how often switch agents
+                          re-apply their full config, in seconds: 120 (default) to
+                          86400'
                         format: int32
                         type: integer
                       agentHeartbeatInterval:
+                        description: 'AgentHeartbeatInterval is how often switch agents
+                          report their status and refresh metrics, in seconds: 15
+                          (default) to 3600'
                         format: int32
                         type: integer
                       allowExtraSwitchProfiles:
