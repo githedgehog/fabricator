@@ -307,9 +307,10 @@ const (
 
 // AgentHeartbeatStale returns how long an agent with the given heartbeat
 // interval (seconds, as in its spec, 0 for the default) can go without a
-// heartbeat before it's considered stale.
+// heartbeat before it's considered stale: two missed heartbeats plus some
+// slack, but never less than a minute.
 func AgentHeartbeatStale(interval uint32) time.Duration {
-	return 4 * max(DefaultAgentHeartbeatInterval, time.Duration(interval)*time.Second)
+	return max(time.Minute, 2*time.Duration(interval)*time.Second+30*time.Second)
 }
 
 type SwitchUser struct {
