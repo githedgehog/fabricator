@@ -8,9 +8,14 @@ metadata:
 spec:
   group: fabricator.githedgehog.com
   names:
+    categories:
+    - hhfr
+    - hhint
     kind: ControlNode
     listKind: ControlNodeList
     plural: controlnodes
+    shortNames:
+    - cn
     singular: controlnode
   scope: Namespaced
   versions:

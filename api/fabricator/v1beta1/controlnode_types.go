@@ -47,6 +47,7 @@ type ControlNodeStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:categories=hhfr;hhint,shortName=cn
 
 type ControlNode struct {
 	kmetav1.TypeMeta   `json:",inline"`

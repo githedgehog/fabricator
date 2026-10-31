@@ -9,8 +9,8 @@ spec:
   group: fabricator.githedgehog.com
   names:
     categories:
-    - hedgehog
-    - fabricator
+    - hhfr
+    - hhint
     kind: FabNode
     listKind: FabNodeList
     plural: fabnodes
