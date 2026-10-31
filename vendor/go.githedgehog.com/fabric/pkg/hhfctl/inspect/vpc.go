@@ -166,20 +166,16 @@ func VPC(ctx context.Context, kube kclient.Reader, in VPCIn) (*VPCOut, error) {
 
 	out.Spec = vpc.Spec
 
+	attachLabels := kclient.MatchingLabels{vpcapi.LabelVPC: name}
+	if subnet != "" {
+		attachLabels[vpcapi.LabelSubnet] = subnet
+	}
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := kube.List(ctx, vpcAttaches, kclient.MatchingLabels{
-		vpcapi.LabelVPC: name,
-	}); err != nil {
-		return nil, errors.Wrap(err, "failed to list VPC attachments")
+	if err := kube.List(ctx, vpcAttaches, attachLabels); err != nil {
+		return nil, fmt.Errorf("failed to list VPC attachments: %w", err)
 	}
 
 	for _, vpcAttach := range vpcAttaches.Items {
-		attachSubnet := strings.SplitN(vpcAttach.Spec.Subnet, "/", 2)[1]
-
-		if subnet != "" && attachSubnet != subnet {
-			continue
-		}
-
 		out.VPCAttachments[vpcAttach.Name] = new(vpcAttach.Spec)
 	}
 
@@ -194,7 +190,8 @@ func VPC(ctx context.Context, kube kclient.Reader, in VPCIn) (*VPCOut, error) {
 		if subnet != "" {
 			found := false
 			for _, permit := range vpcPeering.Spec.Permit {
-				if peer, exist := permit[name]; exist && slices.Contains(peer.Subnets, subnet) {
+				// empty subnets permit all of the vpc's subnets
+				if peer, exist := permit[name]; exist && (len(peer.Subnets) == 0 || slices.Contains(peer.Subnets, subnet)) {
 					found = true
 
 					break

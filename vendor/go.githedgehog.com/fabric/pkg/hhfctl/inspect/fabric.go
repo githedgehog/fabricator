@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -145,34 +145,45 @@ func Fabric(ctx context.Context, kube kclient.Reader, in FabricIn) (*FabricOut, 
 	totalSwitches := 0
 	readySwitches := 0
 
+	// agents carry the labels of their switches
+	fabricSel := kclient.MatchingLabels(apiutil.SwitchFilter{Fabric: in.Name}.FabricLabels(false))
+
 	swList := &wiringapi.SwitchList{}
-	if err := kube.List(ctx, swList); err != nil {
-		return nil, errors.Wrap(err, "cannot list switches")
+	if err := kube.List(ctx, swList, fabricSel); err != nil {
+		return nil, fmt.Errorf("cannot list switches: %w", err)
 	}
 
+	agList := &agentapi.AgentList{}
+	if err := kube.List(ctx, agList, fabricSel); err != nil {
+		return nil, fmt.Errorf("cannot list agents: %w", err)
+	}
+	agents := map[string]*agentapi.Agent{}
+	for idx := range agList.Items {
+		agents[agList.Items[idx].Name] = &agList.Items[idx]
+	}
+
+	profiles := map[string]*wiringapi.SwitchProfile{}
 	for _, sw := range swList.Items {
 		swName := sw.Name
 		fabricName := sw.Spec.Topology.Fabric
-		if in.Name != "" && fabricName != in.Name {
-			continue
-		}
 
 		totalSwitches++
 
-		sp := &wiringapi.SwitchProfile{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
-			return nil, errors.Wrapf(err, "cannot get switch profile %s", sw.Spec.Profile)
+		sp, ok := profiles[sw.Spec.Profile]
+		if !ok {
+			sp = &wiringapi.SwitchProfile{}
+			if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
+				return nil, fmt.Errorf("cannot get switch profile %s: %w", sw.Spec.Profile, err)
+			}
+			profiles[sw.Spec.Profile] = sp
 		}
 
 		skipActual := false
-		agent := &agentapi.Agent{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent); err != nil {
-			if kapierrors.IsNotFound(err) {
-				skipActual = true
-				slog.Warn("Agent object not found", "name", swName)
-			} else {
-				return nil, errors.Wrapf(err, "failed to get Agent %s", swName)
-			}
+		agent, ok := agents[swName]
+		if !ok {
+			skipActual = true
+			agent = &agentapi.Agent{}
+			slog.Warn("Agent object not found", "name", swName)
 		}
 
 		swState := &FabricOutSwitch{
