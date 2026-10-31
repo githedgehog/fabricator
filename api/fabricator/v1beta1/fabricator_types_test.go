@@ -36,10 +36,10 @@ func TestAgentIntervals(t *testing.T) {
 		{name: "unset", expectedHeartbeat: 15, expectedEnforce: 120},
 		{name: "min", heartbeat: 15, enforce: 120, expectedHeartbeat: 15, expectedEnforce: 120},
 		{name: "max", heartbeat: 3600, enforce: 86400, expectedHeartbeat: 3600, expectedEnforce: 86400},
-		{name: "heartbeat-too-low", heartbeat: 14, err: "agent heartbeat interval"},
-		{name: "heartbeat-too-high", heartbeat: 3601, err: "agent heartbeat interval"},
-		{name: "enforce-too-low", enforce: 119, err: "agent enforce interval"},
-		{name: "enforce-too-high", enforce: 86401, err: "agent enforce interval"},
+		{name: "heartbeat-too-low", heartbeat: 14, err: "agent heartbeat interval 14 must be between 15 and 3600 seconds"},
+		{name: "heartbeat-too-high", heartbeat: 3601, err: "agent heartbeat interval 3601 must be between 15 and 3600 seconds"},
+		{name: "enforce-too-low", enforce: 119, err: "agent enforce interval 119 must be between 120 and 86400 seconds"},
+		{name: "enforce-too-high", enforce: 86401, err: "agent enforce interval 86401 must be between 120 and 86400 seconds"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := base.DeepCopy()
