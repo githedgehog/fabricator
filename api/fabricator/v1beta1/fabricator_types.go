@@ -956,11 +956,13 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	}
 
 	if hb := time.Duration(f.Spec.Config.Fabric.AgentHeartbeatInterval) * time.Second; hb < DefaultAgentHeartbeatInterval || hb > MaxAgentHeartbeatInterval {
-		return fmt.Errorf("agent heartbeat interval must be between %s and %s", DefaultAgentHeartbeatInterval, MaxAgentHeartbeatInterval) //nolint:err113
+		return fmt.Errorf("agent heartbeat interval %d must be between %d and %d seconds", //nolint:err113
+			f.Spec.Config.Fabric.AgentHeartbeatInterval, DefaultAgentHeartbeatInterval/time.Second, MaxAgentHeartbeatInterval/time.Second)
 	}
 
 	if enf := time.Duration(f.Spec.Config.Fabric.AgentEnforceInterval) * time.Second; enf < DefaultAgentEnforceInterval || enf > MaxAgentEnforceInterval {
-		return fmt.Errorf("agent enforce interval must be between %s and %s", DefaultAgentEnforceInterval, MaxAgentEnforceInterval) //nolint:err113
+		return fmt.Errorf("agent enforce interval %d must be between %d and %d seconds", //nolint:err113
+			f.Spec.Config.Fabric.AgentEnforceInterval, DefaultAgentEnforceInterval/time.Second, MaxAgentEnforceInterval/time.Second)
 	}
 
 	// TODO validate Alloy config
