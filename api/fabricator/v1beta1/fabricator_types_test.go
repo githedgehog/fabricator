@@ -65,8 +65,9 @@ func TestAgentHeartbeatStale(t *testing.T) {
 		0:    time.Minute,
 		10:   time.Minute,
 		15:   time.Minute,
-		60:   4 * time.Minute,
-		3600: 4 * time.Hour,
+		30:   1*time.Minute + 30*time.Second,
+		60:   2*time.Minute + 30*time.Second,
+		3600: 2*time.Hour + 30*time.Second,
 	} {
 		require.Equal(t, expected, fabapi.AgentHeartbeatStale(interval), "interval %d", interval)
 	}
