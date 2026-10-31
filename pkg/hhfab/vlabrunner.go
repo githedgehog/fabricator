@@ -1056,7 +1056,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:err113
 	}
 
-	ftp, cleanup, err := ssh.NewSftp()
+	ftp, cleanup, err := ssh.NewSftp(ctx)
 	// closes the current client as it's re-created on reconnects; ssh goes first as closing sftp waits for its reader
 	defer func() {
 		if cleanup != nil {
@@ -1171,7 +1171,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 						_ = cleanup()
 						_ = ftp.Close()
 
-						ftp, cleanup, err = ssh.NewSftp()
+						ftp, cleanup, err = ssh.NewSftp(ctx)
 						if err != nil {
 							return fmt.Errorf("re-creating sftp: %w", err)
 						}
@@ -1207,18 +1207,25 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				case <-ctx.Done():
 					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-time.After(5 * time.Second):
+					// sftp reads take no context, closing the connection aborts one stuck on a hung node and reconnects
+					readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
+					closeConn := cleanup
+					stopRead := context.AfterFunc(readCtx, func() { _ = closeConn() })
 					marker, err := sshReadMarker(ftp)
+					if !stopRead() && err == nil {
+						// the read completed as the connection was closed, reconnect for the next one
+						err = fmt.Errorf("reading install marker: %w", readCtx.Err())
+					}
+					readCancel()
 					// gateways are reached through the control node, it may drop the session while setting up k3s networking;
-					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost
+					// a write on a dropped session fails with a raw transport error, not always sftp's connection lost;
+					// up to 3 reconnects in a row, a successful read resets the count
 					if err != nil && !errors.Is(err, os.ErrNotExist) && reconnects < 3 {
 						reconnects++
 						slog.Debug("Reconnecting sftp to check install marker", "vm", vm.Name, "type", vm.Type, "attempt", reconnects, "err", err)
 
-						newFtp, newCleanup, err := ssh.NewSftp()
+						newFtp, newCleanup, err := ssh.NewSftp(ctx)
 						if err != nil {
-							if newCleanup != nil {
-								_ = newCleanup()
-							}
 							slog.Debug("Failed to reconnect sftp", "vm", vm.Name, "type", vm.Type, "err", err)
 
 							continue
@@ -1232,6 +1239,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
+							reconnects = 0
+
 							continue
 						}
 
@@ -1387,6 +1396,7 @@ func sshReadMarker(client *sftp.Client) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("checking for install marker: %w", err)
 	}
+	defer f.Close()
 
 	rawMarker, err := io.ReadAll(f)
 	if err != nil {

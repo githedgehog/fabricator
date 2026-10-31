@@ -12,7 +12,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/appleboy/easyssh-proxy"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -29,50 +28,21 @@ type Config struct {
 	Remote Remote
 	Proxy  *Remote
 
-	SSHKey     string
-	SSHKeyPath string
-	Password   string
+	SSHKey   string
+	Password string
+	// SSHTimeout bounds connecting: dials, handshakes and session or sftp setup, 60s if not set
 	SSHTimeout time.Duration
-
-	ssh *easyssh.MakeConfig
 }
 
-func (c *Config) init() error {
+func (c *Config) timeout() time.Duration {
 	if c.SSHTimeout == 0 {
-		c.SSHTimeout = 60 * time.Second
+		return 60 * time.Second
 	}
 
-	if c.ssh == nil {
-		c.ssh = &easyssh.MakeConfig{
-			User:     c.Remote.User,
-			Server:   c.Remote.Host,
-			Port:     fmt.Sprintf("%d", c.Remote.Port),
-			Key:      c.SSHKey,
-			KeyPath:  c.SSHKeyPath,
-			Password: c.Password,
-			Timeout:  c.SSHTimeout,
-		}
-
-		if c.Proxy != nil {
-			c.ssh.Proxy = easyssh.DefaultConfig{
-				User:    c.Proxy.User,
-				Server:  c.Proxy.Host,
-				Port:    fmt.Sprintf("%d", c.Proxy.Port),
-				Key:     c.SSHKey,
-				KeyPath: c.SSHKeyPath,
-				Timeout: c.SSHTimeout,
-			}
-		}
-	}
-
-	return nil
+	return c.SSHTimeout
 }
 
 func (c *Config) Wait(ctx context.Context) error {
-	if err := c.init(); err != nil {
-		return fmt.Errorf("initializing ssh config: %w", err)
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,11 +67,7 @@ func (c *Config) Wait(ctx context.Context) error {
 }
 
 func (c *Config) Run(ctx context.Context, cmd string) (string, string, error) {
-	if err := c.init(); err != nil {
-		return "", "", fmt.Errorf("initializing ssh config: %w", err)
-	}
-
-	outStr, errStr, err := runContext(ctx, c.ssh, cmd)
+	outStr, errStr, err := runContext(ctx, c, cmd)
 	if err != nil {
 		return outStr, errStr, fmt.Errorf("running command: %w", err)
 	}
@@ -122,11 +88,7 @@ func ExitStatus(err error) (int, bool) {
 }
 
 func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log func(msg string, args ...any)) error {
-	if err := c.init(); err != nil {
-		return fmt.Errorf("initializing ssh config: %w", err)
-	}
-
-	stdoutCh, stderrCh, errCh, err := streamContext(ctx, c.ssh, cmd)
+	stdoutCh, stderrCh, errCh, err := streamContext(ctx, c, cmd)
 	if err != nil {
 		return fmt.Errorf("streaming command: %w", err)
 	}
@@ -159,27 +121,29 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 	}
 }
 
-func (c *Config) NewSftp() (*sftp.Client, func() error, error) {
-	if err := c.init(); err != nil {
-		return nil, nil, fmt.Errorf("initializing ssh config: %w", err)
-	}
+// NewSftp returns an sftp client and a cleanup func closing its connection, both nil on error. sftp calls take no
+// context, so the connection is closed once ctx is done to unblock them.
+func (c *Config) NewSftp(ctx context.Context) (*sftp.Client, func() error, error) {
+	var sftpClient *sftp.Client
+	closeClient, err := c.connect(ctx, func(client *ssh.Client) error {
+		var err error
+		if sftpClient, err = sftp.NewClient(client); err != nil {
+			return fmt.Errorf("creating new sftp client: %w", err)
+		}
 
-	session, client, err := c.ssh.Connect()
+		return nil
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("connecting: %w", err)
 	}
-	_ = session.Close()
 
-	cleanup := func() error {
-		return client.Close()
-	}
+	stop := context.AfterFunc(ctx, func() { _ = closeClient() })
 
-	sftpClient, err := sftp.NewClient(client)
-	if err != nil {
-		return nil, cleanup, fmt.Errorf("creating new sftp client: %w", err)
-	}
+	return sftpClient, func() error {
+		stop()
 
-	return sftpClient, cleanup, nil
+		return closeClient()
+	}, nil
 }
 
 func UploadPathWith(ftp *sftp.Client, localPath string, remotePath string) error {
@@ -202,15 +166,18 @@ func UploadPathWith(ftp *sftp.Client, localPath string, remotePath string) error
 	return nil
 }
 
-func (c *Config) UploadPath(localPath string, remotePath string) error {
-	ftp, cleanup, err := c.NewSftp()
-	if cleanup != nil {
-		defer cleanup() //nolint:errcheck
-	}
+// closeSftp closes the ssh connection first as closing sftp waits for its reader
+func closeSftp(ftp *sftp.Client, cleanup func() error) {
+	_ = cleanup()
+	_ = ftp.Close()
+}
+
+func (c *Config) UploadPath(ctx context.Context, localPath string, remotePath string) error {
+	ftp, cleanup, err := c.NewSftp(ctx)
 	if err != nil {
 		return fmt.Errorf("creating sftp: %w", err)
 	}
-	defer ftp.Close()
+	defer closeSftp(ftp, cleanup)
 
 	return UploadPathWith(ftp, localPath, remotePath)
 }
@@ -233,21 +200,18 @@ func DownloadPathWith(ftp *sftp.Client, remotePath string, localPath string) err
 	}
 
 	if err := local.Sync(); err != nil {
-		return fmt.Errorf("syncing local file: %w", local.Sync())
+		return fmt.Errorf("syncing local file: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Config) DownloadPath(remotePath string, localPath string) error {
-	ftp, cleanup, err := c.NewSftp()
-	if cleanup != nil {
-		defer cleanup() //nolint:errcheck
-	}
+func (c *Config) DownloadPath(ctx context.Context, remotePath string, localPath string) error {
+	ftp, cleanup, err := c.NewSftp(ctx)
 	if err != nil {
 		return fmt.Errorf("creating sftp: %w", err)
 	}
-	defer ftp.Close()
+	defer closeSftp(ftp, cleanup)
 
 	return DownloadPathWith(ftp, remotePath, localPath)
 }
