@@ -262,14 +262,13 @@ type VPCStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
-// +kubebuilder:printcolumn:name="Domains",type=string,JSONPath=`.spec.topology.domains`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="IPv4NS",type=string,JSONPath=`.spec.ipv4Namespace`,priority=0
 // +kubebuilder:printcolumn:name="VLANNS",type=string,JSONPath=`.spec.vlanNamespace`,priority=0
 // +kubebuilder:printcolumn:name="Subnets",type=string,JSONPath=`.spec.subnets`,priority=1
 // +kubebuilder:printcolumn:name="VNI",type=string,JSONPath=`.status.vni`,priority=1
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // VPC is Virtual Private Cloud, similar to the public cloud VPC it provides an isolated private network for the
 // resources with support for multiple subnets each with user-provided VLANs and on-demand DHCP.
 type VPC struct {
@@ -363,6 +362,7 @@ func (vpc *VPC) Default() {
 			vpc.Labels[wiringapi.ListLabelDomain(domain)] = ListLabelValue
 		}
 	}
+	wiringapi.SetTopologyAnnotation(vpc, vpc.Spec.Topology.Fabric, vpc.Spec.Topology.Domains...)
 
 	for _, subnet := range vpc.Spec.Subnets {
 		cidr, err := iputil.ParseCIDR(subnet.Subnet)

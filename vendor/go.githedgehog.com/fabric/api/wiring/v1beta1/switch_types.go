@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 
 const (
 	AnnotationSwitchRouteSumm       = "fabric.githedgehog.com/route-summ"
+	AnnotationSwitchSyslogDebug     = "fabric.githedgehog.com/syslog-debug"
 	DefaultLinkFlapThreshold        = 3
 	DefaultLinkFlapSamplingInterval = 30
 	DefaultLinkFlapRecoveryInterval = 300
@@ -240,9 +242,8 @@ type SwitchStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;wiring;fabric,shortName=sw
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
-// +kubebuilder:printcolumn:name="Domains",type=string,JSONPath=`.spec.topology.domains`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=sw
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`,priority=0
 // +kubebuilder:printcolumn:name="Role",type=string,JSONPath=`.spec.role`,priority=0
 // +kubebuilder:printcolumn:name="Descr",type=string,JSONPath=`.spec.description`,priority=0
@@ -392,6 +393,7 @@ func (sw *Switch) Default() {
 	slices.Sort(sw.Spec.Groups)
 	slices.Sort(sw.Spec.VLANNamespaces)
 	slices.Sort(sw.Spec.Topology.Domains)
+	SetTopologyAnnotation(sw, sw.Spec.Topology.Fabric, sw.Spec.Topology.Domains...)
 
 	sw.Labels[LabelProfile] = sw.Spec.Profile
 }
@@ -588,11 +590,33 @@ func (sw *Switch) HydrationValidation(ctx context.Context, kube kclient.Reader, 
 	return nil
 }
 
+func SwitchSyslogDebug(annotations map[string]string) (bool, error) {
+	if annotations == nil {
+		return false, nil
+	}
+
+	v, ok := annotations[AnnotationSwitchSyslogDebug]
+	if !ok {
+		return false, nil
+	}
+
+	debug, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("annotation %s must be a boolean: %w", AnnotationSwitchSyslogDebug, err)
+	}
+
+	return debug, nil
+}
+
 func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
 	if err := meta.ValidateObjectMetadata(sw); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
+	}
+
+	if _, err := SwitchSyslogDebug(sw.Annotations); err != nil {
+		return nil, err
 	}
 
 	if len(sw.Spec.VLANNamespaces) == 0 {
