@@ -46,9 +46,9 @@ type GatewayGroupStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gwgr
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
-// +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.topology.domain`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhgw,shortName=gwgr
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // GatewayGroup is the Schema for the gatewaygroups API
 type GatewayGroup struct {
 	kmetav1.TypeMeta   `json:",inline"`
@@ -97,6 +97,7 @@ func (gg *GatewayGroup) Default() {
 
 	gg.Labels[wiringapi.ListLabelFabric(gg.Spec.Topology.Fabric)] = ListLabelValue
 	gg.Labels[wiringapi.ListLabelDomain(gg.Spec.Topology.Domain)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(gg, gg.Spec.Topology.Fabric, gg.Spec.Topology.Domain)
 }
 
 func (gg *GatewayGroup) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {

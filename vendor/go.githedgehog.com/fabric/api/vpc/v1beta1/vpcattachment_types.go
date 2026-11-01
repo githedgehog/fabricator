@@ -62,12 +62,12 @@ type VPCAttachmentStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric,shortName=vpcattach
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=vpcattach
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="VPCSUBNET",type=string,JSONPath=`.spec.subnet`,priority=0
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connection`,priority=0
 // +kubebuilder:printcolumn:name="NativeVLAN",type=string,JSONPath=`.spec.nativeVLAN`,priority=0
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // VPCAttachment is the Schema for the vpcattachments API
 type VPCAttachment struct {
 	kmetav1.TypeMeta   `json:",inline"`
@@ -166,6 +166,7 @@ func (attach *VPCAttachment) Default() {
 	maps.Copy(attach.Labels, attach.Spec.Labels())
 
 	attach.Labels[wiringapi.ListLabelFabric(attach.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(attach, attach.Spec.Topology.Fabric)
 }
 
 func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, _ *meta.FabricConfig) (admission.Warnings, error) {

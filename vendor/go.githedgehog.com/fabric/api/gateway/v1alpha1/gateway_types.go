@@ -160,12 +160,12 @@ type GatewayStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gw
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
-// +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.topology.domain`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhgw,shortName=gw
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
+// +kubebuilder:printcolumn:name="Driver",type=string,JSONPath=`.spec.driver`,priority=0
+// +kubebuilder:printcolumn:name="Workers",type=integer,JSONPath=`.spec.workers`,priority=1
 // +kubebuilder:printcolumn:name="VTEPIP",type=string,JSONPath=`.spec.vtepIP`,priority=0
 // +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=0
-// +kubebuilder:printcolumn:name="Workers",type=integer,JSONPath=`.spec.workers`,priority=1
 // +kubebuilder:printcolumn:name="ProtoIP",type=string,JSONPath=`.spec.protocolIP`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // Gateway is the Schema for the gateways API.
@@ -252,6 +252,7 @@ func (gw *Gateway) Default() {
 
 	gw.Labels[wiringapi.ListLabelFabric(gw.Spec.Topology.Fabric)] = ListLabelValue
 	gw.Labels[wiringapi.ListLabelDomain(gw.Spec.Topology.Domain)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(gw, gw.Spec.Topology.Fabric, gw.Spec.Topology.Domain)
 
 	slices.SortFunc(gw.Spec.Groups, func(a, b GatewayGroupMembership) int {
 		return strings.Compare(a.Name, b.Name)

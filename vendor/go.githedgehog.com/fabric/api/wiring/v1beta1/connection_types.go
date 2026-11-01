@@ -282,12 +282,12 @@ type ConnectionStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;wiring;fabric,shortName=conn
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=conn
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/connection-type`,priority=0
 // +kubebuilder:printcolumn:name="Switches",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/switches`,priority=1
 // +kubebuilder:printcolumn:name="Servers",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/servers`,priority=1
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // Connection object represents a logical and physical connections between any devices in the Fabric (Switch, Server
 // and External objects). It's needed to define all physical and logical connections between the devices in the Wiring
 // Diagram. Connection type is defined by the top-level field in the ConnectionSpec. Exactly one of them could be used
@@ -702,6 +702,7 @@ func (conn *Connection) Default() {
 	maps.Copy(conn.Annotations, anns)
 
 	conn.Labels[ListLabelFabric(conn.Spec.Topology.Fabric)] = ListLabelValue
+	SetTopologyAnnotation(conn, conn.Spec.Topology.Fabric)
 }
 
 // ValidateDomains checks the connection does not cross domains where it must not, given its switches by name
@@ -873,6 +874,10 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 	}
 
 	if kube != nil {
+		if fabricCfg == nil {
+			return nil, fmt.Errorf("fabric config is required to validate connection %s against other objects", conn.Name) //nolint:err113
+		}
+
 		rGroup := ""
 		rType := meta.RedundancyTypeNone
 		connFabric := conn.Spec.Topology.Fabric
@@ -1221,11 +1226,11 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			}
 		}
 
-		// TODO require it once fabricator sets it as well
-		if fabricCfg.ExtraValidators.Connection != nil {
-			if err := fabricCfg.ExtraValidators.Connection(ctx, kube, conn); err != nil {
-				return nil, err //nolint:wrapcheck
-			}
+		if fabricCfg.ExtraValidators.Connection == nil {
+			return nil, fmt.Errorf("connection extra validator is not set") //nolint:err113
+		}
+		if err := fabricCfg.ExtraValidators.Connection(ctx, kube, conn); err != nil {
+			return nil, err //nolint:wrapcheck
 		}
 	}
 

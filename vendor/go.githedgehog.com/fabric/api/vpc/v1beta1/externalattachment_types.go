@@ -298,15 +298,15 @@ type ExternalAttachmentStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric;external,shortName=extattach
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=extattach
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="External",type=string,JSONPath=`.spec.external`,priority=0
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connection`,priority=0
 // +kubebuilder:printcolumn:name="SwVLAN",type=string,JSONPath=`.spec.switch.vlan`,priority=1
 // +kubebuilder:printcolumn:name="SwIP",type=string,JSONPath=`.spec.switch.ip`,priority=1
 // +kubebuilder:printcolumn:name="NeighASN",type=string,JSONPath=`.spec.neighbor.asn`,priority=1
 // +kubebuilder:printcolumn:name="NeighIP",type=string,JSONPath=`.spec.neighbor.ip`,priority=1
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // ExternalAttachment is a definition of how specific switch is connected with external system (External object).
 // Effectively it represents BGP peering between the switch and external system including all needed configuration.
 type ExternalAttachment struct {
@@ -366,6 +366,7 @@ func (attach *ExternalAttachment) Default() {
 	attach.Labels[wiringapi.LabelConnection] = attach.Spec.Connection
 	attach.Labels[LabelExternal] = attach.Spec.External
 	attach.Labels[wiringapi.ListLabelFabric(attach.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(attach, attach.Spec.Topology.Fabric)
 }
 
 // asnCollision returns what asn collides with in a fabric, if anything

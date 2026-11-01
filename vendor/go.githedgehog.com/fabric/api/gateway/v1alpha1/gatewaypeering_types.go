@@ -241,8 +241,8 @@ type PeeringStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gwpeer
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhgw,shortName=gwpeer
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="Group",type=string,JSONPath=`.spec.gatewayGroup`,priority=0
 // +kubebuilder:printcolumn:name="VPCs",type=string,JSONPath=`.metadata.annotations.gateway\.githedgehog\.com/vpcs`,priority=0
 // +kubebuilder:printcolumn:name="NAT",type=string,JSONPath=`.metadata.annotations.gateway\.githedgehog\.com/nat`,priority=0
@@ -291,6 +291,7 @@ func (p *GatewayPeering) Default() {
 	wiringapi.CleanupFabricLabels(p.Labels)
 
 	p.Labels[wiringapi.ListLabelFabric(p.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(p, p.Spec.Topology.Fabric)
 
 	vpcs := slices.Sorted(maps.Keys(p.Spec.Peering))
 	if len(vpcs) != 2 {
@@ -560,7 +561,10 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 			return fmt.Errorf("gateway group %s has no domain", p.Spec.GatewayGroup) //nolint:err113
 		}
 
-		if fabricCfg != nil && fabricCfg.ExtraValidators.Peering != nil {
+		if fabricCfg != nil {
+			if fabricCfg.ExtraValidators.Peering == nil {
+				return fmt.Errorf("peering extra validator is not set") //nolint:err113
+			}
 			if err := fabricCfg.ExtraValidators.Peering(ctx, kube, p); err != nil {
 				return err //nolint:wrapcheck
 			}

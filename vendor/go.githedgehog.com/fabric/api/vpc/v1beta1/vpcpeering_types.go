@@ -62,12 +62,12 @@ type VPCPeeringStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric,shortName=vpcpeer
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=vpcpeer
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="VPC1",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/vpc1`,priority=0
 // +kubebuilder:printcolumn:name="VPC2",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/vpc2`,priority=0
 // +kubebuilder:printcolumn:name="Remote",type=string,JSONPath=`.spec.remote`,priority=0
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // VPCPeering represents a peering between two VPCs with corresponding filtering rules.
 // Minimal example of the VPC peering showing vpc-1 to vpc-2 peering with all subnets allowed:
 //
@@ -155,6 +155,7 @@ func (peering *VPCPeering) Default() {
 	wiringapi.CleanupFabricLabels(peering.Labels)
 
 	peering.Labels[wiringapi.ListLabelFabric(peering.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(peering, peering.Spec.Topology.Fabric)
 
 	vpc1, vpc2, err := peering.Spec.VPCs()
 	if err != nil {
@@ -196,7 +197,10 @@ func (peering *VPCPeering) Validate(ctx context.Context, kube kclient.Reader, fa
 	}
 
 	if kube != nil {
-		if fabricCfg != nil && fabricCfg.ExtraValidators.Peering != nil {
+		if fabricCfg != nil {
+			if fabricCfg.ExtraValidators.Peering == nil {
+				return nil, fmt.Errorf("peering extra validator is not set") //nolint:err113
+			}
 			if err := fabricCfg.ExtraValidators.Peering(ctx, kube, peering); err != nil {
 				return nil, err //nolint:wrapcheck
 			}

@@ -88,13 +88,13 @@ type ExternalPeeringStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric;external,shortName=extpeering;extpeer
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=extpeer
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="VPC",type=string,JSONPath=`.spec.permit.vpc.name`,priority=0
 // +kubebuilder:printcolumn:name="VPCSubnets",type=string,JSONPath=`.spec.permit.vpc.subnets`,priority=1
 // +kubebuilder:printcolumn:name="External",type=string,JSONPath=`.spec.permit.external.name`,priority=0
 // +kubebuilder:printcolumn:name="ExtPrefixes",type=string,JSONPath=`.spec.permit.external.prefixes`,priority=1
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // ExternalPeering is the Schema for the externalpeerings API
 type ExternalPeering struct {
 	kmetav1.TypeMeta   `json:",inline"`
@@ -155,6 +155,7 @@ func (peering *ExternalPeering) Default() {
 	peering.Labels[LabelVPC] = peering.Spec.Permit.VPC.Name
 	peering.Labels[LabelExternal] = peering.Spec.Permit.External.Name
 	peering.Labels[wiringapi.ListLabelFabric(peering.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(peering, peering.Spec.Topology.Fabric)
 
 	slices.Sort(peering.Spec.Permit.VPC.Subnets)
 	slices.SortFunc(peering.Spec.Permit.External.Prefixes, func(a, b ExternalPeeringSpecPrefix) int {
@@ -185,7 +186,10 @@ func (peering *ExternalPeering) Validate(ctx context.Context, kube kclient.Reade
 	}
 
 	if kube != nil {
-		if fabricCfg != nil && fabricCfg.ExtraValidators.Peering != nil {
+		if fabricCfg != nil {
+			if fabricCfg.ExtraValidators.Peering == nil {
+				return nil, fmt.Errorf("peering extra validator is not set") //nolint:err113
+			}
 			if err := fabricCfg.ExtraValidators.Peering(ctx, kube, peering); err != nil {
 				return nil, err //nolint:wrapcheck
 			}

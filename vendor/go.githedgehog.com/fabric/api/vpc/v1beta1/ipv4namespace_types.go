@@ -56,10 +56,10 @@ type IPv4NamespaceStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;fabric,shortName=ipns
-// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:resource:categories=hedgehog;hh;hhfc,shortName=ipns
+// +kubebuilder:printcolumn:name="Topo",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/topology`,priority=0
 // +kubebuilder:printcolumn:name="Subnets",type=string,JSONPath=`.spec.subnets`,priority=0
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // IPv4Namespace represents a namespace for VPC subnets allocation. All VPC subnets within a single IPv4Namespace are
 // non-overlapping. Users can create multiple IPv4Namespaces to allocate same VPC subnets.
 type IPv4Namespace struct {
@@ -126,6 +126,7 @@ func (ns *IPv4Namespace) Default() {
 	maps.Copy(ns.Labels, ns.Spec.Labels())
 
 	ns.Labels[wiringapi.ListLabelFabric(ns.Spec.Topology.Fabric)] = ListLabelValue
+	wiringapi.SetTopologyAnnotation(ns, ns.Spec.Topology.Fabric)
 
 	slices.Sort(ns.Spec.Subnets)
 }
