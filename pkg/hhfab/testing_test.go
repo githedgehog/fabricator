@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/netip"
 	"slices"
 	"testing"
@@ -656,6 +657,68 @@ func TestServerTopology(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.expected, topology)
+		})
+	}
+}
+
+func TestPickFabricIPv4Namespaces(t *testing.T) {
+	ns := func(name, fabric string) vpcapi.IPv4Namespace {
+		return vpcapi.IPv4Namespace{
+			Name: name,
+			Spec: vpcapi.IPv4NamespaceSpec{Topology: vpcapi.IPv4NamespaceTopology{Fabric: fabric}},
+		}
+	}
+
+	for _, test := range []struct {
+		name       string
+		namespaces []vpcapi.IPv4Namespace
+		ipns       string
+		expected   map[string]string
+	}{
+		{
+			name:       "several in a non-default fabric picks the one named ipns",
+			namespaces: []vpcapi.IPv4Namespace{ns("ipns-2", "fabric-b"), ns("default", "fabric-b"), ns("ipns-a", "fabric-a")},
+			ipns:       "default",
+			expected:   map[string]string{"fabric-a": "ipns-a", "fabric-b": "default"},
+		},
+		{
+			name:       "single in a non-default fabric is picked whatever its name",
+			namespaces: []vpcapi.IPv4Namespace{ns("ipns-a", "fabric-a")},
+			ipns:       "default",
+			expected:   map[string]string{"fabric-a": "ipns-a"},
+		},
+		{
+			name:       "several in a non-default fabric without ipns picks the first by name",
+			namespaces: []vpcapi.IPv4Namespace{ns("ipns-c", "fabric-b"), ns("ipns-a", "fabric-b"), ns("ipns-b", "fabric-b")},
+			ipns:       "default",
+			expected:   map[string]string{"fabric-b": "ipns-a"},
+		},
+		{
+			name:       "default fabric honours ipns",
+			namespaces: []vpcapi.IPv4Namespace{ns("aaa", wiringapi.DefaultFabric), ns("ipns-2", wiringapi.DefaultFabric), ns("zzz", wiringapi.DefaultFabric)},
+			ipns:       "ipns-2",
+			expected:   map[string]string{wiringapi.DefaultFabric: "ipns-2"},
+		},
+		{
+			name:       "default fabric without ipns gets none",
+			namespaces: []vpcapi.IPv4Namespace{ns("aaa", wiringapi.DefaultFabric), ns("other", "fabric-b")},
+			ipns:       "default",
+			expected:   map[string]string{"fabric-b": "other"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for shuffle := range 10 {
+				namespaces := slices.Clone(test.namespaces)
+				rand.New(rand.NewPCG(uint64(shuffle), 0)).Shuffle(len(namespaces), func(i, j int) { //nolint:gosec
+					namespaces[i], namespaces[j] = namespaces[j], namespaces[i]
+				})
+
+				picked := map[string]string{}
+				for fabric, ns := range pickFabricIPv4Namespaces(namespaces, test.ipns) {
+					picked[fabric] = ns.Name
+				}
+				require.Equal(t, test.expected, picked, "order %v", namespaces)
+			}
 		})
 	}
 }
