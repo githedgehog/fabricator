@@ -39,8 +39,10 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 const (
-	AnnotationSwitchRouteSumm       = "fabric.githedgehog.com/route-summ"
-	AnnotationSwitchSyslogDebug     = "fabric.githedgehog.com/syslog-debug"
+	AnnotationSwitchRouteSumm   = "fabric.githedgehog.com/route-summ"
+	AnnotationSwitchSyslogDebug = "fabric.githedgehog.com/syslog-debug"
+	AnnotationSwitchBCMMutate   = "fabric.alpha.githedgehog.com/bcm-mutate"
+
 	DefaultLinkFlapThreshold        = 3
 	DefaultLinkFlapSamplingInterval = 30
 	DefaultLinkFlapRecoveryInterval = 300
@@ -619,6 +621,11 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 		return nil, err
 	}
 
+	mutateRules, err := SwitchBCMMutateRules(sw.Annotations)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(sw.Spec.VLANNamespaces) == 0 {
 		return nil, errors.Errorf("at least one VLAN namespace required")
 	}
@@ -769,6 +776,11 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 			}
 
 			return nil, errors.Wrapf(err, "failed to get switch profile %s", sw.Spec.Profile) // TODO replace with some internal error to not expose to the user
+		}
+
+		if len(mutateRules) > 0 && !slices.Contains(meta.NOSTypesSONiCBCM, sp.Spec.NOSType) {
+			return nil, fmt.Errorf("annotation %s is only supported for Broadcom SONiC switches, profile %s has NOS type %s", //nolint:err113
+				AnnotationSwitchBCMMutate, sw.Spec.Profile, sp.Spec.NOSType)
 		}
 
 		for name, speed := range sw.Spec.PortGroupSpeeds {
