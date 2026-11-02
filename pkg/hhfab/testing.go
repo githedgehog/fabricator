@@ -205,6 +205,9 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 		slog.Info("Expected gateways", "dataplane", expectedDpV, "gateways", expectedGateways)
 	}
 
+	// when each agent was first seen with its latest generation applied, measured on our clock
+	appliedAfter := map[string]time.Duration{}
+
 	for idx := 0; ; idx++ {
 		swNotReady := []string{}
 		gwNotReady := []string{}
@@ -223,6 +226,10 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 				swNotReady = append(swNotReady, swName)
 
 				continue
+			}
+
+			if _, seen := appliedAfter[swName]; !seen && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation {
+				appliedAfter[swName] = time.Since(start)
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
@@ -268,6 +275,10 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 				continue
 			}
 
+			if _, seen := appliedAfter[gwName]; !seen && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation {
+				appliedAfter[gwName] = time.Since(start)
+			}
+
 			// should be empty for agentless
 			ready := gwag.Spec.AgentVersion == ""
 
@@ -300,7 +311,7 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 		}
 
 		if len(swNotReady) == 0 && len(swNotUpdated) == 0 && len(gwNotReady) == 0 && len(gwNotUpdated) == 0 {
-			slog.Info("All switches and gateways are ready", "took", time.Since(start))
+			slog.Info("All switches and gateways are ready", "took", time.Since(start), "appliedAfter", appliedAfter)
 
 			return nil
 		}
