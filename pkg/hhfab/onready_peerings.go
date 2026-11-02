@@ -219,19 +219,12 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		if peer, ok := externalsByName[peerName]; ok {
 			prefixes = namespaceSubnets(namespaces, peer)
 
-			if internet, pool := transitExternal(sortedExternals, peer); internet != nil && gatewayFabrics[fabricOrDefault(peer.Spec.Topology.Fabric)] {
-				exposes, err := buildExposes(namespaceSubnets(namespaces, ext), []string{pool}, nil, NATModeMasquerade, nil)
-				if err != nil {
-					slog.Warn("Skipping gateway transit peering", "external", ext.Name, "err", err)
-				} else {
-					prefixes = append(prefixes, AllZeroPrefix...)
-					gatewayPeerings[peer.Name+"--"+internet.Name] = &gwapi.PeeringSpec{
-						Peering: map[string]*gwapi.PeeringEntry{
-							gwapi.VPCInfoExtPrefix + peer.Name:     {Expose: exposes},
-							gwapi.VPCInfoExtPrefix + internet.Name: {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
-						},
-					}
-				}
+			transit, err := buildTransitPeering(sortedExternals, namespaces, ext, peer, gatewayFabrics)
+			if err != nil {
+				slog.Warn("Skipping gateway transit peering", "external", ext.Name, "err", err)
+			} else if transit != nil {
+				prefixes = append(prefixes, AllZeroPrefix...)
+				gatewayPeerings[transit.name] = transit.spec
 			}
 		}
 
@@ -268,6 +261,41 @@ func namespaceSubnets(namespaces []vpcapi.IPv4Namespace, ext *vpcapi.External) [
 	}
 
 	return subnets
+}
+
+// transitPeering is a gateway peering that joins an interconnect External to the External of its
+// Fabric that has internet access
+type transitPeering struct {
+	name     string
+	internet *vpcapi.External
+	spec     *gwapi.PeeringSpec
+}
+
+// buildTransitPeering is the gateway peering of the Fabric behind the interconnect External peer,
+// between peer and the External with a NAT pool in the same Fabric and domain, that lets the VPCs
+// peered with ext reach that External through the Gateway. It is nil when that Fabric has no
+// Gateway or no such External.
+func buildTransitPeering(externals []vpcapi.External, namespaces []vpcapi.IPv4Namespace, ext, peer *vpcapi.External, gatewayFabrics map[string]bool) (*transitPeering, error) {
+	internet, pool := transitExternal(externals, peer)
+	if internet == nil || !gatewayFabrics[fabricOrDefault(peer.Spec.Topology.Fabric)] {
+		return nil, nil //nolint:nilnil
+	}
+
+	exposes, err := buildExposes(namespaceSubnets(namespaces, ext), []string{pool}, nil, NATModeMasquerade, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building exposes: %w", err)
+	}
+
+	return &transitPeering{
+		name:     peer.Name + "--" + internet.Name,
+		internet: internet,
+		spec: &gwapi.PeeringSpec{
+			Peering: map[string]*gwapi.PeeringEntry{
+				gwapi.VPCInfoExtPrefix + peer.Name:     {Expose: exposes},
+				gwapi.VPCInfoExtPrefix + internet.Name: {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+			},
+		},
+	}, nil
 }
 
 // transitExternal is the first External of the interconnect External's Fabric and domain that

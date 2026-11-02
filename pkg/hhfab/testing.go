@@ -706,6 +706,40 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 	return topology, nil
 }
 
+// pickFabricIPv4Namespaces is the IPv4Namespace the VPCs of each Fabric get their subnets from:
+// in the default Fabric the one named ipns, if any, and in every other Fabric the one named ipns
+// if it has it, else the first by name
+func pickFabricIPv4Namespaces(namespaces []vpcapi.IPv4Namespace, ipns string) map[string]*vpcapi.IPv4Namespace {
+	byFabric := map[string][]*vpcapi.IPv4Namespace{}
+	for idx := range namespaces {
+		ns := &namespaces[idx]
+		byFabric[ns.Spec.Topology.Fabric] = append(byFabric[ns.Spec.Topology.Fabric], ns)
+	}
+
+	picked := map[string]*vpcapi.IPv4Namespace{}
+	for fabric, candidates := range byFabric {
+		slices.SortFunc(candidates, func(a, b *vpcapi.IPv4Namespace) int { return cmp.Compare(a.Name, b.Name) })
+		idx := slices.IndexFunc(candidates, func(ns *vpcapi.IPv4Namespace) bool { return ns.Name == ipns })
+		switch {
+		case idx >= 0:
+			picked[fabric] = candidates[idx]
+		case fabric == wiringapi.DefaultFabric:
+			continue
+		default:
+			picked[fabric] = candidates[0]
+		}
+		if fabric != wiringapi.DefaultFabric && len(candidates) > 1 {
+			names := make([]string, 0, len(candidates))
+			for _, ns := range candidates {
+				names = append(names, ns.Name)
+			}
+			slog.Info("Several IPv4 namespaces in Fabric, using one for its VPCs", "fabric", fabric, "picked", picked[fabric].Name, "namespaces", names)
+		}
+	}
+
+	return picked
+}
+
 // SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
 // and returns one Endpoint per (server, vpc, subnet) attachment with the
 // discovered IP and HostBGP flag populated.
@@ -917,25 +951,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
 	defer stopVLAN()
 
-	// --ipns is for the default fabric, every other fabric uses its only IPv4Namespace
 	ipNamespaces := &vpcapi.IPv4NamespaceList{}
 	if err := kube.List(ctx, ipNamespaces); err != nil {
 		return nil, nil, fmt.Errorf("listing IPv4 namespaces: %w", err)
 	}
-	fabricIPNS := map[string]*vpcapi.IPv4Namespace{}
-	for _, ns := range ipNamespaces.Items {
-		fabric := ns.Spec.Topology.Fabric
-		switch {
-		case fabric == wiringapi.DefaultFabric:
-			if ns.Name == opts.IPv4Namespace {
-				fabricIPNS[fabric] = &ns
-			}
-		case fabricIPNS[fabric] != nil:
-			return nil, nil, fmt.Errorf("fabric %s has more than one IPv4 namespace", fabric) //nolint:err113
-		default:
-			fabricIPNS[fabric] = &ns
-		}
-	}
+	fabricIPNS := pickFabricIPv4Namespaces(ipNamespaces.Items, opts.IPv4Namespace)
 	nextPrefixes := map[string]func() (netip.Prefix, bool){}
 	for fabric, ns := range fabricIPNS {
 		prefixes := []netip.Prefix{}
