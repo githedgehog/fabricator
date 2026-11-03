@@ -81,9 +81,27 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:err113
 	}
 
+	if opts.AutoUpgrade && opts.NodeReinstall {
+		return fmt.Errorf("--upgrade and --node-reinstall are mutually exclusive: upgrade covers hardware nodes too") //nolint:err113
+	}
+
 	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
+	}
+
+	if opts.NodeReinstall {
+		bmcNodes, err := c.bmcNodes()
+		if err != nil {
+			return err
+		}
+		if len(bmcNodes) == 0 {
+			slog.Warn("No hardware nodes with BMC to install", "annotation", HHFabCfgBMC)
+		}
+
+		if err := checkBMCNodes(ctx, bmcNodes, opts.BMC); err != nil {
+			return err
+		}
 	}
 
 	vlab, err := c.PrepareVLAB(ctx, opts)
@@ -110,9 +128,16 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return fmt.Errorf("controls restricted mode not supported for upstream registry") //nolint:err113
 	}
 
+	// hardware nodes are installed from the ISO, but upgraded using the installer archive same as VMs
+	hwMode := recipe.BuildModeISO
+	if opts.AutoUpgrade {
+		hwMode = recipe.BuildModeManual
+	}
+
 	if err := c.build(ctx, BuildOpts{
 		HydrateMode:          opts.HydrateMode,
 		BuildMode:            opts.BuildMode,
+		ModeOverrides:        c.hardwareModeOverrides(hwMode),
 		BuildControls:        true,
 		BuildGateways:        buildGateways,
 		ObservabilityTargets: opts.ObservabilityTargets,
@@ -295,4 +320,33 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 	}
 
 	return c.VLABSwitchReinstall(ctx, opts)
+}
+
+type NodePowerOpts struct {
+	Nodes  []string   // All hardware nodes with BMC if empty
+	Action pdu.Action // Power action (e.g., on, off, cycle), same as for switches
+	BMC    BMCOpts
+}
+
+func DoNodePower(ctx context.Context, workDir, cacheDir string, opts NodePowerOpts) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.VLABNodePower(ctx, opts)
+}
+
+type NodeReinstallOpts struct {
+	Nodes []string // All hardware nodes with BMC if empty
+	BMC   BMCOpts
+}
+
+func DoNodeReinstall(ctx context.Context, workDir, cacheDir string, opts NodeReinstallOpts) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.VLABNodeReinstall(ctx, vlab, opts)
 }

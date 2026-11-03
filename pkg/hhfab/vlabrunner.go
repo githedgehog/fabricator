@@ -79,6 +79,9 @@ const (
 
 	VLABEnvPDUUsername    = "HHFAB_VLAB_PDU_USERNAME"
 	VLABEnvPDUPassword    = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
+	VLABEnvBMCUsername    = "HHFAB_VLAB_BMC_USERNAME"
+	VLABEnvBMCPassword    = "HHFAB_VLAB_BMC_PASSWORD" //nolint:gosec
+	VLABEnvNodeReinstall  = "HHFAB_VLAB_NODE_REINSTALL"
 	VLABEnvSwitchUsername = "HHFAB_SWITCH_USERNAME"
 	VLABEnvSwitchPassword = "HHFAB_SWITCH_PASSWORD" //nolint:gosec
 	VLABEnvServerUsername = "HHFAB_SERVER_USERNAME"
@@ -116,6 +119,13 @@ type VLABRunOpts struct {
 	ReleaseTestOnReadyOnly   bool
 	InterfaceMTU             uint16
 	InspectPodsStrict        bool
+	NodeReinstall            bool
+	BMC                      BMCOpts
+}
+
+type BMCOpts struct {
+	Username string
+	Password string
 }
 
 type OnReady string
@@ -442,6 +452,22 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	bmcNodes, err := c.bmcNodes()
+	if err != nil {
+		return err
+	}
+
+	// up for the whole run, so BMC nodes can be reinstalled any time
+	var mediaCtx context.Context
+	if len(bmcNodes) > 0 {
+		var stop func()
+		mediaCtx, stop, err = c.serveNodeISOs(ctx, slices.Collect(maps.Keys(bmcNodes)))
+		if err != nil {
+			return err
+		}
+		defer stop()
+	}
+
 	group, ctx := errgroup.WithContext(ctx)
 	postProcesses := &sync.WaitGroup{}
 	postProcessDone := make(chan struct{})
@@ -587,12 +613,57 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	// all hardware nodes are upgraded same as VMs, but only the ones with BMC can be installed
+	hwNodeRuns := map[string]string{}
+	if opts.AutoUpgrade {
+		for _, node := range c.hardwareNodes() {
+			hwNodeRuns[node.Name] = bmcNodes[node.Name]
+		}
+	} else if opts.NodeReinstall {
+		hwNodeRuns = bmcNodes
+	}
+
+	for name, endpoint := range hwNodeRuns {
+		postProcesses.Add(1)
+		group.Go(func() error {
+			var err error
+			if opts.AutoUpgrade {
+				err = c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts)
+			} else {
+				err = c.hwNodeInstall(ctx, mediaCtx, vlab, d, name, endpoint, opts, false)
+			}
+			if err != nil {
+				if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+					return nil
+				}
+
+				slog.Warn("Failed to install or upgrade hardware node", "node", name, "err", err)
+
+				c.CollectVLABDebug(ctx, vlab, opts, true)
+
+				if opts.FailFast {
+					return fmt.Errorf("installing or upgrading hardware node %s: %w", name, err)
+				}
+			}
+
+			// no defer here, as we want to wait for all installers completion without errors
+			postProcesses.Done()
+
+			return nil
+		})
+	}
+
 	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	hwNodes := map[string]bool{}
+	manualNodes := map[string]bool{}
 	for _, node := range c.hardwareNodes() {
 		hwNodes[node.Name] = true
-		warnHardwareNodeInstall(node.Name, opts)
+		if _, ok := hwNodeRuns[node.Name]; !ok {
+			manualNodes[node.Name] = true
+			_, withBMC := bmcNodes[node.Name]
+			warnHardwareNodeInstall(node.Name, withBMC)
+		}
 	}
 
 	group.Go(func() error {
@@ -621,7 +692,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 		slog.Info("Waiting for all nodes to show up in K8s", "expected", lo.Keys(expected))
 
-		// hardware nodes are installed manually, so keep reminding about them as it may take a while
+		// hardware nodes installed manually may take a while, so keep reminding about them
 		const hwReminderInterval = 5 * time.Minute
 		waitStart := time.Now()
 		var lastHWReminder time.Time // zero to remind right away on the first wait
@@ -689,13 +760,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				slog.Debug("Some K8s nodes are not ready", "ready", ready, "missing", missing, "notReady", notReady)
 
 				if time.Since(lastHWReminder) >= hwReminderInterval {
-					pending := lo.Filter(append(missing, notReady...), func(name string, _ int) bool { return hwNodes[name] })
+					pending := lo.Filter(append(missing, notReady...), func(name string, _ int) bool { return manualNodes[name] })
 					if len(pending) > 0 {
 						lastHWReminder = time.Now()
 						slices.Sort(pending)
 						slog.Warn("Waiting for hardware nodes to be installed and ready in K8s", "nodes", pending, "waiting", time.Since(waitStart).Round(time.Second))
 						for _, name := range pending {
-							warnHardwareNodeInstall(name, opts)
+							_, withBMC := bmcNodes[name]
+							warnHardwareNodeInstall(name, withBMC)
 						}
 					}
 				}
@@ -926,6 +998,17 @@ func execCmd(ctx context.Context, sudo bool, baseDir, name string, args []string
 }
 
 func execHelper(ctx context.Context, baseDir string, args []string) error {
+	return runHelper(ctx, baseDir, args, os.Stdout, os.Stderr)
+}
+
+// execLongHelper pipes the output, as sudo's use_pty (default since 1.9.14) puts the terminal into raw mode, breaking
+// the other output
+func execLongHelper(ctx context.Context, baseDir string, args []string) error {
+	// exec copies through a pipe for anything but *os.File
+	return runHelper(ctx, baseDir, args, struct{ io.Writer }{os.Stdout}, struct{ io.Writer }{os.Stderr})
+}
+
+func runHelper(ctx context.Context, baseDir string, args []string, stdout, stderr io.Writer) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("getting executable path: %w", err)
@@ -936,8 +1019,13 @@ func execHelper(ctx context.Context, baseDir string, args []string) error {
 	cmd := exec.CommandContext(ctx, VLABCmdSudo, args...)
 	cmd.Dir = baseDir
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	// sudo relays SIGTERM to the helper, SIGKILL leaves it running
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running helper %v: %w", args[1:], err)
@@ -1012,12 +1100,15 @@ func orasUploadAndInstall(ctx context.Context, d *artificer.Downloader, ssh *ssh
 	return nil
 }
 
-func warnHardwareNodeInstall(name string, opts VLABRunOpts) {
-	done := "installed"
-	if opts.AutoUpgrade {
-		done = "upgraded"
+func warnHardwareNodeInstall(name string, withBMC bool) {
+	if withBMC {
+		slog.Warn("Hardware node has to be installed, it can be done over BMC from another terminal", "node", name,
+			"cmd", "hhfab vlab node reinstall -n "+name)
+
+		return
 	}
-	slog.Warn("Hardware node has to be "+done+" manually using the installer from the result dir", "node", name, "dir", ResultDir)
+
+	slog.Warn("Hardware node has to be installed manually using the installer from the result dir", "node", name, "dir", ResultDir)
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
@@ -1240,6 +1331,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 			installed := false
 			reconnects := 0
+			polls := 0
+			failedChecks := 0
 			for !installed {
 				select {
 				case <-ctx.Done():
@@ -1270,6 +1363,21 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
+							// stop if the installer failed: it's restarted on failure, so two failed checks in a row;
+							// every 6th poll (30s) to limit SSH sessions through the control node
+							polls++
+							if polls%6 != 0 {
+								continue
+							}
+							if _, _, err := ssh.Run(ctx, "systemctl is-failed --quiet hhfab-install.service"); err == nil {
+								failedChecks++
+							} else {
+								failedChecks = 0
+							}
+							if failedChecks >= 2 {
+								return fmt.Errorf("node installer service failed") //nolint:err113
+							}
+
 							continue
 						}
 
