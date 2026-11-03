@@ -529,17 +529,19 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		return status, fmt.Errorf("listing connections: %w", err)
 	}
 
-	// an empty fabric or mesh link IP is only missing if its fabric is numbered, but one that is set counts as
-	// hydrated either way, so that if-not-present doesn't wipe it out
-	countLinkIPs := func(numbered bool, ips ...string) {
-		for _, ip := range ips {
-			switch {
-			case ip != "":
-				total++
-			case numbered:
-				total++
-				missing++
-			}
+	// an unnumbered fabric or mesh link without IPs has nothing to hydrate, any other link needs both of them, so
+	// that if-not-present doesn't wipe out IPs set on an unnumbered link and a link with just one IP isn't hydrated
+	countLinkIPs := func(numbered bool, ip1, ip2 string) {
+		if !numbered && ip1 == "" && ip2 == "" {
+			return
+		}
+
+		total += 2
+		if ip1 == "" {
+			missing++
+		}
+		if ip2 == "" {
+			missing++
 		}
 	}
 
@@ -945,6 +947,18 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		return err
 	}
 
+	// gateway BGP neighbors are all hydrated from the gateway links, so drop the ones left from a previous hydration
+	gwsToReset := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gwsToReset); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+	for _, gw := range gwsToReset.Items {
+		gw.Spec.Neighbors = nil
+		if err := kube.Update(ctx, &gw); err != nil {
+			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
+		}
+	}
+
 	for _, conn := range conns.Items {
 		connNumbered := numbered[conn.Spec.Topology.Fabric]
 
@@ -1029,15 +1043,11 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					return fmt.Errorf("switch %s not found or ASN not set", link.Switch.DeviceName()) //nolint:err113
 				}
 
-				// replace rather than append, so that re-hydrating doesn't leave behind the neighbors of the old IPs
-				neighbor := gwapi.GatewayBGPNeighbor{
+				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
 					Source: link.Gateway.LocalPortName(),
 					IP:     switchIP.Addr().String(),
 					ASN:    asn,
-				}
-				gw.Spec.Neighbors = append(slices.DeleteFunc(gw.Spec.Neighbors, func(n gwapi.GatewayBGPNeighbor) bool {
-					return n.Source == neighbor.Source
-				}), neighbor)
+				})
 
 				if err := kube.Update(ctx, gw); err != nil {
 					return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
