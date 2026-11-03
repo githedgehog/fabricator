@@ -282,7 +282,7 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway == 'dpdk' && 'gwd-' || matrix.gateway == 'kernel' && 'gwk-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode || 'iso' }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.numbered && 'num-' || '' }}${{ matrix.gateway == 'dpdk' && 'gwd-' || matrix.gateway == 'kernel' && 'gwk-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode || 'iso' }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
@@ -303,6 +303,7 @@ jobs:
       fabricatorref: ${{ github.ref }}
       fabricmode: spine-leaf
       mesh: ${{ !!matrix.mesh }}
+      numbered: ${{ !!matrix.numbered }}
       gateway: ${{ !!matrix.gateway }}
       gatewaydriver: ${{ matrix.gateway }}
       includeonie: ${{ !!matrix.includeonie }}
@@ -322,6 +323,9 @@ jobs:
           - { vpcmode: l2vni, mesh: true, gateway: dpdk }
           # TODO: consider enabling it again after removing limitation on ESLAG conns
           # - { vpcmode: l3vni, mesh: true, gateway: dpdk }
+
+          # fabric links are BGP unnumbered by default, keep the numbered ones covered
+          - { vpcmode: l2vni, numbered: true, gateway: kernel }
 
           # other build modes
           - { vpcmode: l2vni,                buildmode: manual }
