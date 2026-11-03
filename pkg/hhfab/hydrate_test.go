@@ -314,6 +314,23 @@ spec:
     enp2s1: {}
 `
 
+// fabric connection of the unnumbered default fabric and IPs to set on its link by hand
+const (
+	hydrateTestUnnumberedConn = "spine-01--fabric--leaf-01"
+	hydrateTestSpineIP        = "172.30.129.0/31"
+	hydrateTestLeafIP         = "172.30.129.1/31"
+)
+
+func hydrateTestSetUnnumberedLinkIPs(t *testing.T, kube kclient.Client, spineIP, leafIP string) {
+	t.Helper()
+
+	conn := &wiringapi.Connection{}
+	require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Namespace: "default", Name: hydrateTestUnnumberedConn}, conn))
+	conn.Spec.Fabric.Links[0].Spine.IP = spineIP
+	conn.Spec.Fabric.Links[0].Leaf.IP = leafIP
+	require.NoError(t, kube.Update(t.Context(), conn))
+}
+
 // hydrateTestLinkIPs returns the IPs of the first link of each fabric, mesh and gateway connection by its name
 func hydrateTestLinkIPs(t *testing.T, kube kclient.Reader) map[string][]string {
 	t.Helper()
@@ -370,21 +387,47 @@ func TestHydrateNumberedLinks(t *testing.T) {
 	require.Equal(t, []string{"172.30.128.3/31"}, gw.Spec.Interfaces["enp2s1"].IPs)
 
 	// IPs on an unnumbered link are not something to hydrate, so they are kept unless overridden
-	conn := &wiringapi.Connection{}
-	require.NoError(t, kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "spine-01--fabric--leaf-01"}, conn))
-	conn.Spec.Fabric.Links[0].Spine.IP = "172.30.129.0/31"
-	conn.Spec.Fabric.Links[0].Leaf.IP = "172.30.129.1/31"
-	require.NoError(t, kube.Update(ctx, conn))
+	hydrateTestSetUnnumberedLinkIPs(t, kube, hydrateTestSpineIP, hydrateTestLeafIP)
 
 	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeIfNotPresent))
-	require.Equal(t, []string{"172.30.129.0/31", "172.30.129.1/31"}, hydrateTestLinkIPs(t, kube)["spine-01--fabric--leaf-01"])
+	require.Equal(t, []string{hydrateTestSpineIP, hydrateTestLeafIP}, hydrateTestLinkIPs(t, kube)[hydrateTestUnnumberedConn])
+
+	// a neighbor left from a gateway link that has since moved to another port
+	require.NoError(t, kube.Get(ctx, gwKey, gw))
+	gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{Source: "enp2s2", IP: "172.30.128.10", ASN: 65100})
+	require.NoError(t, kube.Update(ctx, gw))
 
 	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeOverride))
 	require.Equal(t, hydrated, hydrateTestLinkIPs(t, kube))
 
-	// re-hydrating replaces the gateway neighbors instead of appending to them
+	// re-hydrating rebuilds the gateway neighbors from the gateway links instead of appending to them
 	require.NoError(t, kube.Get(ctx, gwKey, gw))
 	require.Equal(t, gwNeighbors, gw.Spec.Neighbors)
+}
+
+func TestHydrateUnnumberedLinksOneSided(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	l := apiutil.NewLoader()
+	require.NoError(t, l.LoadAddWiring(ctx, []byte(hydrateTestLinksWiring)))
+	kube := l.GetClient()
+
+	c := &Config{Fab: fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}}
+	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeIfNotPresent))
+
+	// a link with an IP on just one side is broken, so even in an unnumbered fabric it isn't hydrated
+	hydrateTestSetUnnumberedLinkIPs(t, kube, hydrateTestSpineIP, "")
+
+	status, err := c.getHydration(ctx, kube)
+	require.NoError(t, err)
+	require.Equal(t, HydrationStatusPartial, status)
+
+	require.ErrorContains(t, c.ensureHydrated(ctx, kube, HydrateModeNever), "not fully hydrated")
+	require.ErrorContains(t, c.ensureHydrated(ctx, kube, HydrateModeIfNotPresent), "partially hydrated")
+
+	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeOverride))
+	require.Equal(t, []string{"", ""}, hydrateTestLinkIPs(t, kube)[hydrateTestUnnumberedConn])
 }
 
 func TestHydrateUnnumberedLinksPartial(t *testing.T) {
@@ -396,11 +439,7 @@ func TestHydrateUnnumberedLinksPartial(t *testing.T) {
 	kube := l.GetClient()
 
 	// IPs on an unnumbered link of an otherwise empty wiring are something already there, not nothing
-	conn := &wiringapi.Connection{}
-	require.NoError(t, kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "spine-01--fabric--leaf-01"}, conn))
-	conn.Spec.Fabric.Links[0].Spine.IP = "172.30.129.0/31"
-	conn.Spec.Fabric.Links[0].Leaf.IP = "172.30.129.1/31"
-	require.NoError(t, kube.Update(ctx, conn))
+	hydrateTestSetUnnumberedLinkIPs(t, kube, hydrateTestSpineIP, hydrateTestLeafIP)
 
 	c := &Config{Fab: fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}}
 
@@ -411,7 +450,7 @@ func TestHydrateUnnumberedLinksPartial(t *testing.T) {
 	require.ErrorContains(t, c.ensureHydrated(ctx, kube, HydrateModeIfNotPresent), "partially hydrated")
 
 	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeOverride))
-	require.Equal(t, []string{"", ""}, hydrateTestLinkIPs(t, kube)["spine-01--fabric--leaf-01"])
+	require.Equal(t, []string{"", ""}, hydrateTestLinkIPs(t, kube)[hydrateTestUnnumberedConn])
 }
 
 func TestHydrateNumberedLinksInvalid(t *testing.T) {
