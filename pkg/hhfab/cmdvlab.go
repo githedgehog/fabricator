@@ -91,6 +91,10 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return fmt.Errorf("preparing VLAB: %w", err)
 	}
 
+	if err := c.setVLABHugePages(ctx, vlab); err != nil {
+		return fmt.Errorf("setting VLAB hugepages: %w", err)
+	}
+
 	buildGateways := len(c.hardwareNodes()) > 0
 	for _, vm := range vlab.VMs {
 		if vm.Type == VMTypeGateway {

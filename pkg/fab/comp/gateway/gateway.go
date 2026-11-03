@@ -19,10 +19,6 @@ const (
 	DataplaneValidatorRef = "dataplane/validator"
 	DataplaneMetricsPort  = 9442
 	FRRMetricsPort        = 9342
-
-	// Hugepages reserved on the gateway nodes and requested by the dataplane, it currently only uses 1G pages
-	HugePages1G = 4
-	HugePages2M = 0
 )
 
 // KernelArgKeys are the kernel args fully managed on the gateway nodes, any of them not in KernelArgs is dropped
@@ -30,13 +26,13 @@ var KernelArgKeys = []string{"iommu", "intel_iommu", "amd_iommu", "hugepagesz", 
 
 // KernelArgs are set by ignition on install and by the installer on upgrade, ignition skips args that are already
 // there, so they must be unique to keep the hugepages sizes and counts paired
-func KernelArgs() []string {
+func KernelArgs(pages1G, pages2M int) []string {
 	args := []string{"iommu=pt", "intel_iommu=on"}
-	if HugePages1G > 0 {
-		args = append(args, "hugepagesz=1G", fmt.Sprintf("hugepages=%d", HugePages1G))
+	if pages1G > 0 {
+		args = append(args, "hugepagesz=1G", fmt.Sprintf("hugepages=%d", pages1G))
 	}
-	if HugePages2M > 0 {
-		args = append(args, "hugepagesz=2M", fmt.Sprintf("hugepages=%d", HugePages2M))
+	if pages2M > 0 {
+		args = append(args, "hugepagesz=2M", fmt.Sprintf("hugepages=%d", pages2M))
 	}
 
 	return args
