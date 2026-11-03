@@ -229,7 +229,7 @@ func TestSetVLABHugePagesOnce(t *testing.T) {
 	gwRoles := []fabapi.FabNodeRole{fabapi.NodeRoleGateway}
 	hw := map[string]string{vlabcomp.NodeTypeAnnotation: vlabcomp.NodeTypeHW}
 	hp := func(val string) map[string]string {
-		return map[string]string{fabapi.AnnotationHugePages1G: val}
+		return map[string]string{gwapi.AnnotationHugePages1G: val}
 	}
 
 	scheme := runtime.NewScheme()
@@ -254,10 +254,10 @@ func TestSetVLABHugePagesOnce(t *testing.T) {
 	for name, want := range map[string]string{"gateway-1": "4", "gateway-2": "", "gateway-3": "8", "gateway-4": "6", "gateway-5": "2"} {
 		node := &fabapi.FabNode{}
 		require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Namespace: comp.FabNamespace, Name: name}, node))
-		require.Equal(t, want, node.Annotations[fabapi.AnnotationHugePages1G], "node %s", name)
+		require.Equal(t, want, node.Annotations[gwapi.AnnotationHugePages1G], "node %s", name)
 
 		gw := &gwapi.Gateway{}
 		require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: name}, gw))
-		require.Equal(t, want, gw.Annotations[fabapi.AnnotationHugePages1G], "gateway %s", name)
+		require.Equal(t, want, gw.Annotations[gwapi.AnnotationHugePages1G], "gateway %s", name)
 	}
 }

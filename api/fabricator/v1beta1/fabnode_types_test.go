@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 )
 
 func TestFabNodeHugePages(t *testing.T) {
@@ -24,38 +25,38 @@ func TestFabNodeHugePages(t *testing.T) {
 		},
 		{
 			name:    "both",
-			anns:    map[string]string{AnnotationHugePages1G: "4", AnnotationHugePages2M: "512"},
+			anns:    map[string]string{gwapi.AnnotationHugePages1G: "4", gwapi.AnnotationHugePages2M: "512"},
 			pages1G: 4,
 			pages2M: 512,
 		},
 		{
 			name:    "only-2m",
-			anns:    map[string]string{AnnotationHugePages1G: "0", AnnotationHugePages2M: "1024"},
+			anns:    map[string]string{gwapi.AnnotationHugePages1G: "0", gwapi.AnnotationHugePages2M: "1024"},
 			pages2M: 1024,
 		},
 		{
 			name: "negative",
-			anns: map[string]string{AnnotationHugePages1G: "-1"},
+			anns: map[string]string{gwapi.AnnotationHugePages1G: "-1"},
 			err:  true,
 		},
 		{
 			name: "not-a-number",
-			anns: map[string]string{AnnotationHugePages2M: "1Gi"},
+			anns: map[string]string{gwapi.AnnotationHugePages2M: "1Gi"},
 			err:  true,
 		},
 		{
 			name: "too-many",
-			anns: map[string]string{AnnotationHugePages1G: "1025"},
+			anns: map[string]string{gwapi.AnnotationHugePages1G: "1025"},
 			err:  true,
 		},
 		{
 			name: "same-count",
-			anns: map[string]string{AnnotationHugePages1G: "4", AnnotationHugePages2M: "4"},
+			anns: map[string]string{gwapi.AnnotationHugePages1G: "4", gwapi.AnnotationHugePages2M: "4"},
 			err:  true,
 		},
 		{
 			name:    "same-count-none",
-			anns:    map[string]string{AnnotationHugePages1G: "0", AnnotationHugePages2M: "0"},
+			anns:    map[string]string{gwapi.AnnotationHugePages1G: "0", gwapi.AnnotationHugePages2M: "0"},
 			pages1G: 0,
 			pages2M: 0,
 		},

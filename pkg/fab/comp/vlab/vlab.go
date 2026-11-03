@@ -74,12 +74,12 @@ func IsGatewayVM(node fabapi.FabNode) bool {
 // the 1G ones. Returns whether the FabNode and the Gateway are changed.
 func SetGatewayHugePages(node *fabapi.FabNode, gw *gwapi.Gateway) (bool, bool) {
 	nodeChanged, gwChanged := false, false
-	for _, key := range []string{fabapi.AnnotationHugePages1G, fabapi.AnnotationHugePages2M} {
+	for _, key := range []string{gwapi.AnnotationHugePages1G, gwapi.AnnotationHugePages2M} {
 		val, ok := node.Annotations[key]
 		if !ok && gw != nil {
 			val, ok = gw.Annotations[key]
 		}
-		if !ok && key == fabapi.AnnotationHugePages1G {
+		if !ok && key == gwapi.AnnotationHugePages1G {
 			val, ok = strconv.Itoa(GatewayHugePages1G), true
 		}
 		if !ok {

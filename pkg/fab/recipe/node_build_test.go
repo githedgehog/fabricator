@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
@@ -26,7 +27,7 @@ func TestNodeIgnitionKernelArgs(t *testing.T) {
 		{
 			name:  "gateway-annotated",
 			roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
-			anns:  map[string]string{fabapi.AnnotationHugePages1G: "4"},
+			anns:  map[string]string{gwapi.AnnotationHugePages1G: "4"},
 			want:  []string{"iommu=pt", "intel_iommu=on", "hugepagesz=1G", "hugepages=4"},
 		},
 		{

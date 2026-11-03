@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	fmeta "go.githedgehog.com/fabric/api/meta"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,21 +38,12 @@ var NodeRoles = []FabNodeRole{
 	NodeRoleGateway,
 }
 
+// DefaultHugePages1G and DefaultHugePages2M are the hugepages reserved on the gateway node unless overridden by the
+// gwapi.AnnotationHugePages1G/2M annotations, the same annotations on its Gateway make the fabric controller request
+// them for the dataplane, so they must match. The dataplane currently only uses 1G pages.
 const (
-	// AnnotationHugePages1G and AnnotationHugePages2M override the hugepages reserved on the gateway node, the same
-	// annotations on its Gateway make the fabric controller request them for the dataplane, so they must match
-	//
-	// TODO use gwapi.AnnotationHugePages1G/2M and meta.MaxGatewayHugePages1G/2M from fabric once it's bumped
-	AnnotationHugePages1G = "gateway.githedgehog.com/hugepages-1g"
-	AnnotationHugePages2M = "gateway.githedgehog.com/hugepages-2m"
-
-	// DefaultHugePages1G and DefaultHugePages2M are used if the annotations aren't set, the dataplane currently only
-	// uses 1G pages
 	DefaultHugePages1G = 16
 	DefaultHugePages2M = 0
-
-	maxHugePages1G = 1 << 10
-	maxHugePages2M = 1 << 19
 )
 
 // FabNodeStatus defines the observed state of Node.
@@ -208,12 +201,12 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 
 // HugePages returns the 1G and 2M hugepages reserved on the gateway node, from the annotations or the defaults
 func (n *FabNode) HugePages() (int, int, error) {
-	pages1G, err := hugePages(n.Annotations, AnnotationHugePages1G, DefaultHugePages1G, maxHugePages1G)
+	pages1G, err := hugePages(n.Annotations, gwapi.AnnotationHugePages1G, DefaultHugePages1G, fmeta.MaxGatewayHugePages1G)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	pages2M, err := hugePages(n.Annotations, AnnotationHugePages2M, DefaultHugePages2M, maxHugePages2M)
+	pages2M, err := hugePages(n.Annotations, gwapi.AnnotationHugePages2M, DefaultHugePages2M, fmeta.MaxGatewayHugePages2M)
 	if err != nil {
 		return 0, 0, err
 	}
