@@ -44,9 +44,6 @@ func TestTopologyBGPState(t *testing.T) {
 	}
 	fabricator.Default()
 
-	meta := func(name string) kmetav1.ObjectMeta {
-		return kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}
-	}
 	port := func(p, ip string) wiringapi.ConnFabricLinkSwitch {
 		return wiringapi.ConnFabricLinkSwitch{
 			Port: p,
@@ -84,8 +81,9 @@ func TestTopologyBGPState(t *testing.T) {
 		}
 
 		return &agentapi.Agent{
-			ObjectMeta: meta(name),
-			Spec:       agentapi.AgentSpec{SwitchProfile: &profile},
+			Name:      name,
+			Namespace: kmetav1.NamespaceDefault,
+			Spec:      agentapi.AgentSpec{SwitchProfile: &profile},
 			Status: agentapi.AgentStatus{State: agentapi.SwitchState{
 				BGPNeighbors: map[string]map[string]agentapi.SwitchStateBGPNeighbor{"default": state},
 			}},
@@ -93,7 +91,8 @@ func TestTopologyBGPState(t *testing.T) {
 	}
 
 	conn := &wiringapi.Connection{
-		ObjectMeta: meta("spine-1--fabric--leaf-1"),
+		Name:      "spine-1--fabric--leaf-1",
+		Namespace: kmetav1.NamespaceDefault,
 		Spec: wiringapi.ConnectionSpec{Fabric: &wiringapi.ConnFabric{Links: []wiringapi.FabricLink{
 			{Spine: port("spine-1/E1/1", "172.30.128.0/31"), Leaf: port("leaf-1/E1/1", "172.30.128.1/31")},
 			{Spine: port("spine-1/E1/2", ""), Leaf: port("leaf-1/E1/2", "")},
@@ -105,11 +104,11 @@ func TestTopologyBGPState(t *testing.T) {
 
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		fabricator,
-		&wiringapi.SwitchProfile{ObjectMeta: meta("test-profile"), Spec: profile},
-		&wiringapi.Switch{ObjectMeta: meta("spine-1"), Spec: wiringapi.SwitchSpec{
+		&wiringapi.SwitchProfile{Name: "test-profile", Namespace: kmetav1.NamespaceDefault, Spec: profile},
+		&wiringapi.Switch{Name: "spine-1", Namespace: kmetav1.NamespaceDefault, Spec: wiringapi.SwitchSpec{
 			Role: wiringapi.SwitchRoleSpine, Profile: "test-profile", ProtocolIP: "172.30.8.0/32",
 		}},
-		&wiringapi.Switch{ObjectMeta: meta("leaf-1"), Spec: wiringapi.SwitchSpec{
+		&wiringapi.Switch{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault, Spec: wiringapi.SwitchSpec{
 			Role: wiringapi.SwitchRoleServerLeaf, Profile: "test-profile", ProtocolIP: "172.30.8.1/32",
 		}},
 		conn,
