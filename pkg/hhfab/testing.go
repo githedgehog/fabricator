@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net/netip"
 	"os"
@@ -107,6 +108,67 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	}
 
 	return nil
+}
+
+// agentGenerations returns the current generation of every switch and gateway agent.
+func agentGenerations(ctx context.Context, kube kclient.Reader) (map[string]int64, error) {
+	gens := map[string]int64{}
+
+	agents := &agentapi.AgentList{}
+	if err := kube.List(ctx, agents); err != nil {
+		return nil, fmt.Errorf("listing agents: %w", err)
+	}
+	for _, ag := range agents.Items {
+		gens["switch/"+ag.Name] = ag.Generation
+	}
+
+	gwAgents := &gwintapi.GatewayAgentList{}
+	if err := kube.List(ctx, gwAgents); err != nil && !kmeta.IsNoMatchError(err) {
+		return nil, fmt.Errorf("listing gateway agents: %w", err)
+	}
+	for _, gwag := range gwAgents.Items {
+		gens["gateway/"+gwag.Name] = gwag.Generation
+	}
+
+	return gens, nil
+}
+
+// waitAgentGenerationsSettled waits until the controllers have propagated a change to the agents, so that WaitReady
+// does not return on generations that are about to be bumped. It returns once at least one agent generation differs
+// from before and none changed for quiet, or after maxWait if nothing changed (the change did not touch any agent).
+func waitAgentGenerationsSettled(ctx context.Context, kube kclient.Reader, before map[string]int64, quiet, maxWait time.Duration) error {
+	start := time.Now()
+	lastChange := time.Time{}
+	prev := before
+
+	for {
+		curr, err := agentGenerations(ctx, kube)
+		if err != nil {
+			return err
+		}
+
+		if !maps.Equal(curr, prev) {
+			lastChange = time.Now()
+			prev = curr
+		}
+
+		if !lastChange.IsZero() && time.Since(lastChange) >= quiet {
+			slog.Info("Agents picked up the change", "after", time.Since(start))
+
+			return nil
+		}
+		if time.Since(start) >= maxWait {
+			slog.Info("No agent picked up the change", "after", time.Since(start))
+
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for agent generations: %w", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 type WaitReadyOpts struct {
@@ -1279,6 +1341,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 
+	// generations right before creating VPCs and attachments, to see when agents pick the changes up
+	genBefore, err := agentGenerations(ctx, kube)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	for _, vpc := range vpcs {
 		iterChanged, err := CreateOrUpdateVpc(ctx, kube, vpc)
 		if err != nil {
@@ -1311,11 +1379,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if changed && opts.WaitSwitchesReady {
-		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
-		select {
-		case <-ctx.Done():
-			return nil, nil, fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
-		case <-time.After(15 * time.Second):
+		if err := waitAgentGenerationsSettled(ctx, kube, genBefore, 5*time.Second, 15*time.Second); err != nil {
+			return nil, nil, err
 		}
 
 		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
@@ -2283,6 +2348,11 @@ func DoSetupPeerings(ctx context.Context, kube kclient.Client, vpcPeerings map[s
 		return fmt.Errorf("gateway peerings are not supported when gateway is not enabled") //nolint:err113
 	}
 
+	genBefore, err := agentGenerations(ctx, kube)
+	if err != nil {
+		return err
+	}
+
 	var changed bool
 
 	vpcPeeringList := &vpcapi.VPCPeeringList{}
@@ -2446,11 +2516,8 @@ func DoSetupPeerings(ctx context.Context, kube kclient.Client, vpcPeerings map[s
 	}
 
 	if changed && waitReady {
-		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
-		case <-time.After(15 * time.Second):
+		if err := waitAgentGenerationsSettled(ctx, kube, genBefore, 5*time.Second, 15*time.Second); err != nil {
+			return err
 		}
 
 		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {

@@ -585,38 +585,32 @@ func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool)
 	}
 	slog.Debug("Waiting for switch to reboot after changing desired RoCE state", "switch", swName, "desiredState", roce)
 
-	// only measure how long the reboot really takes, the sleep below stays as is
-	measureCtx, stopMeasure := context.WithCancel(ctx)
-	defer stopMeasure()
-	go func() {
-		start := time.Now()
-		var wentDown time.Duration
-		for {
-			select {
-			case <-measureCtx.Done():
-				return
-			case <-time.After(5 * time.Second):
-			}
-
-			ag := &agentapi.Agent{}
-			if err := kube.Get(measureCtx, kclient.ObjectKey{Namespace: "default", Name: swName}, ag); err != nil {
-				continue
-			}
-
-			alive := time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
-			if wentDown == 0 && !alive {
-				wentDown = time.Since(start)
-				slog.Info("RoCE reboot: switch heartbeat lost", "switch", swName, "after", wentDown)
-			}
-			if wentDown > 0 && alive && ag.Generation > currGen && ag.Status.LastAppliedGen == ag.Generation {
-				slog.Info("RoCE reboot: switch back and applied", "switch", swName, "after", time.Since(start))
-
-				return
-			}
+	// wait for the switch to go down, come back and apply the changes, giving up on seeing it after the old fixed 6 minutes
+	start := time.Now()
+	wentDown := false
+	for time.Since(start) < 6*time.Minute {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for switch to reboot: %w", ctx.Err())
+		case <-time.After(5 * time.Second):
 		}
-	}()
 
-	time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
+		ag := &agentapi.Agent{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, ag); err != nil {
+			continue
+		}
+
+		alive := time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
+		if !wentDown && !alive {
+			wentDown = true
+			slog.Info("RoCE reboot: switch heartbeat lost", "switch", swName, "after", time.Since(start))
+		}
+		if wentDown && alive && ag.Generation > currGen && ag.Status.LastAppliedGen == ag.Generation {
+			slog.Info("RoCE reboot: switch back and applied", "switch", swName, "after", time.Since(start))
+
+			break
+		}
+	}
 	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
 		return fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
 	}
