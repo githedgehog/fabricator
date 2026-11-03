@@ -4,6 +4,9 @@
 package diagram
 
 import (
+	"encoding/xml"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -218,4 +221,77 @@ func TestDrawioLogoClearOfDomainAndFabricBoxes(t *testing.T) {
 	}
 
 	requireClearOfBoxes(t, testCells(t, Topology{Nodes: nodes, Links: links}))
+}
+
+func TestDrawioUnderlayLabels(t *testing.T) {
+	underlay := func(topo Topology) map[string]string {
+		t.Helper()
+
+		out := filepath.Join(t.TempDir(), "diagram.drawio")
+		require.NoError(t, GenerateDrawio("", topo, StyleTypeDefault, out))
+		data, err := os.ReadFile(out)
+		require.NoError(t, err)
+		model := &MxGraphModel{}
+		require.NoError(t, xml.Unmarshal(data, model))
+
+		labels := map[string]string{}
+		for _, cell := range model.Root.MxCell {
+			if cell.Parent == "underlay_layer" && strings.HasSuffix(cell.ID, "_p2p") {
+				labels[cell.Value] = cell.Style
+			}
+		}
+
+		return labels
+	}
+
+	unnumbered := testLink("spine-1", "leaf-1", EdgeTypeFabric)
+	unnumbered.Properties[PropUnnumbered] = "true"
+	unnumbered.Properties[PropBGPState] = "idle"
+	topo := Topology{
+		Nodes: []Node{
+			testNode("spine-1", NodeTypeSwitch, "", SwitchRoleSpine),
+			testNode("leaf-1", NodeTypeSwitch, "", testLeafRole),
+			testNode("leaf-2", NodeTypeSwitch, "", testLeafRole),
+		},
+		Links: []Link{unnumbered},
+	}
+
+	// unnumbered links alone are enough to draw the layer
+	labels := underlay(topo)
+	require.Len(t, labels, 1)
+	idleStroke, _ := bgpStateColors("idle")
+	require.Contains(t, labels["unnumbered"], "strokeColor="+idleStroke)
+
+	numbered := testLink("spine-1", "leaf-2", EdgeTypeFabric)
+	numbered.Properties[PropSrcLinkIP] = "100.64.0.2/30"
+	numbered.Properties[PropDstLinkIP] = "100.64.0.1/30"
+	topo.Links = append(topo.Links, numbered)
+	labels = underlay(topo)
+	require.Contains(t, labels, "unnumbered")
+	require.Contains(t, labels, "100.64.0.0/30")
+}
+
+func TestDrawioExternalOnSeveralInterconnects(t *testing.T) {
+	topo := Topology{
+		Nodes: []Node{
+			testNode("leaf-a", NodeTypeSwitch, "fabric-a", testLeafRole),
+			testNode("leaf-b", NodeTypeSwitch, "fabric-b", testLeafRole),
+			testNode("ext-a", NodeTypeExternal, "fabric-a", ""),
+			testNode("ext-b1", NodeTypeExternal, "fabric-b", ""),
+			testNode("ext-b2", NodeTypeExternal, "fabric-b", ""),
+		},
+		Links: []Link{
+			testLink("leaf-a", "ext-a", EdgeTypeExternal),
+			testLink("leaf-b", "ext-b1", EdgeTypeExternal),
+			testLink("leaf-b", "ext-b2", EdgeTypeExternal),
+			testLink("ext-a", "ext-b1", EdgeTypeInterconnect),
+			testLink("ext-a", "ext-b2", EdgeTypeInterconnect),
+		},
+	}
+
+	ids := map[string]bool{}
+	for _, cell := range createDrawioModel(topo, GetStyle(StyleTypeDefault)).Root.MxCell {
+		require.False(t, ids[cell.ID], "duplicate cell %s", cell.ID)
+		ids[cell.ID] = true
+	}
 }
