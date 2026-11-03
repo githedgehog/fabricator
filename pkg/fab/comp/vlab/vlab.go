@@ -5,10 +5,14 @@ package vlab
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -19,6 +23,9 @@ const (
 	// NodeTypeAnnotation set to NodeTypeHW marks the VLAB nodes that are hardware instead of VMs
 	NodeTypeAnnotation = "type.hhfab.githedgehog.com"
 	NodeTypeHW         = "hw"
+
+	// GatewayHugePages1G is the 1G hugepages of the gateway VMs, set on their FabNodes and Gateways unless already there
+	GatewayHugePages1G = 4
 )
 
 const (
@@ -55,6 +62,55 @@ func GatewayKernel(nicID uint8) string {
 	}
 
 	return RootPortKernel(nicID - 1)
+}
+
+// IsGatewayVM reports whether the node is a gateway VM and not a hardware one of a hybrid VLAB
+func IsGatewayVM(node fabapi.FabNode) bool {
+	return slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) && node.Annotations[NodeTypeAnnotation] != NodeTypeHW
+}
+
+// SetGatewayHugePages sets the gateway VM hugepages on its FabNode and Gateway, if there is one, unless already set.
+// The value already set on either of them is used for the other one, so they match, the VLAB default otherwise for
+// the 1G ones. Returns whether the FabNode and the Gateway are changed.
+func SetGatewayHugePages(node *fabapi.FabNode, gw *gwapi.Gateway) (bool, bool) {
+	nodeChanged, gwChanged := false, false
+	for _, key := range []string{fabapi.AnnotationHugePages1G, fabapi.AnnotationHugePages2M} {
+		val, ok := node.Annotations[key]
+		if !ok && gw != nil {
+			val, ok = gw.Annotations[key]
+		}
+		if !ok && key == fabapi.AnnotationHugePages1G {
+			val, ok = strconv.Itoa(GatewayHugePages1G), true
+		}
+		if !ok {
+			continue
+		}
+
+		if setAnnotation(node, key, val) {
+			nodeChanged = true
+		}
+		if gw != nil && setAnnotation(gw, key, val) {
+			gwChanged = true
+		}
+	}
+
+	return nodeChanged, gwChanged
+}
+
+// setAnnotation sets the annotation unless already set, returns whether it's changed
+func setAnnotation(obj kclient.Object, key, val string) bool {
+	anns := obj.GetAnnotations()
+	if _, ok := anns[key]; ok {
+		return false
+	}
+
+	if anns == nil {
+		anns = map[string]string{}
+	}
+	anns[key] = val
+	obj.SetAnnotations(anns)
+
+	return true
 }
 
 func FlatcarVersion(f fabapi.Fabricator) meta.Version {

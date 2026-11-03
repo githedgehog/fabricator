@@ -139,7 +139,11 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 
 	var kernelArgs []string
 	if slices.Contains(b.Node.Spec.Roles, fabapi.NodeRoleGateway) {
-		kernelArgs = gateway.KernelArgs()
+		pages1G, pages2M, err := b.Node.HugePages()
+		if err != nil {
+			return nil, fmt.Errorf("gateway hugepages: %w", err)
+		}
+		kernelArgs = gateway.KernelArgs(pages1G, pages2M)
 	}
 
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{

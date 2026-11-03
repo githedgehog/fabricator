@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strconv"
 
 	"github.com/samber/lo"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
@@ -34,6 +35,23 @@ const (
 var NodeRoles = []FabNodeRole{
 	NodeRoleGateway,
 }
+
+const (
+	// AnnotationHugePages1G and AnnotationHugePages2M override the hugepages reserved on the gateway node, the same
+	// annotations on its Gateway make the fabric controller request them for the dataplane, so they must match
+	//
+	// TODO use gwapi.AnnotationHugePages1G/2M and meta.MaxGatewayHugePages1G/2M from fabric once it's bumped
+	AnnotationHugePages1G = "gateway.githedgehog.com/hugepages-1g"
+	AnnotationHugePages2M = "gateway.githedgehog.com/hugepages-2m"
+
+	// DefaultHugePages1G and DefaultHugePages2M are used if the annotations aren't set, the dataplane currently only
+	// uses 1G pages
+	DefaultHugePages1G = 16
+	DefaultHugePages2M = 0
+
+	maxHugePages1G = 1 << 10
+	maxHugePages2M = 1 << 19
+)
 
 // FabNodeStatus defines the observed state of Node.
 type FabNodeStatus struct{}
@@ -88,6 +106,10 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 
 	if !lo.Every(NodeRoles, n.Spec.Roles) {
 		return fmt.Errorf("unexpected node roles %q", n.Spec.Roles) //nolint:err113
+	}
+
+	if _, _, err := n.HugePages(); err != nil {
+		return err
 	}
 
 	if !allowNotHydrated {
@@ -182,4 +204,38 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 	}
 
 	return nil
+}
+
+// HugePages returns the 1G and 2M hugepages reserved on the gateway node, from the annotations or the defaults
+func (n *FabNode) HugePages() (int, int, error) {
+	pages1G, err := hugePages(n.Annotations, AnnotationHugePages1G, DefaultHugePages1G, maxHugePages1G)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	pages2M, err := hugePages(n.Annotations, AnnotationHugePages2M, DefaultHugePages2M, maxHugePages2M)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// ignition skips kernel args that are already there, so the same hugepages=N would leave the 2M size without count
+	if pages1G > 0 && pages1G == pages2M {
+		return 0, 0, fmt.Errorf("1G and 2M hugepages can't be the same count %d", pages1G) //nolint:err113
+	}
+
+	return pages1G, pages2M, nil
+}
+
+func hugePages(anns map[string]string, key string, def, maxPages int) (int, error) {
+	val, ok := anns[key]
+	if !ok {
+		return def, nil
+	}
+
+	pages, err := strconv.Atoi(val)
+	if err != nil || pages < 0 || pages > maxPages {
+		return 0, fmt.Errorf("annotation %s must be between 0 and %d, got %q", key, maxPages, val) //nolint:err113
+	}
+
+	return pages, nil
 }

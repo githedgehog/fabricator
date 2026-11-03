@@ -295,8 +295,9 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		DataplaneValidatorRef: dataplaneValidatorRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
 		DataplaneMetricsPort:  gateway.DataplaneMetricsPort,
 		FRRMetricsPort:        gateway.FRRMetricsPort,
-		GatewayHugePages1G:    gateway.HugePages1G,
-		GatewayHugePages2M:    gateway.HugePages2M,
+		// for the gateways without the hugepages annotations, the same defaults as the gateway nodes use
+		GatewayHugePages1G: fabapi.DefaultHugePages1G,
+		GatewayHugePages2M: fabapi.DefaultHugePages2M,
 
 		ExtraValidators: fmeta.ExtraValidators{
 			Peering:    valid.Peering,

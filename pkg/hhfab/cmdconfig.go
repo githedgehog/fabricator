@@ -19,6 +19,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kyaml "sigs.k8s.io/yaml"
 )
 
@@ -66,7 +67,7 @@ type Config struct {
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
-	Client   apiutil.ReaderWithScheme // all resources (fab, fabric and gateway)
+	Client   kclient.Client // all resources (fab, fabric and gateway)
 	Shutdown atomic.Int32
 }
 

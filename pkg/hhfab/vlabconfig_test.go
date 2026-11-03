@@ -229,6 +229,53 @@ func TestVLABSSHKey(t *testing.T) {
 	require.Equal(t, []string{pub}, c.Fab.Spec.Config.Fabric.DefaultSwitchUsers["admin"].AuthorizedKeys)
 }
 
+func TestSetVLABHugePages(t *testing.T) {
+	hp := func(val string) map[string]string {
+		return map[string]string{fabapi.AnnotationHugePages1G: val}
+	}
+
+	kube := apiutil.NewLoader().GetClient()
+	for _, gw := range []*gwapi.Gateway{
+		{Name: "gateway-1", Namespace: kmetav1.NamespaceDefault},
+		{Name: "gateway-2", Namespace: kmetav1.NamespaceDefault},
+		{Name: "gateway-3", Namespace: kmetav1.NamespaceDefault, Annotations: hp("8")},
+		{Name: "gateway-4", Namespace: kmetav1.NamespaceDefault, Annotations: hp("6")},
+		{Name: "gateway-5", Namespace: kmetav1.NamespaceDefault},
+	} {
+		require.NoError(t, kube.Create(t.Context(), gw))
+	}
+
+	c := &Config{
+		Nodes: []fabapi.FabNode{
+			{Name: "gateway-1"},
+			{Name: "gateway-2"},
+			{Name: "gateway-3", Annotations: hp("8")},
+			{Name: "gateway-4"},
+			{Name: "gateway-5", Annotations: hp("2")},
+		},
+		Client: kube,
+	}
+	// gateway-2 is a hardware one, so there is no VM for it
+	vlab := &VLAB{VMs: []VM{
+		{Name: "control-1", Type: VMTypeControl},
+		{Name: "gateway-1", Type: VMTypeGateway},
+		{Name: "gateway-3", Type: VMTypeGateway},
+		{Name: "gateway-4", Type: VMTypeGateway},
+		{Name: "gateway-5", Type: VMTypeGateway},
+	}}
+	require.NoError(t, c.setVLABHugePages(t.Context(), vlab))
+
+	// the value set on either the node or the gateway goes to the other one
+	for idx, want := range []string{"4", "", "8", "6", "2"} {
+		node := c.Nodes[idx]
+		require.Equal(t, want, node.Annotations[fabapi.AnnotationHugePages1G], "node %s", node.Name)
+
+		gw := &gwapi.Gateway{}
+		require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: node.Name}, gw))
+		require.Equal(t, want, gw.Annotations[fabapi.AnnotationHugePages1G], "gateway %s", node.Name)
+	}
+}
+
 func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 	nodes := []fabapi.FabNode{} //nolint:prealloc
 	for _, name := range []string{"gateway-1", "gateway-2"} {

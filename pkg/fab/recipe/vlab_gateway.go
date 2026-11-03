@@ -239,6 +239,81 @@ func newVLABGatewayPort(name string) (string, uint8, error) {
 	return fmt.Sprintf("port%d", nicID), uint8(nicID), nil
 }
 
+// setVLABHugePages sets the hugepages of the gateway VMs on their FabNodes and Gateways unless already set, the same as
+// hhfab sets them for the installers. The VLAB marker of the control VM tells it's a VLAB and the hw annotation of the
+// FabNodes tells the hardware gateways of a hybrid VLAB apart. It runs before the fabricator is upgraded, as the new
+// fabric controller would request the default hugepages for the gateways without them.
+//
+// TODO remove once upgrades are only supported from the releases setting the hugepages
+func setVLABHugePages(ctx context.Context, kube kclient.Client) error {
+	if !isVLAB() {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	// any error, e.g. a conflict or the webhooks not being ready after the k8s upgrade, is retried with a fresh list
+	attempt := 0
+	if err := retry.OnError(vlabGatewayMigrationBackoff, func(error) bool {
+		return ctx.Err() == nil
+	}, func() error {
+		attempt++
+
+		err := setVLABHugePagesOnce(ctx, kube)
+		if err != nil {
+			slog.Warn("Failed to set VLAB hugepages", "attempt", attempt, "err", err)
+		}
+
+		return err
+	}); err != nil {
+		return fmt.Errorf("setting VLAB hugepages after %d attempts: %w", attempt, err)
+	}
+
+	return nil
+}
+
+func setVLABHugePagesOnce(ctx context.Context, kube kclient.Client) error {
+	nodes := &fabapi.FabNodeList{}
+	if err := kube.List(ctx, nodes); err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+	gwList := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gwList); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+	gws := map[string]*gwapi.Gateway{}
+	for idx := range gwList.Items {
+		gws[gwList.Items[idx].Name] = &gwList.Items[idx]
+	}
+
+	for idx := range nodes.Items {
+		node := &nodes.Items[idx]
+		if !vlabcomp.IsGatewayVM(*node) {
+			continue
+		}
+
+		gw := gws[node.Name]
+		nodeChanged, gwChanged := vlabcomp.SetGatewayHugePages(node, gw)
+		if nodeChanged {
+			slog.Info("Setting VLAB hugepages", "node", node.Name)
+
+			if err := kube.Update(ctx, node); err != nil {
+				return fmt.Errorf("updating node %s: %w", node.Name, err)
+			}
+		}
+		if gwChanged {
+			slog.Info("Setting VLAB hugepages", "gateway", gw.Name)
+
+			if err := kube.Update(ctx, gw); err != nil {
+				return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // migrateVLABGatewayIfaces renames the old style interfaces of the gateway and the neighbors' sources and returns the
 // renames
 func migrateVLABGatewayIfaces(gw *gwapi.Gateway) (map[string]string, error) {

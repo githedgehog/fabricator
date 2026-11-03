@@ -1582,6 +1582,48 @@ func (c *Config) addAuthorizedKey(pub string) bool {
 	return added
 }
 
+// setVLABHugePages sets the VLAB hugepages on the gateway VMs unless already set, on their FabNodes for the installers
+// and on their Gateways for the fabric controller to request the same for the dataplane
+func (c *Config) setVLABHugePages(ctx context.Context, vlab *VLAB) error {
+	gwVMs := map[string]bool{}
+	for _, vm := range vlab.VMs {
+		gwVMs[vm.Name] = vm.Type == VMTypeGateway
+	}
+
+	gwList := &gwapi.GatewayList{}
+	if err := c.Client.List(ctx, gwList); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+	gws := map[string]*gwapi.Gateway{}
+	for idx := range gwList.Items {
+		gws[gwList.Items[idx].Name] = &gwList.Items[idx]
+	}
+
+	for idx := range c.Nodes {
+		node := &c.Nodes[idx]
+		if !gwVMs[node.Name] {
+			continue
+		}
+
+		gw := gws[node.Name]
+		nodeChanged, gwChanged := vlabcomp.SetGatewayHugePages(node, gw)
+		if nodeChanged {
+			slog.Debug("Setting VLAB hugepages", "node", node.Name)
+		}
+		if !gwChanged {
+			continue
+		}
+
+		slog.Debug("Setting VLAB hugepages", "gateway", gw.Name)
+
+		if err := c.Client.Update(ctx, gw); err != nil {
+			return fmt.Errorf("updating gateway %q: %w", gw.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // getVLABSSHKey returns the public VLAB SSH key if the work dir has one, or an empty string otherwise, never creates it
 func getVLABSSHKey(workDir string) (string, error) {
 	path := filepath.Join(workDir, VLABDir, VLABSSHKeyFile)
