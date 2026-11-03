@@ -1,0 +1,143 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    # - bodyclose
+    # https://github.com/timakin/bodyclose/issues/10
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - funlen
+    - goconst
+    - gocritic
+    - gocyclo
+    - goheader
+    - goprintffuncname
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - revive
+    - rowserrcheck
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        prevent_unmaintained_packages:
+          list-mode: lax
+          files:
+            - $all
+            - '!$test'
+          allow:
+            - $gostd
+          deny:
+            - pkg: io/ioutil
+              desc: 'replaced by io and os packages since Go 1.16: https://tip.golang.org/doc/go1.16#ioutil'
+    dupl:
+      threshold: 200
+    funlen:
+      lines: 100
+      statements: 50
+    goconst:
+      min-len: 2
+      min-occurrences: 5
+      ignore-tests: true
+    gocritic:
+      disabled-checks:
+        - deprecatedComment
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - paramTypeCombine
+        - whyNoLint
+        - wrapperFunc
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 30
+    goheader:
+      values:
+        const:
+          LICENSE: BSD-3-Clause
+      template: 'SPDX-License-Identifier: {{ LICENSE }}'
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: false
+      require-specific: false
+      allow-unused: false
+    revive:
+      rules:
+        - name: var-naming
+          severity: error
+          arguments:
+            - [] # AllowList
+            - [] # DenyList
+            - - skip-package-name-checks: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)\.go$
+        text: declaration of "(err|ctx)" shadows declaration at
+      - path: (.+)\.go$
+        text: 'G402: TLS InsecureSkipVerify may be true'
+      - path: (.+)\.go$
+        text: '`(F|f)ibre` is a misspelling'
+      - path: (.+)\.go$
+        text: '`(C|c)ancell.*` is a misspelling'
+      - path: (.+)\.go$
+        text: Error return value of `original.UnmarshalJSON` is not checked
+      # Schema and OEM files list Redfish property names as string literals in
+      # their writable-property allow-lists; these are spec data, not magic
+      # constants worth extracting.
+      - linters:
+          - goconst
+        path: (schemas|oem)/
+    paths:
+      - examples
+      - tools
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/stmcginnis
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+  exclusions:
+    generated: lax
+    paths:
+      - examples
+      - tools
+      - third_party$
+      - builtin$
+      - examples$
