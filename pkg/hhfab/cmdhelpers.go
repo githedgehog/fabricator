@@ -16,6 +16,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/process"
 	"github.com/vishvananda/netlink"
+	"go.githedgehog.com/fabricator/pkg/hhfab/bmc"
 )
 
 // tuntap values netlink only defines on Linux
@@ -190,6 +191,34 @@ func SetupVLABNet(_ context.Context, nets []VLABNet) error {
 	slog.Info("VLAB networks are ready", "nets", len(nets))
 
 	return nil
+}
+
+// ServeMedia serves the <url path>=<local path> files to the BMCs, it needs root for port 80
+func ServeMedia(ctx context.Context, id string, specs []string) error {
+	if id == "" {
+		return fmt.Errorf("media server ID is required") //nolint:err113
+	}
+
+	files := map[string]string{}
+	for _, spec := range specs {
+		name, local, ok := strings.Cut(spec, "=")
+		if !ok || name == "" || local == "" {
+			return fmt.Errorf("invalid media file %q, expected <url path>=<local path>", spec) //nolint:err113
+		}
+		files[name] = local
+	}
+
+	_, srvCtx, stop, err := bmc.Serve(ctx, bmc.MediaPort, id, files)
+	if err != nil {
+		return fmt.Errorf("starting media server: %w", err)
+	}
+	defer stop()
+
+	slog.Info("Media server started", "port", bmc.MediaPort, "files", len(files))
+
+	<-srvCtx.Done()
+
+	return context.Cause(srvCtx) //nolint:wrapcheck
 }
 
 func PreparePassthrough(ctx context.Context, devs []string) error {

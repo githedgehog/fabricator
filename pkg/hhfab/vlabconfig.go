@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,6 +50,8 @@ const (
 	HHFabCfgLinkPrefix = "link" + HHFabCfgPrefix + "/"
 	HHFabCfgPCIPrefix  = "pci@"
 	HHFabCfgASNPrefix  = "asn"
+	// HHFabCfgBMC is the hardware node BMC Redfish endpoint, e.g. https://10.0.0.5
+	HHFabCfgBMC = "bmc" + HHFabCfgPrefix
 	// HHFabCfgSerial          = "serial" + HHFabCfgPrefix
 	// HHFabCfgSerialSchemeSSH = "ssh://"
 
@@ -89,6 +92,8 @@ type VLAB struct {
 	Nets         []VLABNet
 	Passthroughs []string
 	Externals    ExternalsCfg
+	// Created is set if the VLAB config was created in this run, so there is no existing cluster
+	Created bool
 }
 
 type VLABNetKind string
@@ -552,6 +557,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	if err != nil {
 		return nil, fmt.Errorf("creating VLAB: %w", err)
 	}
+	vlab.Created = createCfg
 
 	return vlab, nil
 }
@@ -1475,6 +1481,44 @@ func (c *Config) hardwareNodes() []fabapi.FabNode {
 	}
 
 	return nodes
+}
+
+// getBMCEndpoint returns empty if it isn't a hardware node or the annotation isn't set
+func getBMCEndpoint(node *fabapi.FabNode) (string, error) {
+	endpoint := node.GetAnnotations()[HHFabCfgBMC]
+	if endpoint == "" || !isHardware(node) {
+		return "", nil
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parsing node %s BMC endpoint %q: %w", node.Name, endpoint, err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" || u.Hostname() == "" {
+		return "", fmt.Errorf("node %s BMC endpoint %q isn't an http(s) URL", node.Name, endpoint) //nolint:err113
+	}
+	// gofish adds the Redfish path itself
+	if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("node %s BMC endpoint %q should have no path, e.g. https://10.0.0.5", node.Name, endpoint) //nolint:err113
+	}
+
+	return endpoint, nil
+}
+
+// bmcNodes returns the BMC endpoints by node name
+func (c *Config) bmcNodes() (map[string]string, error) {
+	nodes := map[string]string{}
+	for _, node := range c.hardwareNodes() {
+		endpoint, err := getBMCEndpoint(&node)
+		if err != nil {
+			return nil, err
+		}
+		if endpoint != "" {
+			nodes[node.Name] = endpoint
+		}
+	}
+
+	return nodes, nil
 }
 
 func getPassthroughLinks(obj kclient.Object) map[string]string {

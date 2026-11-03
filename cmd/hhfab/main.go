@@ -70,10 +70,12 @@ const (
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameReCreate              = "recreate"
 	FlagNameBuildMode             = "build-mode"
+	FlagNameBuildModeOverride     = "mode-override"
 	FlagNameBuildControls         = "build-controls"
 	FlagNameBuildGateways         = "build-gateways"
 	FlagNameObservabilityTargets  = "o11y-targets"
 	FlagNameAutoUpgrade           = "auto-upgrade"
+	FlagNameNodeReinstall         = "node-reinstall"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
@@ -560,6 +562,18 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	bmcFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    "bmc-username",
+			Usage:   "BMC username to install hardware nodes",
+			EnvVars: []string{hhfab.VLABEnvBMCUsername},
+		},
+		&cli.StringFlag{
+			Name:    "bmc-password",
+			Usage:   "BMC password to install hardware nodes",
+			EnvVars: []string{hhfab.VLABEnvBMCPassword},
+		},
+	}
 	showTechConsoleFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    "switch-username",
@@ -1051,12 +1065,23 @@ func Run(ctx context.Context) error {
 						Usage:   "build gateway node(s)",
 						Value:   true,
 					},
+					&cli.StringSliceFlag{
+						Name:    FlagNameBuildModeOverride,
+						Usage:   "build mode for a control or node as <name>=<mode> (hardware ones are built as " + string(recipe.BuildModeISO) + " by default)",
+						EnvVars: []string{"HHFAB_BUILD_MODE_OVERRIDE"},
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
+					modeOverrides, err := hhfab.ParseModeOverrides(c.StringSlice(FlagNameBuildModeOverride))
+					if err != nil {
+						return err //nolint:wrapcheck
+					}
+
 					if err := hhfab.Build(ctx, workDir, cacheDir, extraCacheDirs.Value(), hhfab.BuildOpts{
 						HydrateMode:          hhfab.HydrateMode(hydrateMode),
 						BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),
+						ModeOverrides:        modeOverrides,
 						BuildControls:        c.Bool(FlagNameBuildControls),
 						BuildGateways:        c.Bool(FlagNameBuildGateways),
 						SetJoinToken:         joinToken,
@@ -1300,7 +1325,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "up",
 						Usage: "run VLAB",
-						Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, []cli.Flag{
+						Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, bmcFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    FlagNameReCreate,
 								Aliases: []string{"f"},
@@ -1330,6 +1355,12 @@ func Run(ctx context.Context) error {
 								Usage:   "automatically upgrade all node(s), expected to be used after initial successful installation",
 								EnvVars: []string{"HHFAB_AUTO_UPGRADE"},
 								Value:   false,
+							},
+							&cli.BoolFlag{
+								Name: FlagNameNodeReinstall,
+								Usage: "install hardware nodes with " + hhfab.HHFabCfgBMC + " annotation from the ISO over BMC " +
+									"(skipped if installed into this VLAB before), not for --" + FlagNameAutoUpgrade + " that upgrades all nodes",
+								EnvVars: []string{hhfab.VLABEnvNodeReinstall},
 							},
 							&cli.BoolFlag{
 								Name:  FlagNameFailFast,
@@ -1507,6 +1538,11 @@ func Run(ctx context.Context) error {
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
 									InterfaceMTU:             ifMTU,
 									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
+									NodeReinstall:            c.Bool(FlagNameNodeReinstall),
+									BMC: hhfab.BMCOpts{
+										Username: c.String("bmc-username"),
+										Password: c.String("bmc-password"),
+									},
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -2571,6 +2607,87 @@ to have it re-run itself under sudo.`,
 						},
 					},
 					{
+						Name:  "node",
+						Usage: "manage hardware node reinstall or power",
+						Flags: defaultFlags,
+						Subcommands: []*cli.Command{
+							{
+								Name:  "reinstall",
+								Usage: "reinstall hardware nodes from the ISO over BMC (if no nodes specified, all hardware nodes with " + hhfab.HHFabCfgBMC + " annotation will be reinstalled)",
+								Flags: flatten(bmcFlags, []cli.Flag{
+									&cli.StringSliceFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "node name to reinstall",
+									},
+									verboseFlag,
+									yesFlag,
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									if err := hhfab.DoNodeReinstall(ctx, workDir, cacheDir, hhfab.NodeReinstallOpts{
+										Nodes: c.StringSlice("name"),
+										BMC: hhfab.BMCOpts{
+											Username: c.String("bmc-username"),
+											Password: c.String("bmc-password"),
+										},
+									}); err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "power",
+								Usage: "manage hardware node power state using the BMC (if no nodes specified, all hardware nodes with " + hhfab.HHFabCfgBMC + " annotation will be affected)",
+								Flags: flatten(bmcFlags, []cli.Flag{
+									&cli.StringSliceFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "node name to manage power",
+									},
+									&cli.StringFlag{
+										Name:    "action",
+										Aliases: []string{"a"},
+										Usage:   "power action: one of " + strings.Join(powerActions, ", "),
+										Value:   string(pdu.ActionCycle),
+									},
+									verboseFlag,
+									yesFlag,
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									action := strings.ToLower(c.String("action"))
+									if !slices.Contains(powerActions, action) {
+										return fmt.Errorf("invalid action: %s", action) //nolint:err113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									if err := hhfab.DoNodePower(ctx, workDir, cacheDir, hhfab.NodePowerOpts{
+										Nodes:  c.StringSlice("name"),
+										Action: pdu.Action(action),
+										BMC: hhfab.BMCOpts{
+											Username: c.String("bmc-username"),
+											Password: c.String("bmc-password"),
+										},
+									}); err != nil {
+										return fmt.Errorf("failed to power node: %w", err)
+									}
+
+									return nil
+								},
+							},
+						},
+					},
+					{
 						Name:  "switch",
 						Usage: "manage switch reinstall or power",
 						Flags: flatten(defaultFlags, accessNameFlags),
@@ -2761,6 +2878,26 @@ to have it re-run itself under sudo.`,
 						Action: func(_ *cli.Context) error {
 							if _, err := hhfab.CheckStaleVMs(ctx, true); err != nil {
 								return fmt.Errorf("killing stale vms: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:      "serve-media",
+						Usage:     "serve installer ISOs to BMCs on port 80 until stopped",
+						ArgsUsage: "<url path>=<local path>...",
+						Flags: flatten(defaultFlags, []cli.Flag{
+							&cli.StringFlag{
+								Name:     "id",
+								Usage:    "ID to answer the health check with, tells this server apart from anything else on the port",
+								Required: true,
+							},
+						}),
+						Before: before(true),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.ServeMedia(ctx, c.String("id"), c.Args().Slice()); err != nil {
+								return fmt.Errorf("serving media: %w", err)
 							}
 
 							return nil
