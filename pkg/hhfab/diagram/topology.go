@@ -603,13 +603,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	}
 
 	// Build BGP session state map from agents (live mode only)
-	// switchName -> local port -> session state
+	// switchName -> {connection, remote port or external} -> session state
 	// The agent keys a session by the peer IP when the link is numbered and by the port
 	// when it is not (port.vlan over the TH5 workaround SVI), so go through apiutil
 	// rather than reading the agent state directly and having to know which is which.
-	bgpStateByPort := map[string]map[string]agentapi.BGPNeighborSessionState{}
-	// the profile the agent itself used to name those ports, so the lookup can't skew from it
-	bgpProfiles := map[string]*wiringapi.SwitchProfileSpec{}
+	type bgpPeer struct{ conn, remote string }
+	bgpStates := map[string]map[bgpPeer]agentapi.BGPNeighborSessionState{}
 	if agents != nil && len(agents.Items) > 0 {
 		f := &fabapi.Fabricator{}
 		if err := client.Get(ctx, kclient.ObjectKey{Namespace: fabapi.FabNamespace, Name: fabapi.FabName}, f); err != nil {
@@ -621,34 +620,40 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			return topo, fmt.Errorf("getting fabric config: %w", err)
 		}
 
-		// driven off the agents rather than the switches, since a switch without one has
-		// no state to report and apiutil needs the agent to exist
-		for i := range agents.Items {
-			sw, exist := switchMap[agents.Items[i].Name]
-			if !exist {
-				continue
+		// one call for all switches fails if any of them has no agent yet or an incomplete
+		// spec, so fall back to a call per switch: a diagram missing some session state
+		// beats no diagram
+		statuses, err := apiutil.GetBGPStatus(ctx, client, fabCfg, apiutil.SwitchFilter{})
+		if err != nil {
+			slog.Debug("Getting BGP session state per switch", "err", err)
+			statuses = map[string]*apiutil.BGPSwitchStatus{}
+			for i := range agents.Items {
+				name := agents.Items[i].Name
+				if _, exist := switchMap[name]; !exist {
+					continue
+				}
+
+				status, err := apiutil.GetBGPStatus(ctx, client, fabCfg, apiutil.SwitchFilter{Names: []string{name}})
+				if err != nil {
+					slog.Warn("Skipping BGP session state", "switch", name, "err", err)
+
+					continue
+				}
+				statuses[name] = status[name]
 			}
+		}
 
-			// a diagram without session state beats no diagram, and an agent can be
-			// mid-registration with an incomplete spec
-			status, err := apiutil.GetBGPStatus(ctx, client, fabCfg, apiutil.SwitchFilter{Names: []string{sw.Name}})
-			if err != nil {
-				slog.Warn("Skipping BGP session state", "switch", sw.Name, "err", err)
-
-				continue
-			}
-
-			byPort := map[string]agentapi.BGPNeighborSessionState{}
-			for _, vrfNeighbors := range status[sw.Name].Neighbors {
+		for name, status := range statuses {
+			states := map[bgpPeer]agentapi.BGPNeighborSessionState{}
+			for _, vrfNeighbors := range status.Neighbors {
 				for _, neighbor := range vrfNeighbors {
-					if neighbor.Port == "" || neighbor.SessionState == "" {
+					if neighbor.ConnectionName == "" || neighbor.SessionState == "" {
 						continue
 					}
-					byPort[neighbor.Port] = neighbor.SessionState
+					states[bgpPeer{neighbor.ConnectionName, neighbor.RemoteName}] = neighbor.SessionState
 				}
 			}
-			bgpStateByPort[sw.Name] = byPort
-			bgpProfiles[sw.Name] = agents.Items[i].Spec.SwitchProfile
+			bgpStates[name] = states
 		}
 	}
 
@@ -820,13 +825,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if ips, ok := portPairIPs[source+"->"+target]; ok {
 					link.Properties[PropSrcLinkIP] = ips.src
 					link.Properties[PropDstLinkIP] = ips.dst
-					if ips.src == "" && ips.dst == "" {
+					// gateway links are always numbered, no IPs there means not hydrated
+					if ips.src == "" && ips.dst == "" && conn.Spec.Gateway == nil {
 						link.Properties[PropUnnumbered] = "true"
 					}
-					if stateMap, ok := bgpStateByPort[link.Source]; ok {
-						if state, ok := getBGPState(source, bgpProfiles[link.Source], stateMap); ok {
-							link.Properties[PropBGPState] = string(state)
-						}
+					if state := bgpStates[link.Source][bgpPeer{conn.Name, target}]; state != "" {
+						link.Properties[PropBGPState] = string(state)
 					}
 				}
 
@@ -875,10 +879,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if spec, ok := extMap[externalName]; ok {
 					link.Properties[PropSrcLinkIP] = spec.Switch.IP
 					link.Properties[PropDstLinkIP] = spec.Neighbor.IP
-					if stateMap, ok := bgpStateByPort[switchID]; ok {
-						if state, ok := getBGPState(switchPort, bgpProfiles[switchID], stateMap); ok {
-							link.Properties[PropBGPState] = string(state)
-						}
+					if state := bgpStates[switchID][bgpPeer{connName, externalName}]; state != "" {
+						link.Properties[PropBGPState] = string(state)
 					}
 				}
 			}
@@ -1568,20 +1570,6 @@ func getPortStatus(portName string, portStatusMap map[string]map[string]string) 
 	}
 
 	return ""
-}
-
-// getBGPState returns the BGP session state the agent reports for a port. apiutil keys the
-// sessions by the agent-side port name, so normalize the wiring name the same way: a
-// breakout-capable port the wiring spells without a subport (E1/53) is E1/53/1 to the agent,
-// while one that names the subport (E1/53/2) is already agent-side.
-func getBGPState(portName string, profile *wiringapi.SwitchProfileSpec, stateMap map[string]agentapi.BGPNeighborSessionState) (agentapi.BGPNeighborSessionState, bool) {
-	port, err := profile.NormalizePortName((&wiringapi.BasePortName{Port: portName}).LocalPortName())
-	if err != nil {
-		return "", false
-	}
-	state, ok := stateMap[port]
-
-	return state, ok
 }
 
 // getPortNOSName returns the NOS (Ethernet) name for a port
