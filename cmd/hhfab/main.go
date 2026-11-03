@@ -268,7 +268,7 @@ func Run(ctx context.Context) error {
 	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgOrphanLeafsCount uint
 	var wgESLAGLeafGroups string
 	var wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
-	var wgNoSwitches bool
+	var wgNoSwitches, wgNumberedLinks bool
 	var wgExtraDomain bool
 	var wgSharedLeafsCount uint
 	var wgExtraFabric, wgInterconnectFabrics bool
@@ -294,6 +294,11 @@ func Run(ctx context.Context) error {
 			Name:        "mesh-links-count",
 			Usage:       "number of mesh links",
 			Destination: &wgMeshLinksCount,
+		},
+		&cli.BoolFlag{
+			Name:        "numbered-links",
+			Usage:       "hydrate fabric and mesh links with /31s instead of leaving them for BGP unnumbered",
+			Destination: &wgNumberedLinks,
 		},
 		&cli.StringFlag{
 			Name:        "eslag-leaf-groups",
@@ -1202,6 +1207,7 @@ func Run(ctx context.Context) error {
 								DefaultSwitchProfile:   wgDefaultSwitchProfile,
 								SwitchProfileOverrides: overrides,
 								ServerPortBase:         wgServerPortBase,
+								NumberedLinks:          wgNumberedLinks,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {

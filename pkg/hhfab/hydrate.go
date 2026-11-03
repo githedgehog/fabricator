@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -41,6 +42,10 @@ var HydrateModes = []HydrateMode{
 	HydrateModeIfNotPresent,
 	HydrateModeOverride,
 }
+
+// HydrateNumberedLinksAnnotation set to "true" on a Fabric makes hydration assign /31s to its fabric and mesh
+// links instead of leaving them empty for BGP unnumbered
+const HydrateNumberedLinksAnnotation = "hydrate.hhfab.githedgehog.com/numbered-links"
 
 type HydrationStatus string
 
@@ -195,6 +200,30 @@ func fabricSpecs(ctx context.Context, kube kclient.Reader) (map[string]wiringapi
 	}
 
 	return specs, nil
+}
+
+// numberedFabrics returns the fabrics whose fabric and mesh links are hydrated with /31s
+func numberedFabrics(ctx context.Context, kube kclient.Reader) (map[string]bool, error) {
+	fabrics := &wiringapi.FabricList{}
+	if err := kube.List(ctx, fabrics); err != nil {
+		return nil, fmt.Errorf("listing fabrics: %w", err)
+	}
+
+	numbered := map[string]bool{}
+	for _, f := range fabrics.Items {
+		v, ok := f.Annotations[HydrateNumberedLinksAnnotation]
+		if !ok {
+			continue
+		}
+
+		n, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("fabric %s annotation %s value %q: %w", f.Name, HydrateNumberedLinksAnnotation, v, err)
+		}
+		numbered[f.Name] = n
+	}
+
+	return numbered, nil
 }
 
 func fabricDomain(fabrics map[string]wiringapi.FabricSpec, fabricName, domainName string) (wiringapi.FabricDomainSpec, error) {
@@ -490,23 +519,38 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 	fabricIPs := map[netip.Addr]bool{}
 
+	numbered, err := numberedFabrics(ctx, kube)
+	if err != nil {
+		return status, err
+	}
+
 	conns := &wiringapi.ConnectionList{}
 	if err := kube.List(ctx, conns); err != nil {
 		return status, fmt.Errorf("listing connections: %w", err)
 	}
 
+	// an empty fabric or mesh link IP is only missing if its fabric is numbered, but one that is set counts as
+	// hydrated either way, so that if-not-present doesn't wipe it out
+	countLinkIPs := func(numbered bool, ips ...string) {
+		for _, ip := range ips {
+			switch {
+			case ip != "":
+				total++
+			case numbered:
+				total++
+				missing++
+			}
+		}
+	}
+
 	for _, conn := range conns.Items {
+		connNumbered := numbered[conn.Spec.Topology.Fabric]
+
 		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
 
 			for idx, link := range cf.Links {
-				total += 2
-				if link.Spine.IP == "" {
-					missing++
-				}
-				if link.Leaf.IP == "" {
-					missing++
-				}
+				countLinkIPs(connNumbered, link.Spine.IP, link.Leaf.IP)
 				if link.Spine.IP == "" || link.Leaf.IP == "" {
 					continue
 				}
@@ -553,13 +597,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			cm := conn.Spec.Mesh
 
 			for idx, link := range cm.Links {
-				total += 2
-				if link.Leaf1.IP == "" {
-					missing++
-				}
-				if link.Leaf2.IP == "" {
-					missing++
-				}
+				countLinkIPs(connNumbered, link.Leaf1.IP, link.Leaf2.IP)
 				if link.Leaf1.IP == "" || link.Leaf2.IP == "" {
 					continue
 				}
@@ -902,12 +940,26 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
+	numbered, err := numberedFabrics(ctx, kube)
+	if err != nil {
+		return err
+	}
+
 	for _, conn := range conns.Items {
+		connNumbered := numbered[conn.Spec.Topology.Fabric]
+
 		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
 
 			for idx := range cf.Links {
 				link := &cf.Links[idx]
+				if !connNumbered {
+					link.Spine.IP = ""
+					link.Leaf.IP = ""
+
+					continue
+				}
+
 				link.Spine.IP = nextFabricIP.String() + "/31"
 				nextFabricIP = nextFabricIP.Next()
 
@@ -919,6 +971,13 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 			for idx := range cm.Links {
 				link := &cm.Links[idx]
+				if !connNumbered {
+					link.Leaf1.IP = ""
+					link.Leaf2.IP = ""
+
+					continue
+				}
+
 				link.Leaf1.IP = nextFabricIP.String() + "/31"
 				nextFabricIP = nextFabricIP.Next()
 
@@ -970,12 +1029,15 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					return fmt.Errorf("switch %s not found or ASN not set", link.Switch.DeviceName()) //nolint:err113
 				}
 
-				// TODO check that it's not already set?
-				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
+				// replace rather than append, so that re-hydrating doesn't leave behind the neighbors of the old IPs
+				neighbor := gwapi.GatewayBGPNeighbor{
 					Source: link.Gateway.LocalPortName(),
 					IP:     switchIP.Addr().String(),
 					ASN:    asn,
-				})
+				}
+				gw.Spec.Neighbors = append(slices.DeleteFunc(gw.Spec.Neighbors, func(n gwapi.GatewayBGPNeighbor) bool {
+					return n.Source == neighbor.Source
+				}), neighbor)
 
 				if err := kube.Update(ctx, gw); err != nil {
 					return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
