@@ -483,12 +483,14 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			connectionToExternalMap[attachment.Spec.Connection],
 			attachment.Spec.External,
 		)
-		if attachment.Spec.Static == nil && attachment.Spec.Neighbor.ASN != 0 {
+		if attachment.Spec.Static == nil {
 			if connExtAttachMap[attachment.Spec.Connection] == nil {
 				connExtAttachMap[attachment.Spec.Connection] = map[string]*vpcapi.ExternalAttachmentSpec{}
 			}
 			connExtAttachMap[attachment.Spec.Connection][attachment.Spec.External] = &externalAttachments.Items[i].Spec
-			externalNodeASN[attachment.Spec.External] = attachment.Spec.Neighbor.ASN
+			if attachment.Spec.Neighbor.ASN != 0 {
+				externalNodeASN[attachment.Spec.External] = attachment.Spec.Neighbor.ASN
+			}
 		}
 	}
 
@@ -497,7 +499,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	if err := client.List(ctx, externals); err != nil {
 		return topo, fmt.Errorf("listing externals: %w", err)
 	}
+	localASN := map[string]uint32{}
 	for _, external := range externals.Items {
+		localASN[external.Name] = external.Spec.LocalASN
 		if nodeSet[external.Name] {
 			continue
 		}
@@ -879,6 +883,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if spec, ok := extMap[externalName]; ok {
 					link.Properties[PropSrcLinkIP] = spec.Switch.IP
 					link.Properties[PropDstLinkIP] = spec.Neighbor.IP
+					if spec.Switch.IP == "" && spec.Neighbor.IP == "" {
+						link.Properties[PropUnnumbered] = "true"
+					}
 					if state := bgpStates[switchID][bgpPeer{connName, externalName}]; state != "" {
 						link.Properties[PropBGPState] = string(state)
 					}
@@ -888,20 +895,55 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
-	// Externals attached with each other's switch IP as neighbor are the two ends of a link between fabrics
-	for i, a := range externalAttachments.Items {
-		aIP, _, _ := strings.Cut(a.Spec.Switch.IP, "/")
-		for _, b := range externalAttachments.Items[i+1:] {
-			bIP, _, _ := strings.Cut(b.Spec.Switch.IP, "/")
-			if a.Spec.Topology.Fabric != b.Spec.Topology.Fabric &&
-				aIP != "" && bIP != "" && aIP == b.Spec.Neighbor.IP && bIP == a.Spec.Neighbor.IP {
-				topo.Links = append(topo.Links, Link{
-					Source:     a.Spec.External,
-					Target:     b.Spec.External,
-					Type:       EdgeTypeInterconnect,
-					Properties: map[string]string{},
-				})
+	// Externals attached with each other's switch IP as neighbor are the two ends of a link between
+	// fabrics. Unnumbered ends have no IPs to match, so pair them by each side's neighbor ASN being
+	// the local ASN the other presents: the External's, or else its border leaf's. Both ends are on
+	// the same VLAN. Independent links can reuse IPs and ASNs, so an attachment matching more than one
+	// External is left unpaired rather than guessed. Several links between the same two are drawn as one.
+	attachments := externalAttachments.Items
+	asns := make([]uint32, len(attachments))
+	for i, a := range attachments {
+		asns[i] = localASN[a.Spec.External]
+		if port, ok := externalConnections[a.Spec.Connection]; ok && asns[i] == 0 {
+			if sw := switchMap[wiringapi.SplitPortName(port)[0]]; sw != nil {
+				asns[i] = sw.Spec.ASN
 			}
+		}
+	}
+	matches := make([][]int, len(attachments))
+	for i, a := range attachments {
+		aIP, _, _ := strings.Cut(a.Spec.Switch.IP, "/")
+		for j, b := range attachments {
+			if a.Spec.Topology.Fabric == b.Spec.Topology.Fabric || a.Spec.Switch.VLAN != b.Spec.Switch.VLAN {
+				continue
+			}
+			bIP, _, _ := strings.Cut(b.Spec.Switch.IP, "/")
+			numbered := aIP != "" && bIP != "" && aIP == b.Spec.Neighbor.IP && bIP == a.Spec.Neighbor.IP
+			unnumbered := aIP == "" && bIP == "" &&
+				a.Spec.Neighbor.ASN != 0 && a.Spec.Neighbor.ASN == asns[j] &&
+				b.Spec.Neighbor.ASN != 0 && b.Spec.Neighbor.ASN == asns[i]
+			if numbered || unnumbered {
+				matches[i] = append(matches[i], j)
+			}
+		}
+	}
+	interconnects := map[[2]string]bool{}
+	for i, js := range matches {
+		for _, j := range js {
+			a, b := attachments[i].Spec.External, attachments[j].Spec.External
+			pair := [2]string{min(a, b), max(a, b)}
+			ambiguous := slices.ContainsFunc(js, func(k int) bool { return attachments[k].Spec.External != b }) ||
+				slices.ContainsFunc(matches[j], func(k int) bool { return attachments[k].Spec.External != a })
+			if ambiguous || interconnects[pair] {
+				continue
+			}
+			interconnects[pair] = true
+			topo.Links = append(topo.Links, Link{
+				Source:     pair[0],
+				Target:     pair[1],
+				Type:       EdgeTypeInterconnect,
+				Properties: map[string]string{},
+			})
 		}
 	}
 
@@ -1091,8 +1133,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 		topo.Nodes[i] = node
 	}
-
-	generateUnderlayLayer = hasUnderlayData(topo)
 
 	return topo, nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -136,10 +137,6 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 
 	style := GetStyle(styleType)
 
-	nodeConnectionsMap = make(map[string][]float64)
-	edgePositions = nil                        // Reset edge positions for this diagram
-	generateLinkSpeedLayer = topo.HasAgentData // Only generate link speed layer when agent data available
-
 	model := createDrawioModel(topo, style)
 	outputXML, err := xml.MarshalIndent(model, "", "  ")
 	if err != nil {
@@ -160,6 +157,9 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	nodes = topo.Nodes
+	edgePositions = nil                        // Reset edge positions for this diagram
+	generateLinkSpeedLayer = topo.HasAgentData // Only generate link speed layer when agent data available
+	generateUnderlayLayer = hasUnderlayData(topo)
 
 	model := &MxGraphModel{
 		Dx:         600,
@@ -682,6 +682,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			continue
 		}
 		left, right := findNode(nodes, link.Source), findNode(nodes, link.Target)
+		if cellMap[left.ID] != nil && cellMap[right.ID] != nil {
+			continue
+		}
 		if blockX[blockOf(left)] > blockX[blockOf(right)] {
 			left, right = right, left
 		}
@@ -690,6 +693,10 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		gapPairs[blockOf(left)]++
 
 		for i, node := range []Node{left, right} {
+			// an External can be at the end of several links between fabrics
+			if cellMap[node.ID] != nil {
+				continue
+			}
 			width, height := GetNodeDimensions(node)
 			cell := MxCell{
 				ID:     node.ID,
@@ -2503,23 +2510,12 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 		return "." + after
 	}
 	subnetOf := func(cidr string) string {
-		ip, prefix, ok := strings.Cut(cidr, "/")
-		if !ok {
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil {
 			return cidr
-		}
-		before, after, ok := strings.CutLast(ip, ".")
-		if !ok {
-			return cidr
-		}
-		var octet int
-		for _, ch := range after {
-			if ch < '0' || ch > '9' {
-				return cidr
-			}
-			octet = octet*10 + int(ch-'0')
 		}
 
-		return fmt.Sprintf("%s.%d/%s", before, octet&^1, prefix)
+		return prefix.Masked().String()
 	}
 
 	const p2pFixedDist = 30.0

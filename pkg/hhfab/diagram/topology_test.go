@@ -5,6 +5,8 @@ package diagram
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -134,34 +136,87 @@ func TestTopologyBGPState(t *testing.T) {
 	}
 	gwConn.Default()
 
-	extConn := &wiringapi.Connection{
-		Name:      "leaf-1--external--ext",
-		Namespace: kmetav1.NamespaceDefault,
-		Spec: wiringapi.ConnectionSpec{External: &wiringapi.ConnExternal{
-			Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: "leaf-1/E1/5"}},
-		}},
-	}
-	extConn.Default()
-
-	objs := make([]kclient.Object, 0, 4)
-	for _, ext := range []struct{ name, switchIP, neighborIP string }{
-		{"ext-a", "100.1.0.1/31", "100.1.0.0"},
-		{"ext-b", "", ""},
+	objs := make([]kclient.Object, 0, 24)
+	extConns := map[string]*wiringapi.Connection{}
+	for _, c := range []struct{ name, swPort, fabric string }{
+		{"leaf-1--external--ext", "leaf-1/E1/5", ""},
+		{"leaf-2--external--ext", "leaf-2/E1/5", ""},
+		{"extra-leaf-1--external--ext-1", "extra-leaf-1/E1/5", "extra"},
+		{"extra-leaf-1--external--ext-2", "extra-leaf-1/E1/7", "extra"},
 	} {
-		external := &vpcapi.External{Name: ext.name, Namespace: kmetav1.NamespaceDefault}
-		external.Default()
+		extConn := &wiringapi.Connection{
+			Name:      c.name,
+			Namespace: kmetav1.NamespaceDefault,
+			Spec: wiringapi.ConnectionSpec{
+				Topology: wiringapi.ConnectionTopology{Fabric: c.fabric},
+				External: &wiringapi.ConnExternal{
+					Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: c.swPort}},
+				},
+			},
+		}
+		extConn.Default()
+		extConns[c.swPort] = extConn
+		objs = append(objs, extConn)
+	}
+
+	// ext-b and ext-c have no neighbor ASN, which is optional, so they must not pair up. The ic-*
+	// externals are the two ends of links between fabrics, numbered and unnumbered, and the
+	// unnumbered ones have two links that must be drawn as one. The ic-shared-* externals reuse
+	// ASNs: the VLAN tells the first link apart, the others can't be told apart and stay unpaired
+	// without losing the first. The ic-reused-* links reuse IPs and are told apart by the VLAN.
+	// The ic-leaf-* externals have no local ASN, so each side presents its border leaf's.
+	externals := map[string]bool{}
+	for _, ext := range []struct {
+		name, fabric, swPort, switchIP, neighborIP string
+		localASN, neighborASN                      uint32
+		vlan                                       uint16
+	}{
+		{"ext-a", "", "leaf-1/E1/5", "100.1.0.1/31", "100.1.0.0", 0, 64102, 0},
+		{"ext-b", "", "leaf-1/E1/5", "", "", 0, 0, 0},
+		{"ext-c", "extra", "extra-leaf-1/E1/5", "", "", 0, 0, 0},
+		{"ic-num-main", "", "leaf-1/E1/5", "100.64.0.1/30", "100.64.0.2", 64910, 64911, 0},
+		{"ic-num-extra", "extra", "extra-leaf-1/E1/5", "100.64.0.2/30", "100.64.0.1", 64911, 64910, 0},
+		{"ic-unnum-main", "", "leaf-1/E1/5", "", "", 64920, 64921, 0},
+		{"ic-unnum-main", "", "leaf-2/E1/5", "", "", 64920, 64921, 0},
+		{"ic-unnum-extra", "extra", "extra-leaf-1/E1/5", "", "", 64921, 64920, 0},
+		{"ic-unnum-extra", "extra", "extra-leaf-1/E1/7", "", "", 64921, 64920, 0},
+		{"ic-shared-main-1", "", "leaf-1/E1/5", "", "", 64930, 64931, 10},
+		{"ic-shared-main-1", "", "leaf-2/E1/5", "", "", 64930, 64931, 20},
+		{"ic-shared-extra-1", "extra", "extra-leaf-1/E1/5", "", "", 64931, 64930, 10},
+		{"ic-shared-main-2", "", "leaf-1/E1/5", "", "", 64930, 64931, 20},
+		{"ic-shared-extra-2", "extra", "extra-leaf-1/E1/5", "", "", 64931, 64930, 20},
+		{"ic-shared-main-3", "", "leaf-2/E1/5", "", "", 64930, 64931, 20},
+		{"ic-shared-extra-3", "extra", "extra-leaf-1/E1/7", "", "", 64931, 64930, 20},
+		{"ic-reused-main-1", "", "leaf-1/E1/5", "100.64.1.1/30", "100.64.1.2", 0, 0, 10},
+		{"ic-reused-extra-1", "extra", "extra-leaf-1/E1/5", "100.64.1.2/30", "100.64.1.1", 0, 0, 10},
+		{"ic-reused-main-2", "", "leaf-1/E1/5", "100.64.1.1/30", "100.64.1.2", 0, 0, 20},
+		{"ic-reused-extra-2", "extra", "extra-leaf-1/E1/5", "100.64.1.2/30", "100.64.1.1", 0, 0, 20},
+		{"ic-leaf-main", "", "leaf-2/E1/5", "", "", 0, 65201, 30},
+		{"ic-leaf-extra", "extra", "extra-leaf-1/E1/7", "", "", 0, 65102, 30},
+	} {
+		if !externals[ext.name] {
+			externals[ext.name] = true
+			external := &vpcapi.External{Name: ext.name, Namespace: kmetav1.NamespaceDefault, Spec: vpcapi.ExternalSpec{
+				Topology: vpcapi.ExternalTopology{Fabric: ext.fabric},
+				LocalASN: ext.localASN,
+			}}
+			external.Default()
+			objs = append(objs, external)
+		}
+		extConn := extConns[ext.swPort]
 		attach := &vpcapi.ExternalAttachment{
 			Name:      extConn.Name + "--" + ext.name,
 			Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.ExternalAttachmentSpec{
+				Topology:   vpcapi.ExternalAttachmentTopology{Fabric: ext.fabric},
 				External:   ext.name,
 				Connection: extConn.Name,
-				Switch:     vpcapi.ExternalAttachmentSwitch{IP: ext.switchIP},
-				Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: 64102, IP: ext.neighborIP},
+				Switch:     vpcapi.ExternalAttachmentSwitch{IP: ext.switchIP, VLAN: ext.vlan},
+				Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: ext.neighborASN, IP: ext.neighborIP},
 			},
 		}
 		attach.Default()
-		objs = append(objs, external, attach)
+		objs = append(objs, attach)
 	}
 
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
@@ -174,27 +229,31 @@ func TestTopologyBGPState(t *testing.T) {
 			Role: wiringapi.SwitchRoleServerLeaf, Profile: "test-profile", ProtocolIP: "172.30.8.1/32",
 		}},
 		&wiringapi.Switch{Name: "leaf-2", Namespace: kmetav1.NamespaceDefault, Spec: wiringapi.SwitchSpec{
-			Role: wiringapi.SwitchRoleServerLeaf, Profile: "test-profile", ProtocolIP: "172.30.8.2/32",
+			Role: wiringapi.SwitchRoleServerLeaf, Profile: "test-profile", ProtocolIP: "172.30.8.2/32", ASN: 65102,
+		}},
+		&wiringapi.Switch{Name: "extra-leaf-1", Namespace: kmetav1.NamespaceDefault, Spec: wiringapi.SwitchSpec{
+			Role: wiringapi.SwitchRoleServerLeaf, Profile: "test-profile", ProtocolIP: "172.30.9.1/32", ASN: 65201,
+			Topology: wiringapi.SwitchTopology{Fabric: "extra"},
 		}},
 		conn,
 		meshConn,
 		gwConn,
-		extConn,
 		agent("spine-1", map[string]map[string]string{"default": {
-			"172.30.128.1": "established", "E1/2": "established",
-			"E1/3/1": "established", "172.30.128.3": "established",
-			"172.30.128.5": "established",
+			"172.30.128.1": "established", "E1/2": "idle",
+			"E1/3/1": "active", "172.30.128.3": "connect",
+			"172.30.128.5": "openSent",
 		}}),
 		agent("leaf-1", map[string]map[string]string{
 			"default": {
-				"172.30.128.0": "established", "E1/2": "idle",
-				"E1/3/1": "idle", "172.30.128.2": "idle",
+				"172.30.128.0": "openConfirm", "E1/2": "openConfirm",
+				"E1/3/1": "openConfirm", "172.30.128.2": "openConfirm",
 				"E1/6": "established",
 			},
 			"VrfEext-a": {"100.1.0.0": "established"},
 			"VrfEext-b": {"E1/5": "idle"},
 		}),
 		agent("leaf-2", nil),
+		agent("extra-leaf-1", nil),
 	).WithObjects(objs...).Build()
 
 	// a switch without an agent fails the call for all switches, so the second run goes
@@ -211,10 +270,16 @@ func TestTopologyBGPState(t *testing.T) {
 
 		byPort := map[string]Link{}
 		byExternal := map[string]Link{}
+		interconnects := []string{}
 		for _, link := range topo.Links {
-			if link.Type == EdgeTypeExternal {
+			switch link.Type {
+			case EdgeTypeExternal:
 				byExternal[link.Target] = link
-			} else {
+			case EdgeTypeInterconnect:
+				pair := []string{link.Source, link.Target}
+				slices.Sort(pair)
+				interconnects = append(interconnects, strings.Join(pair, "<>"))
+			default:
 				byPort[link.Properties[PropSourcePort]] = link
 			}
 		}
@@ -229,17 +294,17 @@ func TestTopologyBGPState(t *testing.T) {
 		require.Equal(t, "172.30.128.0/31", numbered.Properties[PropSrcLinkIP])
 
 		unnumbered := byPort["spine-1/E1/2"]
-		require.Equal(t, "established", unnumbered.Properties[PropBGPState])
+		require.Equal(t, "idle", unnumbered.Properties[PropBGPState])
 		require.Equal(t, "true", unnumbered.Properties[PropUnnumbered])
 		require.Empty(t, unnumbered.Properties[PropSrcLinkIP])
 
 		breakout := byPort["spine-1/E1/3"]
-		require.Equal(t, "established", breakout.Properties[PropBGPState])
+		require.Equal(t, "active", breakout.Properties[PropBGPState])
 		require.Equal(t, "true", breakout.Properties[PropUnnumbered])
 		require.Empty(t, breakout.Properties[PropSrcLinkIP])
 
 		subport := byPort["spine-1/E1/4/2"]
-		require.Equal(t, "established", subport.Properties[PropBGPState])
+		require.Equal(t, "connect", subport.Properties[PropBGPState])
 		require.Empty(t, subport.Properties[PropUnnumbered])
 		require.Equal(t, "172.30.128.2/31", subport.Properties[PropSrcLinkIP])
 
@@ -248,7 +313,7 @@ func TestTopologyBGPState(t *testing.T) {
 		require.Equal(t, "true", mesh.Properties[PropUnnumbered])
 
 		gateway := byPort["spine-1/E1/7"]
-		require.Equal(t, "established", gateway.Properties[PropBGPState])
+		require.Equal(t, "openSent", gateway.Properties[PropBGPState])
 		require.Empty(t, gateway.Properties[PropUnnumbered])
 		require.Equal(t, "172.30.128.4/31", gateway.Properties[PropSrcLinkIP])
 
@@ -256,6 +321,18 @@ func TestTopologyBGPState(t *testing.T) {
 		require.Empty(t, byPort["spine-1/E1/5"].Properties[PropUnnumbered])
 
 		require.Equal(t, "established", byExternal["ext-a"].Properties[PropBGPState])
+		require.Empty(t, byExternal["ext-a"].Properties[PropUnnumbered])
 		require.Equal(t, "idle", byExternal["ext-b"].Properties[PropBGPState])
+		require.Equal(t, "true", byExternal["ext-b"].Properties[PropUnnumbered])
+
+		slices.Sort(interconnects)
+		require.Equal(t, []string{
+			"ic-leaf-extra<>ic-leaf-main",
+			"ic-num-extra<>ic-num-main",
+			"ic-reused-extra-1<>ic-reused-main-1",
+			"ic-reused-extra-2<>ic-reused-main-2",
+			"ic-shared-extra-1<>ic-shared-main-1",
+			"ic-unnum-extra<>ic-unnum-main",
+		}, interconnects)
 	}
 }
