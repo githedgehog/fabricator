@@ -194,6 +194,9 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Services and logs**: `k3s-agent.service` status and last-hour logs,
   `sshd` status, `systemd-networkd` last-hour logs, kernel logs (last hour),
   kernel network/bond/VLAN messages from `dmesg`
+- **Link events (upgrade)**: timestamped `ip monitor link address route` trace
+  that hhfab records on gateway nodes while an upgrade runs
+  (`/var/log/hh-linkmon.log`), `not recorded` otherwise
 
 ### external.sh - virtual external node (Flatcar Linux + FRR)
 
