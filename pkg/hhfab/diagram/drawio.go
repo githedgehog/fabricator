@@ -118,7 +118,7 @@ func hasUnderlayData(topo Topology) bool {
 		}
 	}
 	for _, link := range topo.Links {
-		if link.Properties[PropSrcLinkIP] != "" || link.Properties[PropDstLinkIP] != "" {
+		if link.Properties[PropSrcLinkIP] != "" || link.Properties[PropDstLinkIP] != "" || link.Properties[PropUnnumbered] != "" {
 			return true
 		}
 	}
@@ -2531,7 +2531,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 		srcIP := edgeData.Link.Properties[PropSrcLinkIP]
 		dstIP := edgeData.Link.Properties[PropDstLinkIP]
 		// an unnumbered link has no addresses to label, but is still worth marking
-		unnumbered := edgeData.Link.Properties[PropUnnumbered] == "true"
+		unnumbered := edgeData.Link.Properties[PropUnnumbered] != ""
 		if srcIP == "" && dstIP == "" && !unnumbered {
 			continue
 		}
