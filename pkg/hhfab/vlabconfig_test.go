@@ -231,7 +231,7 @@ func TestVLABSSHKey(t *testing.T) {
 
 func TestSetVLABHugePages(t *testing.T) {
 	hp := func(val string) map[string]string {
-		return map[string]string{fabapi.AnnotationHugePages1G: val}
+		return map[string]string{gwapi.AnnotationHugePages1G: val}
 	}
 
 	kube := apiutil.NewLoader().GetClient()
@@ -268,11 +268,11 @@ func TestSetVLABHugePages(t *testing.T) {
 	// the value set on either the node or the gateway goes to the other one
 	for idx, want := range []string{"4", "", "8", "6", "2"} {
 		node := c.Nodes[idx]
-		require.Equal(t, want, node.Annotations[fabapi.AnnotationHugePages1G], "node %s", node.Name)
+		require.Equal(t, want, node.Annotations[gwapi.AnnotationHugePages1G], "node %s", node.Name)
 
 		gw := &gwapi.Gateway{}
 		require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: node.Name}, gw))
-		require.Equal(t, want, gw.Annotations[fabapi.AnnotationHugePages1G], "gateway %s", node.Name)
+		require.Equal(t, want, gw.Annotations[gwapi.AnnotationHugePages1G], "gateway %s", node.Name)
 	}
 }
 

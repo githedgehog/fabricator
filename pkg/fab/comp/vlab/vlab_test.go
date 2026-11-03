@@ -20,7 +20,7 @@ func TestRootPortNICs(t *testing.T) {
 }
 
 func TestSetGatewayHugePages(t *testing.T) {
-	const hp1G, hp2M = fabapi.AnnotationHugePages1G, fabapi.AnnotationHugePages2M
+	const hp1G, hp2M = gwapi.AnnotationHugePages1G, gwapi.AnnotationHugePages2M
 
 	for _, tt := range []struct {
 		name      string
