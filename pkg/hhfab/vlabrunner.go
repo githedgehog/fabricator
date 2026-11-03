@@ -1155,7 +1155,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return err
 				}
 
-				if vm.Type == VMTypeControl && opts.AutoUpgrade {
+				if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.AutoUpgrade {
 					startLinkMonitor(ctx, ssh, vm.Name)
 				}
 
@@ -1330,7 +1330,7 @@ func sshBootID(ctx context.Context, ssh *sshutil.Config) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// linkMonitorLog is where startLinkMonitor records link events, show-tech/control.sh reads the same path; each start
+// linkMonitorLog is where startLinkMonitor records link events, show-tech/control.sh and gateway.sh read the same path; each start
 // begins a fresh trace
 const linkMonitorLog = "/var/log/hh-linkmon.log"
 
