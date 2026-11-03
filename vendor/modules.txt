@@ -829,6 +829,10 @@ github.com/spf13/pflag
 # github.com/stefanberger/go-pkcs11uri v0.0.0-20230803200340-78284954bff6
 ## explicit; go 1.19
 github.com/stefanberger/go-pkcs11uri
+# github.com/stmcginnis/gofish v0.27.0
+## explicit; go 1.21
+github.com/stmcginnis/gofish
+github.com/stmcginnis/gofish/schemas
 # github.com/stretchr/testify v1.12.1
 ## explicit; go 1.17
 github.com/stretchr/testify/assert

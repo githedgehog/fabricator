@@ -1,0 +1,754 @@
+//
+// SPDX-License-Identifier: BSD-3-Clause
+//
+
+package gofish
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"mime/multipart"
+	"net/http"
+	"net/http/httputil"
+	"net/textproto"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/stmcginnis/gofish/schemas"
+)
+
+const userAgent = "gofish/1.0"
+const applicationJSON = "application/json"
+
+// APIClient represents a connection to a Redfish/Swordfish enabled service
+// or device.
+type APIClient struct {
+	// ctx is the context used in the HTTP requests
+	ctx context.Context
+
+	// Endpoint is the URL of the *fish service
+	endpoint string
+
+	// HTTPClient is for direct http actions
+	HTTPClient *http.Client
+
+	// Service is the ServiceRoot of this Redfish instance
+	Service *Service
+
+	// Auth information saved for later to be able to log out
+	auth *schemas.AuthToken
+
+	// sem used to limit number of concurrent requests
+	sem chan bool
+
+	// dumpWriter will receive HTTP dumps if non-nil.
+	dumpWriter io.Writer
+
+	// keepAlive is a flag to indicate if we should try to keep idle connections open
+	keepAlive bool
+
+	Settings schemas.ClientSettings
+}
+
+// Session holds the session ID and auth token needed to identify an
+// authenticated client
+type Session struct {
+	ID    string
+	Token string
+}
+
+// ClientConfig holds the settings for establishing a connection.
+type ClientConfig struct {
+	// Endpoint is the URL of the redfish service
+	Endpoint string
+
+	// Username is the optional user name to authenticate with.
+	Username string
+
+	// Password is the password to use for authentication.
+	Password string
+
+	// Session is an optional session ID+token obtained from a previous session
+	// If this is set, it is preferred over Username and Password
+	Session *Session
+
+	// Insecure controls whether to enforce SSL certificate validity.
+	Insecure bool
+
+	// Controls TLS handshake timeout
+	TLSHandshakeTimeout int
+
+	// HTTPClient is the optional client to connect with.
+	HTTPClient *http.Client
+
+	// DumpWriter is an optional io.Writer to receive dumps of HTTP
+	// requests and responses.
+	DumpWriter io.Writer
+
+	// BasicAuth tells the APIClient if basic auth should be used (true) or token based auth must be used (false)
+	BasicAuth bool
+
+	// The maximum number of concurrent HTTP requests that will be made (default: 1)
+	MaxConcurrentRequests int64
+
+	// ReuseConnections can be useful if executing a lot of requests. Setting to `true` allows
+	// the TCP sessions to remain open and reused betweeen subsequent calls.
+	ReuseConnections bool
+
+	// NoModifyTransport if set indicates that the API client won't attempt to make any changes to the transport
+	NoModifyTransport bool
+
+	// AutoExpand enables $expand if supported and automatically falls back if $expand fails.
+	AutoExpand bool
+
+	// AutoExpandLevels sets how many levels deep $expand should inline
+	// resources, when the BMC's ServiceRoot says it supports $levels. The
+	// value is clamped to the MaxLevels the service advertises. Has no effect
+	// unless AutoExpand is also true. At 0 no $levels is sent and the service
+	// picks its own depth.
+	//
+	// Each inlined resource is retained as raw JSON on its parent until the
+	// matching getter consumes it, so a deep expand holds roughly the size of
+	// the expanded response in memory.
+	AutoExpandLevels uint
+}
+
+// setupClientWithConfig setups the client using the client config
+func setupClientWithConfig(ctx context.Context, config *ClientConfig) (c *APIClient, err error) {
+	if !strings.HasPrefix(config.Endpoint, "http") {
+		return c, fmt.Errorf("endpoint must starts with http or https")
+	}
+
+	client := &APIClient{
+		endpoint:   config.Endpoint,
+		dumpWriter: config.DumpWriter,
+		ctx:        ctx,
+	}
+
+	if config.MaxConcurrentRequests <= 0 {
+		client.sem = make(chan bool, 1)
+	} else {
+		client.sem = make(chan bool, config.MaxConcurrentRequests)
+	}
+
+	if config.HTTPClient == nil {
+		defaultTransport := http.DefaultTransport.(*http.Transport)
+		transport := &http.Transport{
+			Proxy:                 defaultTransport.Proxy,
+			DialContext:           defaultTransport.DialContext,
+			MaxIdleConns:          defaultTransport.MaxIdleConns,
+			IdleConnTimeout:       defaultTransport.IdleConnTimeout,
+			ExpectContinueTimeout: defaultTransport.ExpectContinueTimeout,
+			// Clone rather than share the pointer. The default transport's config
+			// belongs to the whole process, and both the InsecureSkipVerify write
+			// below and net/http's HTTP/2 setup write into whatever config a
+			// transport holds.
+			TLSClientConfig:     defaultTransport.TLSClientConfig.Clone(),
+			TLSHandshakeTimeout: time.Duration(config.TLSHandshakeTimeout) * time.Second,
+			// Without this, Go disables HTTP/2 negotiation whenever TLSClientConfig
+			// is non-nil. Setting it to true re-enables ALPN-based negotiation so
+			// the protocol is selected during the TLS handshake as usual.
+			ForceAttemptHTTP2: true,
+		}
+
+		config.HTTPClient = &http.Client{Transport: transport}
+	}
+
+	client.HTTPClient = config.HTTPClient
+
+	// if the provided HTTPClient uses a standard Transport, we want to
+	// amend its configuration to match what was provided to us if the user allows it.
+	// otherwise we'll rely on the user to configure the transport as they claim it's configured.
+	if transport, ok := client.HTTPClient.Transport.(*http.Transport); ok && !config.NoModifyTransport {
+		if config.Insecure {
+			// If we're using the default transport, need to make sure there
+			// is a TLSClientConfig set in order to set the SkipVerify flag.
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				}
+			}
+			transport.TLSClientConfig.InsecureSkipVerify = true
+		}
+
+		// Without this, Go disables HTTP/2 negotiation whenever TLSClientConfig
+		// is non-nil. Setting it to true re-enables ALPN-based negotiation so
+		// the protocol is selected during the TLS handshake as usual.
+		transport.ForceAttemptHTTP2 = true
+
+		if config.ReuseConnections {
+			transport.DisableKeepAlives = false
+			transport.IdleConnTimeout = 1 * time.Minute
+		}
+
+		if config.TLSHandshakeTimeout != 0 {
+			transport.TLSHandshakeTimeout = time.Duration(config.TLSHandshakeTimeout) * time.Second
+		}
+	}
+
+	// Allow provided HTTPClients that don't use the standard Transport to reuse connections.
+	if config.ReuseConnections {
+		client.keepAlive = true
+	}
+
+	// Fetch the service root
+	client.Service, err = ServiceRoot(client)
+	if err != nil {
+		return nil, err
+	}
+
+	// Init default settings
+	if config.AutoExpand && client.Service != nil {
+		expand := schemas.ExpandNone
+		protocolFeats := client.Service.ProtocolFeaturesSupported
+		if protocolFeats.ExpandQuery.NoLinks {
+			expand = schemas.ExpandOptionPeriod
+		} else if protocolFeats.ExpandQuery.Links {
+			expand = schemas.ExpandOptionTilde
+		} else if protocolFeats.ExpandQuery.ExpandAll {
+			expand = schemas.ExpandOptionAsterisk
+		}
+
+		if expand != schemas.ExpandNone {
+			queryOpts := []schemas.QueryOption{schemas.WithExpand(expand), schemas.WithExpandFallback(true)}
+
+			if levels := config.AutoExpandLevels; levels > 0 && protocolFeats.ExpandQuery.Levels {
+				if maxLevels := protocolFeats.ExpandQuery.MaxLevels; maxLevels > 0 && levels > maxLevels {
+					levels = maxLevels
+				}
+
+				// The spec requires MaxLevels whenever Levels is true, so a
+				// service that omits it leaves levels unclamped above. Bound
+				// the conversion: a value that wraps negative is silently
+				// dropped by BuildQuery instead of being sent.
+				queryOpts = append(queryOpts, schemas.WithExpandLevel(int(min(levels, math.MaxInt32))))
+			}
+
+			client.Settings.DefaultQueryOptions = append(client.Settings.DefaultQueryOptions,
+				schemas.WithCollectionQueryOpts(queryOpts...))
+		}
+	}
+
+	return client, nil
+}
+
+// setupClientWithEndpoint setups the client using only the endpoint
+func setupClientWithEndpoint(ctx context.Context, endpoint string) (c *APIClient, err error) {
+	if !strings.HasPrefix(endpoint, "http") {
+		return c, fmt.Errorf("endpoint must starts with http or https")
+	}
+
+	client := &APIClient{
+		endpoint: endpoint,
+		ctx:      ctx,
+		sem:      make(chan bool, 1),
+	}
+	client.HTTPClient = &http.Client{}
+
+	// Fetch the service root
+	client.Service, err = ServiceRoot(client)
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// setupClientAuth setups the authentication in the client using the client config
+func (c *APIClient) setupClientAuth(config *ClientConfig) error {
+	if config.Session != nil {
+		c.auth = &schemas.AuthToken{
+			Session: config.Session.ID,
+			Token:   config.Session.Token,
+		}
+	} else if config.Username != "" {
+		var auth *schemas.AuthToken
+		if config.BasicAuth {
+			auth = &schemas.AuthToken{
+				Username:  config.Username,
+				Password:  config.Password,
+				BasicAuth: true,
+			}
+		} else {
+			var err error
+			auth, err = c.Service.CreateSession(config.Username, config.Password)
+			if err != nil {
+				return err
+			}
+		}
+
+		c.auth = auth
+	}
+
+	return nil
+}
+
+// Connect creates a new client connection to a Redfish service.
+func Connect(config ClientConfig) (c *APIClient, err error) { //nolint:gocritic
+	return ConnectContext(context.Background(), config)
+}
+
+// ConnectContext is the same as Connect, but sets the ctx.
+func ConnectContext(ctx context.Context, config ClientConfig) (c *APIClient, err error) { //nolint:gocritic
+	client, err := setupClientWithConfig(ctx, &config)
+	if err != nil {
+		return c, err
+	}
+
+	// Authenticate with the service
+	err = client.setupClientAuth(&config)
+	if err != nil {
+		return c, err
+	}
+
+	return client, err
+}
+
+// ConnectDefault creates an unauthenticated connection to a Redfish service.
+func ConnectDefault(endpoint string) (c *APIClient, err error) {
+	return ConnectDefaultContext(context.Background(), endpoint)
+}
+
+// ConnectDefaultContext is the same as ConnectDefault, but sets the ctx.
+func ConnectDefaultContext(ctx context.Context, endpoint string) (c *APIClient, err error) {
+	client, err := setupClientWithEndpoint(ctx, endpoint)
+	if err != nil {
+		return c, err
+	}
+
+	return client, err
+}
+
+// GetService returns the APIClient's service.
+func (c *APIClient) GetService() *Service {
+	return c.Service
+}
+
+// WithContext returns a copy of the client using the provided context
+func (c *APIClient) WithContext(ctx context.Context) *APIClient {
+	newClient := *c
+	newClient.ctx = ctx
+
+	// clone the service onto the new client so that any requests against it use the proper client
+	newService := Service{}
+	if newClient.Service != nil {
+		newService = *newClient.Service
+	}
+
+	newClient.Service = &newService
+	newClient.Service.SetClient(&newClient)
+
+	return &newClient
+}
+
+// CloneWithSession will create a new Client with a session instead of basic auth.
+func (c *APIClient) CloneWithSession() (*APIClient, error) {
+	if c.auth != nil && c.auth.Session != "" {
+		return nil, fmt.Errorf("client already has a session")
+	}
+
+	newClient := *c
+	newClient.HTTPClient = c.HTTPClient
+	service, err := ServiceRoot(&newClient)
+	if err != nil {
+		return nil, err
+	}
+	newClient.Service = service
+
+	auth, err := newClient.Service.CreateSession(
+		newClient.auth.Username,
+		newClient.auth.Password)
+	if err != nil {
+		return nil, err
+	}
+	newClient.auth = auth
+
+	return &newClient, err
+}
+
+// GetSession retrieves the session data from an initialized APIClient. An error
+// is returned if the client is not authenticated.
+func (c *APIClient) GetSession() (*Session, error) {
+	if c.auth == nil || c.auth.Session == "" {
+		return nil, fmt.Errorf("client not authenticated")
+	}
+	return &Session{
+		ID:    c.auth.Session,
+		Token: c.auth.Token,
+	}, nil
+}
+
+// Get performs a HEAD request against the Redfish service.
+func (c *APIClient) Head(url string) (*http.Response, error) {
+	return c.HeadWithHeaders(url, nil)
+}
+
+// GetWithHeaders performs a HEAD request against the Redfish service but allowing custom headers
+func (c *APIClient) HeadWithHeaders(url string, customHeaders map[string]string) (*http.Response, error) {
+	relativePath := url
+	if relativePath == "" {
+		relativePath = schemas.DefaultServiceRoot
+	}
+
+	return c.runRequestWithHeaders(http.MethodHead, relativePath, nil, customHeaders)
+}
+
+// Get performs a GET request against the Redfish service.
+func (c *APIClient) Get(url string) (*http.Response, error) {
+	return c.GetWithHeaders(url, nil)
+}
+
+// GetWithHeaders performs a GET request against the Redfish service but allowing custom headers
+func (c *APIClient) GetWithHeaders(url string, customHeaders map[string]string) (*http.Response, error) {
+	relativePath := url
+	if relativePath == "" {
+		relativePath = schemas.DefaultServiceRoot
+	}
+
+	return c.runRequestWithHeaders(http.MethodGet, relativePath, nil, customHeaders)
+}
+
+// Post performs a Post request against the Redfish service.
+func (c *APIClient) Post(url string, payload any) (*http.Response, error) {
+	return c.PostWithHeaders(url, payload, nil)
+}
+
+// PostWithHeaders performs a Post request against the Redfish service but allowing custom headers
+func (c *APIClient) PostWithHeaders(url string, payload any, customHeaders map[string]string) (*http.Response, error) {
+	return c.runRequestWithHeaders(http.MethodPost, url, payload, customHeaders)
+}
+
+// PostMultipart performs a Post request against the Redfish service with multipart payload.
+func (c *APIClient) PostMultipart(url string, payload map[string]io.Reader) (*http.Response, error) {
+	return c.PostMultipartWithHeaders(url, payload, nil)
+}
+
+// PostMultipartWithHeadersperforms a Post request against the Redfish service with multipart payload but allowing custom headers
+func (c *APIClient) PostMultipartWithHeaders(url string, payload map[string]io.Reader, customHeaders map[string]string) (*http.Response, error) {
+	return c.runRequestWithMultipartPayloadWithHeaders(http.MethodPost, url, payload, customHeaders)
+}
+
+// Put performs a Put request against the Redfish service.
+func (c *APIClient) Put(url string, payload any) (*http.Response, error) {
+	return c.PutWithHeaders(url, payload, nil)
+}
+
+// PutWithHeaders performs a Put request against the Redfish service but allowing custom headers
+func (c *APIClient) PutWithHeaders(url string, payload any, customHeaders map[string]string) (*http.Response, error) {
+	return c.runRequestWithHeaders(http.MethodPut, url, payload, customHeaders)
+}
+
+// Patch performs a Patch request against the Redfish service.
+func (c *APIClient) Patch(url string, payload any) (*http.Response, error) {
+	return c.PatchWithHeaders(url, payload, nil)
+}
+
+// PatchWithHeaders performs a Patch request against the Redfish service but allowing custom headers
+func (c *APIClient) PatchWithHeaders(url string, payload any, customHeaders map[string]string) (*http.Response, error) {
+	return c.runRequestWithHeaders(http.MethodPatch, url, payload, customHeaders)
+}
+
+// Delete performs a Delete request against the Redfish service
+func (c *APIClient) Delete(url string) (*http.Response, error) {
+	return c.DeleteWithHeaders(url, nil)
+}
+
+// DeleteWithHeaders performs a Delete request against the Redfish service but allowing custom headers
+func (c *APIClient) DeleteWithHeaders(url string, customHeaders map[string]string) (*http.Response, error) {
+	resp, err := c.runRequestWithHeaders(http.MethodDelete, url, nil, customHeaders)
+	defer schemas.DeferredCleanupHTTPResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// runRequestWithHeaders performs JSON REST calls but allowing custom headers
+func (c *APIClient) runRequestWithHeaders(method, url string, payload any, customHeaders map[string]string) (*http.Response, error) {
+	if url == "" {
+		return nil, fmt.Errorf("unable to execute request, no target provided")
+	}
+
+	var payloadBuffer io.ReadSeeker
+	if payload != nil {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		payloadBuffer = bytes.NewReader(body)
+	}
+
+	return c.runRawRequestWithHeaders(method, url, payloadBuffer, applicationJSON, customHeaders)
+}
+
+// runRequestWithMultipartPayloadWithHeaders performs REST calls with a multipart payload but allowing custom headers
+func (c *APIClient) runRequestWithMultipartPayloadWithHeaders(method, url string, payload map[string]io.Reader, customHeaders map[string]string) (*http.Response, error) {
+	if url == "" {
+		return nil, fmt.Errorf("unable to execute request, no target provided")
+	}
+
+	var payloadBuffer bytes.Buffer
+	var err error
+	payloadWriter := multipart.NewWriter(&payloadBuffer)
+	for key, reader := range payload {
+		var partWriter io.Writer
+		if file, ok := reader.(*os.File); ok {
+			// Add a file stream
+			if partWriter, err = payloadWriter.CreateFormFile(key, filepath.Base(file.Name())); err != nil {
+				return nil, err
+			}
+		} else {
+			// Add other fields
+			if partWriter, err = createFormField(key, payloadWriter); err != nil {
+				return nil, err
+			}
+		}
+		if _, err = io.Copy(partWriter, reader); err != nil {
+			return nil, err
+		}
+	}
+	payloadWriter.Close()
+
+	return c.runRawRequestWithHeaders(method, url, bytes.NewReader(payloadBuffer.Bytes()), payloadWriter.FormDataContentType(), customHeaders)
+}
+
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func escapeQuotes(s string) string {
+	return quoteEscaper.Replace(s)
+}
+
+// createFormField create form field with Content-Type
+func createFormField(fieldname string, w *multipart.Writer) (io.Writer, error) {
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition",
+		fmt.Sprintf(`form-data; name=%q`, escapeQuotes(fieldname)))
+	h.Set("Content-Type", "application/json")
+	return w.CreatePart(h)
+}
+
+// runRawRequest actually performs the REST calls
+func (c *APIClient) runRawRequest(method, url string, payloadBuffer io.ReadSeeker, contentType string) (*http.Response, error) {
+	return c.runRawRequestWithHeaders(method, url, payloadBuffer, contentType, nil)
+}
+
+// RunRawRequestWithHeaders actually performs the REST calls but allowing custom headers
+func (c *APIClient) RunRawRequestWithHeaders(method, url string, payloadBuffer io.ReadSeeker, contentType string, customHeaders map[string]string) (*http.Response, error) {
+	return c.runRawRequestWithHeaders(method, url, payloadBuffer, contentType, customHeaders)
+}
+
+// acquireSemaphore blocks until either the http concurrency semaphore is acquired or the context is cancelled
+func (c *APIClient) acquireSemaphore() error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	case c.sem <- true:
+		return nil
+	}
+}
+
+// releaseSemaphore releases the http concurrency semaphore
+func (c *APIClient) releaseSemaphore() {
+	<-c.sem
+}
+
+// runRawRequestWithHeaders actually performs the REST calls but allowing custom headers
+func (c *APIClient) runRawRequestWithHeaders(method, url string, payloadBuffer io.ReadSeeker, contentType string, customHeaders map[string]string) (*http.Response, error) {
+	if url == "" {
+		return nil, schemas.ConstructError(0, []byte("unable to execute request, no target provided"))
+	}
+
+	endpoint := fmt.Sprintf("%s%s", c.endpoint, url)
+	req, err := http.NewRequestWithContext(c.ctx, method, endpoint, payloadBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add common headers
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", applicationJSON)
+
+	// Add custom headers
+	for k, v := range customHeaders {
+		if k == "" && v == "" { // Quick check to avoid empty headers
+			continue
+		}
+
+		// Set Content-Length custom headers on the request
+		// since its ignored when set using Header.Set()
+		if strings.EqualFold("Content-Length", k) {
+			req.ContentLength, err = strconv.ParseInt(v, 10, 64) // base 10, 64 bit
+			if err != nil {
+				return nil, schemas.ConstructError(0, []byte("error parsing custom Content-Length header"))
+			}
+
+			continue
+		}
+
+		req.Header.Set(k, v)
+	}
+
+	// Add content info if present
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// Add auth info if authenticated
+	if c.auth != nil {
+		if c.auth.Token != "" {
+			req.Header.Set("X-Auth-Token", c.auth.Token)
+		} else if c.auth.BasicAuth && c.auth.Username != "" && c.auth.Password != "" {
+			encodedAuth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%v:%v", c.auth.Username, c.auth.Password)))
+			req.Header.Set("Authorization", fmt.Sprintf("Basic %v", encodedAuth))
+		}
+	}
+
+	req.Close = true
+	if c.keepAlive {
+		req.Close = false
+		req.Header.Add("Connection", "keep-alive")
+	}
+
+	// Dump request if needed.
+	if c.dumpWriter != nil {
+		if err := c.dumpRequest(req); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := c.acquireSemaphore(); err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	c.releaseSemaphore()
+	if err != nil {
+		return nil, err
+	}
+
+	// Dump response if needed.
+	if c.dumpWriter != nil {
+		if err := c.dumpResponse(resp); err != nil {
+			defer schemas.DeferredCleanupHTTPResponse(resp)
+			return nil, err
+		}
+	}
+
+	// A 304 Not Modified is the successful outcome of a conditional GET: the
+	// caller sent If-None-Match and their cached representation is still valid.
+	// Return the response intact (so the caller can read the Etag header) along
+	// with a sentinel so it can be told apart from a real error. Backward
+	// compatible: callers that don't send If-None-Match never receive a 304.
+	if resp.StatusCode == http.StatusNotModified {
+		return resp, schemas.ErrNotModified
+	}
+
+	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 202 && resp.StatusCode != 204 {
+		defer schemas.DeferredCleanupHTTPResponse(resp)
+		payload, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, schemas.ConstructError(0, []byte(err.Error()))
+		}
+		return nil, schemas.ConstructError(resp.StatusCode, payload)
+	}
+
+	return resp, err
+}
+
+// dumpRequest writes outgoing client requests to dumpWriter
+func (c *APIClient) dumpRequest(req *http.Request) error {
+	d, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		return schemas.ConstructError(0, []byte(err.Error()))
+	}
+
+	d = append(d, '\n')
+	_, err = c.dumpWriter.Write(d)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+// dumpRequest writes incoming responses to dumpWriter
+func (c *APIClient) dumpResponse(resp *http.Response) error {
+	d, err := httputil.DumpResponse(resp, true)
+	if err != nil {
+		return schemas.ConstructError(0, []byte(err.Error()))
+	}
+
+	d = append(d, '\n')
+	_, err = c.dumpWriter.Write(d)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+// Logout will delete any active session. Useful to defer logout when creating
+// a new connection.
+func (c *APIClient) Logout() {
+	if c != nil && c.Service != nil && c.auth != nil {
+		// if APIClient is created with ConnectContext (f.e. with http request ctx)
+		// and passed context is cancelled (f.e. downstream request is aborted),
+		// we need to create a new context to clean up Redfish API session
+		if c.ctx.Err() != nil {
+			c.ctx = context.Background()
+		}
+		if err := c.Service.DeleteSession(c.auth.Session); err == nil {
+			// Clean up invalid session token and ID upon successful Logout
+			c.auth.Session = ""
+			c.auth.Token = ""
+		}
+
+		c.HTTPClient.CloseIdleConnections()
+	}
+}
+
+// SetDumpWriter sets the client the DumpWriter dynamically
+func (c *APIClient) SetDumpWriter(writer io.Writer) {
+	c.dumpWriter = writer
+}
+
+func (c *APIClient) GetSettings() schemas.ClientSettings {
+	return c.Settings
+}
+
+// Deref is a convenience wrapper to get optional values from schema objects.
+//
+// Pointer values in objects are optional values, so if you want to see if the
+// service reported a value, then you need to explicitly check for nil:
+//
+//	// Did we get a display order?
+//	if attribuate.DisplayOrder {
+//			// Nothing reported
+//	}
+//
+// But if we don't care if it was reported by the service and we just want its
+// value, being fine with its zero-value if it wasn't provided, we can do:
+//
+//	var value int
+//	value = Deref(attribute.DisplayOrder)
+func Deref[T any](v *T) T {
+	var result T
+	if v == nil {
+		return result
+	}
+	return *v
+}
+
+// ToRef is a convenience wrapper to get a pointer to a value. This is useful
+// when assigning a value to an optional API object field that expects a pointer.
+func ToRef[T any](v T) *T {
+	return &v
+}
