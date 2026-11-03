@@ -66,3 +66,25 @@ All created VPCs, peerings, and server network configurations are torn down rega
 | `gateway=true` | GatewayPeerings created between consecutive `ort-d2..N` VPCs; `NoGateway` skip lifted |
 | `gateway=false` | Gateway peerings skipped; test still passes as long as other preconditions are met |
 | `mesh=true` | mesh-only switch connections (does not affect the on-ready test logic directly) |
+
+## The add-fabric job
+
+The `v-gwk-iso-l2vni-mf` job (`addfabric=true`, `gateway=kernel`) does not run the OnReady Suite or release tests, whatever `releasetest` is. It generates two Fabrics with `--add-fabric --interconnect-fabrics --interconnect-links=2`: the default Fabric with 2 orphan leaves and the extra Fabric with 2 mesh leaves, one server per leaf, 1 BGP + 1 static external, no ESLAG, and the 2 gateways in the default Fabric only. The Fabrics are linked by two independent interconnect pairs, each with its own two Externals and attachments on a port of the same leaf on each side. The extra Fabric is left out of the install: its VMs boot and its switches wait for their Switch objects.
+
+The ready steps then run in this order:
+
+- `add-fabric` creates the objects of the extra Fabric and waits for all switches, including the two new leaves, to be ready
+- `inspect` and `inspect-pods`
+- `setup-vpcs` creates the VPCs and attachments of all four servers, one subnet per VPC when there are several interconnect pairs so each Fabric has a VPC per pair, and checks that each server is configured and reaches its gateway through its leaf
+- `setup-peerings` creates a VPC peering inside each Fabric and an External peering from the k-th VPC of each Fabric to the External of the k-th interconnect pair, built from the cluster. The extra Fabric has no gateway, so the default Fabric also gets a gateway peering between its interconnect External and the BGP External (masquerading into the External's NAT pool), and the VPC of the extra Fabric peers its interconnect External with `0.0.0.0/0`
+- `test-connectivity` checks every server pair and External against the connectivity matrix. A pair in different Fabrics must reach each other when both VPCs have an External peering to the interconnect External of their own Fabric, one covering the other's subnet, and nothing else carries traffic between Fabrics. A server in the extra Fabric reaches the External only when that gateway peering and the VPC's `0.0.0.0/0` peering both exist, and the matrix expects it denied without them. Interconnect Externals are not probe targets. Servers on different pairs must not reach each other, since the VPCs of one pair have no path through the other
+
+## The multi-domain job
+
+The `v-iso-l2vni-md` job (`multidomain=true`) does not run the OnReady Suite or release tests either. It generates one Fabric with a second domain: `--extra-domain --shared-leafs-count=1` with one ESLAG group of 2 leaves, 3 orphan leaves, one server per orphan leaf and the ESLAG servers, 1 BGP + 1 static external and no gateways. The ESLAG group stays in the default domain, so `leaf-01` and `leaf-02` are in `default` only. The orphan leaves and the externals are in the second domain, `domain-b`: `leaf-03` and `leaf-04` are in `domain-b` only and `leaf-05` is shared by `default` and `domain-b`.
+
+The ready steps run in this order: `inspect`, `inspect-pods`, `setup-vpcs`, `setup-peerings`, `test-connectivity`.
+
+- `setup-vpcs` creates VPCs in `default` for the three servers of the ESLAG group, a VPC in `domain-b` for the two orphan-leaf servers, and a VPC in both domains for the server on the shared leaf
+- `setup-peerings` peers the VPCs of the same domain, peers the first VPC of `default` and the first VPC of `domain-b` with the VPC on the shared leaf, and peers the first VPC of `domain-b` with the first External of that domain
+- `test-connectivity` checks every pair against the peerings: a server in `default` and a server in `domain-b` must not reach each other, although both VPCs are peered to the VPC on the shared leaf, so the shared leaf is not a path between domains. Only the peered subnet reaches the External

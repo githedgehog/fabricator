@@ -277,3 +277,36 @@ func TestSelectStaticExternalTargetSkipsUnattachedCandidate(t *testing.T) {
 		t.Errorf("expected inVPC vpc-01 and otherVPC vpc-02, got %s/%s", sel.inVPC.Name, sel.otherVPC.Name)
 	}
 }
+
+// an interconnect External has a BGP attachment too, but nothing behind it to test against
+func TestFindExternalsSkipsInterconnect(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := wiringapi.AddToScheme(scheme); err != nil {
+		t.Fatalf("adding wiringapi to scheme: %v", err)
+	}
+	if err := vpcapi.AddToScheme(scheme); err != nil {
+		t.Fatalf("adding vpcapi to scheme: %v", err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
+	extList := &vpcapi.ExternalList{Items: []vpcapi.External{
+		toB,
+		{Name: "ext-bgp-01"},
+	}}
+	attaches := &vpcapi.ExternalAttachmentList{Items: []vpcapi.ExternalAttachment{
+		{Spec: vpcapi.ExternalAttachmentSpec{External: "to-fabric-b"}},
+		{Spec: vpcapi.ExternalAttachmentSpec{External: "ext-bgp-01"}},
+	}}
+
+	bgp, static := findExternals(context.Background(), kube, extList, attaches)
+	if bgp != "ext-bgp-01" || static != "" {
+		t.Fatalf("got bgp %q static %q, want ext-bgp-01 and none", bgp, static)
+	}
+
+	// only the interconnect External left: no viable external
+	bgp, static = findExternals(context.Background(), kube, &vpcapi.ExternalList{Items: extList.Items[:1]}, attaches)
+	if bgp != "" || static != "" {
+		t.Fatalf("got bgp %q static %q, want none", bgp, static)
+	}
+}
