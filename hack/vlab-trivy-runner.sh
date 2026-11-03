@@ -234,6 +234,11 @@ if [ "$USE_EXISTING_VLAB" = false ]; then
         if [ "$RUN_SWITCH" = true ]; then
             echo -e "${YELLOW}Generating VLAB topology for switch scanning...${NC}"
             $HHFAB_BIN vlab gen --spines-count 2 --fabric-links-count 1 --orphan-leafs-count 1 --unbundled-servers 1 --bundled-servers 0 --eslag-servers 0
+        elif [ "$RUN_GATEWAY" = true ]; then
+            # vlab up needs the Gateway object from the wiring to size the gateway VM, and the gateway needs a
+            # switch to attach to, so generate the smallest topology with one: a single mesh leaf
+            echo -e "${YELLOW}Generating VLAB topology for gateway scanning...${NC}"
+            $HHFAB_BIN vlab gen --mesh-links-count 1 --orphan-leafs-count 1 --unbundled-servers 0 --bundled-servers 0 --eslag-servers 0 --multihomed-servers 0
         fi
     fi
 
