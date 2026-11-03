@@ -56,6 +56,7 @@ type VLABBuilderBase struct {
 	DefaultSwitchProfile   string            // default switch profile to use for switches
 	SwitchProfileOverrides map[string]string // switch profile overrides to use for switches
 	ServerPortBase         string            // base for server port interfaces (e.g. enp2s for ports like enp2s1, enp2s2, etc.)
+	NumberedLinks          bool              // annotate fabrics to hydrate fabric and mesh links with /31s instead of BGP unnumbered
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -338,7 +339,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		slog.Info(">>>", overrides...)
 	}
 	if fabricMode == meta.FabricModeSpineLeaf {
-		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
+		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount, "numberedLinks", b.NumberedLinks)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
 		if b.ExtraDomain {
 			slog.Info(">>>", "extraDomain", VLABExtraDomain, "sharedLeafsCount", b.SharedLeafsCount)
@@ -974,9 +975,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
-		Kind:       wiringapi.KindFabric,
-		APIVersion: wiringapi.GroupVersion.String(),
-		Name:       VLABExtraFabric,
+		Kind:        wiringapi.KindFabric,
+		APIVersion:  wiringapi.GroupVersion.String(),
+		Name:        VLABExtraFabric,
+		Annotations: b.fabricAnnotations(),
 		Spec: wiringapi.FabricSpec{
 			LeafASNStart: 4200072168, // 64088.1000 in asdot
 			LeafASNEnd:   4200081167, // 64088.9999 in asdot
@@ -1343,15 +1345,24 @@ func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabr
 	maps.Copy(spec.Domains, extraDomains)
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
-		Kind:       wiringapi.KindFabric,
-		APIVersion: wiringapi.GroupVersion.String(),
-		Name:       wiringapi.DefaultFabric,
-		Spec:       spec,
+		Kind:        wiringapi.KindFabric,
+		APIVersion:  wiringapi.GroupVersion.String(),
+		Name:        wiringapi.DefaultFabric,
+		Annotations: b.fabricAnnotations(),
+		Spec:        spec,
 	}); err != nil {
 		return fmt.Errorf("creating default fabric: %w", err)
 	}
 
 	return nil
+}
+
+func (b *VLABBuilderBase) fabricAnnotations() map[string]string {
+	if !b.NumberedLinks {
+		return nil
+	}
+
+	return map[string]string{HydrateNumberedLinksAnnotation: "true"}
 }
 
 func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
