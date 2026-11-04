@@ -149,6 +149,8 @@ spec:
                       baseVPCCommunity:
                         type: string
                       defaultAlloyConfig:
+                        description: 'Deprecated: ignored, kept so configs exported
+                          by 26.05 can be imported'
                         properties:
                           agentScrapeIntervalSeconds:
                             type: integer
