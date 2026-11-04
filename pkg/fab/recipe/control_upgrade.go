@@ -57,11 +57,6 @@ type ControlUpgrade struct {
 func (c *ControlUpgrade) Run(ctx context.Context) error {
 	slog.Info("Running control node upgrade")
 
-	// before anything talks to k3s, which cannot start without its interface
-	if err := ensureVLABIfaceNames(ctx); err != nil {
-		return fmt.Errorf("ensuring VLAB interface names: %w", err)
-	}
-
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		coreapi.AddToScheme, appsapi.AddToScheme,
 		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
@@ -714,8 +709,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 }
 
 // installVLABVirtioNames writes the VLAB-only virtio NIC naming rule an install
-// gets from its ignition, so that a VLAB upgraded from e1000 keeps its
-// interface names once its VMs restart with virtio-net. It matches only VLAB
+// gets from its ignition, so upgrades keep it current. It matches only VLAB
 // VMs, so writing it anywhere else changes nothing.
 func installVLABVirtioNames() error {
 	if err := os.MkdirAll(filepath.Dir(flatcar.VLABVirtioNamesLinkPath), 0o755); err != nil {
