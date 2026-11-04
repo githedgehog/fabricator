@@ -43,8 +43,8 @@ var FabricatorVersion = meta.Version(version.Version)
 
 // Upgrade constraints, "-0" to include pre-releases
 const (
-	FabricatorCtrlConstraint = ">=0.49.3-0"
-	FabricAgentConstraint    = ">=0.129.4-0"
+	FabricatorCtrlConstraint = ">=0.51.3-0"
+	FabricAgentConstraint    = ">=0.144.1-0"
 	FabricNOSConstraint      = ">=4.5.2-0" // -0 is to allow -Enterprise_Base suffix
 )
 
