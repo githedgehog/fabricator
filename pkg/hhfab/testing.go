@@ -3570,9 +3570,8 @@ func checkPing(ctx context.Context, pingCount int, sem *semaphore.Weighted, from
 	return nil
 }
 
-// iperf3DaemonUnit is also planted by vlab_server_butane.tmpl.yaml on fresh
-// installs; ensureIperf3Daemon below covers upgrades from VMs without the
-// butane entry and can be removed once those releases are out of support.
+// iperf3DaemonUnit is also planted by vlab_server_butane.tmpl.yaml on server
+// VMs; ensureIperf3Daemon below covers hardware servers of hybrid VLABs.
 const iperf3DaemonUnit = `[Unit]
 Description=iperf3 server for VLAB connectivity tests
 After=docker.service network-online.target
@@ -3594,8 +3593,8 @@ RestartSec=5
 WantedBy=multi-user.target
 `
 
-// ensureIperf3Daemon installs iperf3.service on servers that pre-date the
-// butane entry. Idempotent; safe to remove once those releases are unsupported.
+// ensureIperf3Daemon installs iperf3.service on servers without the butane
+// entry, i.e. hardware ones. Idempotent.
 func ensureIperf3Daemon(ctx context.Context, sshCfg *sshutil.Config, server string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(iperf3DaemonUnit))
 	cmd := fmt.Sprintf(
