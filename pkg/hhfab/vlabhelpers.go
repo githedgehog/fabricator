@@ -455,6 +455,16 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		}
 	}
 
+	// an interrupted reinstall must not leave the switch marked as installed
+	for _, sw := range switches.Items {
+		if len(opts.Switches) > 0 && !slices.Contains(opts.Switches, sw.Name) {
+			continue
+		}
+		if err := c.resetHWInstalled(sw.Name); err != nil {
+			return err
+		}
+	}
+
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("getting executable path: %w", err)
@@ -574,6 +584,9 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 			} else {
 				if opts.WaitReady {
 					slog.Info("Switch reinstalled successfully", "name", sw.Name)
+					if err := c.setHWInstalled(sw.Name); err != nil {
+						slog.Warn("Failed to mark switch installed", "name", sw.Name, "err", err)
+					}
 				} else {
 					slog.Info("Switch placed into NOS Install Mode", "name", sw.Name)
 				}
@@ -1030,6 +1043,9 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 	}
 
 	if len(opts.Switches) > 0 {
+		// unused ones only by name
+		switches.Items = append(switches.Items, c.UnusedHW.Switches...)
+
 		sws := map[string]bool{}
 		for _, sw := range switches.Items {
 			sws[sw.Name] = true
@@ -1047,25 +1063,33 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 			continue
 		}
 
-		powerInfo := hhfctl.GetPowerInfo(&sw)
-		if len(powerInfo) == 0 {
-			return fmt.Errorf("no power info found for switch: %s", sw.Name) //nolint:err113
+		if err := powerSwitch(ctx, &sw, opts.Action, opts.PDUUsername, opts.PDUPassword); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func powerSwitch(ctx context.Context, sw *wiringapi.Switch, action pdu.Action, username, password string) error {
+	powerInfo := hhfctl.GetPowerInfo(sw)
+	if len(powerInfo) == 0 {
+		return fmt.Errorf("no power info found for switch: %s", sw.Name) //nolint:err113
+	}
+
+	for psuName, url := range powerInfo {
+		outletID, err := pdu.ExtractOutletID(url)
+		if err != nil {
+			return fmt.Errorf("extracting outlet ID from URL %s: %w", url, err)
+		}
+		pduIP, err := pdu.GetPDUIPFromURL(url)
+		if err != nil {
+			return fmt.Errorf("extracting PDU IP from URL %s: %w", url, err)
 		}
 
-		for psuName, url := range powerInfo {
-			outletID, err := pdu.ExtractOutletID(url)
-			if err != nil {
-				return fmt.Errorf("extracting outlet ID from URL %s: %w", url, err)
-			}
-			pduIP, err := pdu.GetPDUIPFromURL(url)
-			if err != nil {
-				return fmt.Errorf("extracting PDU IP from URL %s: %w", url, err)
-			}
-
-			slog.Info("Calling PDU API", "switch", sw.Name, "psu", psuName, "pduIP", pduIP, "outletID", outletID, "action", opts.Action)
-			if err := pdu.ControlOutlet(ctx, pduIP, opts.PDUUsername, opts.PDUPassword, outletID, opts.Action); err != nil {
-				return fmt.Errorf("failed to power %s switch %s %s: %w", opts.Action, sw.Name, psuName, err)
-			}
+		slog.Info("Calling PDU API", "switch", sw.Name, "psu", psuName, "pduIP", pduIP, "outletID", outletID, "action", action)
+		if err := pdu.ControlOutlet(ctx, pduIP, username, password, outletID, action); err != nil {
+			return fmt.Errorf("failed to power %s switch %s %s: %w", action, sw.Name, psuName, err)
 		}
 	}
 

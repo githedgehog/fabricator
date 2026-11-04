@@ -35,6 +35,10 @@ func Build(ctx context.Context, workDir, cacheDir string, extraCacheDirs []strin
 		return err
 	}
 
+	if err := c.dropUnusedHW(ctx); err != nil {
+		return err
+	}
+
 	// hardware nodes are installed from the ISO unless explicitly overridden
 	overrides := c.hardwareModeOverrides(recipe.BuildModeISO)
 	maps.Copy(overrides, opts.ModeOverrides)

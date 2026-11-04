@@ -94,6 +94,7 @@ type VLAB struct {
 	Externals    ExternalsCfg
 	// Created is set if the VLAB config was created in this run, so there is no existing cluster
 	Created bool
+	hw      *hwPlan
 }
 
 type VLABNetKind string

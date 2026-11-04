@@ -115,6 +115,17 @@ type WaitReadyOpts struct {
 	PrintEvery   int
 }
 
+func switchAgentApplied(ag *agentapi.Agent, expectedV string) bool {
+	// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
+	ready := ag.Spec.Version.Default == expectedV
+
+	// make sure last applied generation is the same as current generation
+	ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
+
+	// make sure last heartbeat is recent enough
+	return ready && time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
+}
+
 func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) error {
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -224,14 +235,7 @@ func WaitReady(ctx context.Context, kube kclient.Reader, opts WaitReadyOpts) err
 				continue
 			}
 
-			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := ag.Spec.Version.Default == expectedSwAgentV
-
-			// make sure last applied generation is the same as current generation
-			ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
-
-			// make sure last heartbeat is recent enough
-			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < fabapi.AgentHeartbeatStale(ag.Spec.Config.HeartbeatInterval)
+			ready := switchAgentApplied(ag, expectedSwAgentV)
 
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough

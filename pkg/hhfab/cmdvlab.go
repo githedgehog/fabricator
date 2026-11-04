@@ -68,6 +68,7 @@ type VLABUpOpts struct {
 	SetJoinToken         string
 	ObservabilityTargets string
 	VMSizesOverrides     VMSizes
+	HWModes              HWModeFlags
 	VLABRunOpts
 }
 
@@ -81,8 +82,10 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:err113
 	}
 
-	if opts.AutoUpgrade && opts.NodeReinstall {
-		return fmt.Errorf("--upgrade and --node-reinstall are mutually exclusive: upgrade covers hardware nodes too") //nolint:err113
+	var err error
+	opts.HWSwitches, opts.HWNodes, opts.OnReady, err = resolveHWModes(opts.HWModes, opts.OnReady, opts.AutoUpgrade)
+	if err != nil {
+		return err
 	}
 
 	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, true, opts.HydrateMode, opts.SetJoinToken)
@@ -90,23 +93,18 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return err
 	}
 
-	if opts.NodeReinstall {
-		bmcNodes, err := c.bmcNodes()
-		if err != nil {
-			return err
-		}
-		if len(bmcNodes) == 0 {
-			slog.Warn("No hardware nodes with BMC to install", "annotation", HHFabCfgBMC)
-		}
-
-		if err := checkBMCNodes(ctx, bmcNodes, opts.BMC); err != nil {
-			return err
-		}
+	if err := c.dropUnusedHW(ctx); err != nil {
+		return err
 	}
 
 	vlab, err := c.PrepareVLAB(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("preparing VLAB: %w", err)
+	}
+
+	vlab.hw, err = c.planHW(ctx, opts.VLABRunOpts)
+	if err != nil {
+		return err
 	}
 
 	if err := c.setVLABHugePages(ctx, vlab); err != nil {
@@ -156,6 +154,10 @@ func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config,
 
 	c, err := load(ctx, workDir, cacheDir, nil, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := c.dropUnusedHW(ctx); err != nil {
 		return nil, nil, err
 	}
 
