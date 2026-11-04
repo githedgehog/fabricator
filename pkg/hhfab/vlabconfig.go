@@ -72,6 +72,8 @@ const (
 	// VLABLink prefixes the links, hhlink0 has taps hhlink0p0 and hhlink0p1
 	VLABLink = "hhlink"
 	// VLABLegacyMgmt and VLABLegacyMgmtTap are the management network's previous names, kept to clean it up
+	//
+	// TODO remove once upgrades from 26.05 are no longer supported
 	VLABLegacyMgmt    = "hhbr"
 	VLABLegacyMgmtTap = "hhtap"
 
