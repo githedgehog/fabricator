@@ -32,6 +32,7 @@ func TestUpgradeFromWithoutFabric(t *testing.T) {
 		"":         false,
 	} {
 		require.Equal(t, want, upgradeFromWithoutFabric(release), "release %q", release)
+		require.Equal(t, want, upgradeFromWithoutNICRule(release), "release %q", release)
 	}
 }
 
