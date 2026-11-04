@@ -270,6 +270,11 @@ type FabricConfig struct {
 	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
 	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
 
+	// Deprecated: ignored, kept so configs exported by older releases can be imported
+	VPCWorkaroundVLANs []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"` // TODO: remove after 26.05 release
+	// Deprecated: ignored, kept so configs exported by older releases can be imported
+	VPCWorkaroundSubnet meta.Prefix `json:"vpcWorkaroundSubnet,omitempty"` // TODO: remove after 26.05 release
+
 	TH5WorkaroundVLANs []fmeta.VLANRange `json:"th5WorkaroundVLANs,omitempty"`
 
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
@@ -424,7 +429,8 @@ type GatewayVersions struct {
 	Controller meta.Version `json:"controller,omitempty"`
 	Agent      meta.Version `json:"agent,omitempty"`
 	Dataplane  meta.Version `json:"dataplane,omitempty"`
-	FRR        meta.Version `json:"frr,omitempty"` // TODO: remove after 26.05 release
+	// Deprecated: ignored, FRR is part of the dataplane
+	FRR meta.Version `json:"frr,omitempty"` // TODO: remove after 26.05 release
 }
 
 type VLABVersions struct {
@@ -567,6 +573,10 @@ func (f *Fabricator) Default() {
 			"9": "50001:9",
 		}
 	}
+
+	f.Spec.Config.Fabric.VPCWorkaroundVLANs = nil
+	f.Spec.Config.Fabric.VPCWorkaroundSubnet = ""
+	f.Spec.Overrides.Versions.Gateway.FRR = ""
 
 	o11yNotNone := f.Spec.Config.Observability.Defaults != ObservabilityDefaultsNone
 	o11yMinimal := f.Spec.Config.Observability.Defaults == ObservabilityDefaultsMinimal

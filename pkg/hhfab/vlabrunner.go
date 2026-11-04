@@ -30,6 +30,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
@@ -1116,6 +1117,12 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			if err == nil && !opts.AutoUpgrade && marker == recipe.InstallMarkerComplete {
 				slog.Info("Node install was already completed", "vm", vm.Name, "type", vm.Type)
 			} else {
+				if vm.Type == VMTypeControl && opts.AutoUpgrade {
+					if err := c.checkConfigExportImport(ctx, ssh, vm.Name); err != nil {
+						return fmt.Errorf("checking config export and import before upgrade: %w", err)
+					}
+				}
+
 				slog.Info("Uploading installer", "vm", vm.Name, "type", vm.Type)
 
 				recipeType := string(recipe.TypeControl)
@@ -1328,6 +1335,40 @@ func sshBootID(ctx context.Context, ssh *sshutil.Config) (string, error) {
 	}
 
 	return strings.TrimSpace(out), nil
+}
+
+// checkConfigExportImport runs the documented upgrade path's first step: exports the config with the hhfabctl of
+// the release being upgraded from and imports it the way `hhfab init -c` does
+func (c *Config) checkConfigExportImport(ctx context.Context, ssh *sshutil.Config, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	cmd := filepath.Join(f8r.BinDir, f8r.CtlDestBinName) + " config export"
+	for {
+		out, stderr, err := ssh.Run(ctx, cmd)
+		if err == nil {
+			path := filepath.Join(c.WorkDir, VLABDir, "fab-export-"+name+".yaml")
+			if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+				return fmt.Errorf("writing exported config: %w", err)
+			}
+
+			if _, _, err := importConfig(ctx, path, map[string]any{}); err != nil {
+				return fmt.Errorf("importing exported config: %w", err)
+			}
+
+			slog.Info("Exported config imports cleanly", "vm", name, "file", path)
+
+			return nil
+		}
+
+		slog.Debug("Exporting config failed, retrying", "vm", name, "err", err, "stderr", stderr)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("exporting config: %w: %s", err, stderr)
+		case <-time.After(15 * time.Second):
+		}
+	}
 }
 
 // linkMonitorLog is where startLinkMonitor records link events, show-tech/control.sh reads the same path; each start
