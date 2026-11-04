@@ -1092,6 +1092,18 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 		return fmt.Errorf("syncing temporary script file: %w", err)
 	}
 
+	// Dedicated clock sample: the runner's own time right before and after the remote reading
+	// brackets the SSH round trip, so the offset is not mixed up with how long collection waited.
+	sampleStart := time.Now()
+	sampleOut, _, sampleErr := ssh.Run(ctx, "date -u +%s.%N")
+	sampleEnd := time.Now()
+	if sampleErr != nil {
+		slog.Debug("Clock sample failed", "entry", entryName, "err", sampleErr)
+	} else {
+		slog.Info("Clock sample", "entry", entryName, "runnerBefore", sampleStart.UTC().Format(time.RFC3339Nano),
+			"remoteEpoch", strings.TrimSpace(sampleOut), "runnerAfter", sampleEnd.UTC().Format(time.RFC3339Nano))
+	}
+
 	err = ssh.UploadPath(tmpfile.Name(), remoteScriptPath)
 	if err != nil {
 		return fmt.Errorf("uploading script to %s: %w", entryName, err)
