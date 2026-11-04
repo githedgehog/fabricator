@@ -64,7 +64,6 @@ _Appears in:_
 | `controlAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayDataplane` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
-| `gatewayFRR` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
 
 
 #### ControlConfig
@@ -400,8 +399,6 @@ _Appears in:_
 | `proxyExternalSubnet` _Prefix_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
-| `vpcWorkaroundVLANs` _VLANRange array_ | Deprecated: ignored, kept so configs exported by older releases can be imported |  |  |
-| `vpcWorkaroundSubnet` _Prefix_ | Deprecated: ignored, kept so configs exported by older releases can be imported |  |  |
 | `th5WorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
 | `eslagESIPrefix` _string_ |  |  |  |
@@ -639,7 +636,6 @@ _Appears in:_
 | `controller` _Version_ |  |  |  |
 | `agent` _Version_ |  |  |  |
 | `dataplane` _Version_ |  |  |  |
-| `frr` _Version_ | Deprecated: ignored, FRR is part of the dataplane |  |  |
 
 
 #### ObservabilityConfig

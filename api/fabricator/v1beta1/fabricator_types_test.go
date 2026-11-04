@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	fmeta "go.githedgehog.com/fabric/api/meta"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -72,17 +71,4 @@ func TestAgentHeartbeatStale(t *testing.T) {
 	} {
 		require.Equal(t, expected, fabapi.AgentHeartbeatStale(interval), "interval %d", interval)
 	}
-}
-
-func TestDefaultClearsIgnoredFields(t *testing.T) {
-	f := &fabapi.Fabricator{}
-	f.Spec.Config.Fabric.VPCWorkaroundVLANs = []fmeta.VLANRange{{From: 100, To: 3999}}
-	f.Spec.Config.Fabric.VPCWorkaroundSubnet = "172.30.96.0/19"
-	f.Spec.Overrides.Versions.Gateway.FRR = "v0.28.0"
-
-	f.Default()
-
-	require.Empty(t, f.Spec.Config.Fabric.VPCWorkaroundVLANs)
-	require.Empty(t, f.Spec.Config.Fabric.VPCWorkaroundSubnet)
-	require.Empty(t, f.Spec.Overrides.Versions.Gateway.FRR)
 }

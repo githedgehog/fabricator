@@ -356,21 +356,6 @@ spec:
                               type: integer
                           type: object
                         type: array
-                      vpcWorkaroundSubnet:
-                        description: 'Deprecated: ignored, kept so configs exported
-                          by older releases can be imported'
-                        type: string
-                      vpcWorkaroundVLANs:
-                        description: 'Deprecated: ignored, kept so configs exported
-                          by older releases can be imported'
-                        items:
-                          properties:
-                            from:
-                              type: integer
-                            to:
-                              type: integer
-                          type: object
-                        type: array
                       vtepSubnet:
                         type: string
                     type: object
@@ -638,10 +623,6 @@ spec:
                             type: string
                           dataplane:
                             type: string
-                          frr:
-                            description: 'Deprecated: ignored, FRR is part of the
-                              dataplane'
-                            type: string
                         type: object
                       platform:
                         properties:
@@ -717,10 +698,6 @@ spec:
                   gatewayAlloy:
                     type: string
                   gatewayDataplane:
-                    additionalProperties:
-                      type: string
-                    type: object
-                  gatewayFRR:
                     additionalProperties:
                       type: string
                     type: object
@@ -871,9 +848,6 @@ spec:
                       controller:
                         type: string
                       dataplane:
-                        type: string
-                      frr:
-                        description: 'Deprecated: ignored, FRR is part of the dataplane'
                         type: string
                     type: object
                   platform:
