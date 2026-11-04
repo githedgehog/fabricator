@@ -81,7 +81,10 @@ const (
 	VLABEnvPDUPassword    = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
 	VLABEnvBMCUsername    = "HHFAB_VLAB_BMC_USERNAME"
 	VLABEnvBMCPassword    = "HHFAB_VLAB_BMC_PASSWORD" //nolint:gosec
-	VLABEnvNodeReinstall  = "HHFAB_VLAB_NODE_REINSTALL"
+	VLABEnvHW             = "HHFAB_VLAB_HW"
+	VLABEnvHWSwitches     = "HHFAB_VLAB_HW_SWITCHES"
+	VLABEnvHWNodes        = "HHFAB_VLAB_HW_NODES"
+	VLABEnvHWPowerOff     = "HHFAB_VLAB_HW_POWER_OFF_UNUSED"
 	VLABEnvSwitchUsername = "HHFAB_SWITCH_USERNAME"
 	VLABEnvSwitchPassword = "HHFAB_SWITCH_PASSWORD" //nolint:gosec
 	VLABEnvServerUsername = "HHFAB_SERVER_USERNAME"
@@ -119,7 +122,11 @@ type VLABRunOpts struct {
 	ReleaseTestOnReadyOnly   bool
 	InterfaceMTU             uint16
 	InspectPodsStrict        bool
-	NodeReinstall            bool
+	HWSwitches               HWMode
+	HWNodes                  HWMode
+	HWPowerOffUnused         bool
+	PDUUsername              string
+	PDUPassword              string
 	BMC                      BMCOpts
 }
 
@@ -452,6 +459,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	plan := vlab.hw
+	if plan == nil {
+		return fmt.Errorf("no hardware plan") //nolint:err113
+	}
+
+	c.powerHW(ctx, plan, opts)
+
 	bmcNodes, err := c.bmcNodes()
 	if err != nil {
 		return err
@@ -613,36 +627,21 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
-	// all hardware nodes are upgraded same as VMs, but only the ones with BMC can be installed
-	hwNodeRuns := map[string]string{}
-	if opts.AutoUpgrade {
-		for _, node := range c.hardwareNodes() {
-			hwNodeRuns[node.Name] = bmcNodes[node.Name]
-		}
-	} else if opts.NodeReinstall {
-		hwNodeRuns = bmcNodes
-	}
-
-	for name, endpoint := range hwNodeRuns {
+	// hardware runs along with the VMs and counts as their post-processing
+	hwRun := func(kind, name string, run func() error) {
 		postProcesses.Add(1)
 		group.Go(func() error {
-			var err error
-			if opts.AutoUpgrade {
-				err = c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts)
-			} else {
-				err = c.hwNodeInstall(ctx, mediaCtx, vlab, d, name, endpoint, opts, false)
-			}
-			if err != nil {
+			if err := run(); err != nil {
 				if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 					return nil
 				}
 
-				slog.Warn("Failed to install or upgrade hardware node", "node", name, "err", err)
+				slog.Warn("Failed to install or upgrade hardware "+kind, kind, name, "err", err)
 
 				c.CollectVLABDebug(ctx, vlab, opts, true)
 
 				if opts.FailFast {
-					return fmt.Errorf("installing or upgrading hardware node %s: %w", name, err)
+					return fmt.Errorf("installing or upgrading hardware %s %s: %w", kind, name, err)
 				}
 			}
 
@@ -653,14 +652,28 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		})
 	}
 
+	if len(plan.switches) > 0 {
+		hwRun("switch", strings.Join(plan.switches, ","), func() error {
+			return c.hwSwitchesInstall(ctx, plan.switches, opts)
+		})
+	}
+	for name, endpoint := range plan.nodes {
+		hwRun("node", name, func() error {
+			return c.hwNodeInstall(ctx, mediaCtx, vlab, d, name, endpoint, opts)
+		})
+	}
+	for _, name := range plan.upgradeNodes {
+		hwRun("node", name, func() error {
+			return c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts)
+		})
+	}
+
 	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	hwNodes := map[string]bool{}
-	manualNodes := map[string]bool{}
 	for _, node := range c.hardwareNodes() {
 		hwNodes[node.Name] = true
-		if _, ok := hwNodeRuns[node.Name]; !ok {
-			manualNodes[node.Name] = true
+		if plan.manualNodes[node.Name] {
 			_, withBMC := bmcNodes[node.Name]
 			warnHardwareNodeInstall(node.Name, withBMC)
 		}
@@ -760,7 +773,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				slog.Debug("Some K8s nodes are not ready", "ready", ready, "missing", missing, "notReady", notReady)
 
 				if time.Since(lastHWReminder) >= hwReminderInterval {
-					pending := lo.Filter(append(missing, notReady...), func(name string, _ int) bool { return manualNodes[name] })
+					pending := lo.Filter(append(missing, notReady...), func(name string, _ int) bool { return plan.manualNodes[name] })
 					if len(pending) > 0 {
 						lastHWReminder = time.Now()
 						slices.Sort(pending)
@@ -793,16 +806,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				slog.Info("Running on-ready command", "command", cmd)
 				switch cmd {
 				case OnReadySwitchReinstall:
-					reinstallOpts := SwitchReinstallOpts{
-						Mode:        ReinstallModeHardReset,
-						PDUUsername: os.Getenv(VLABEnvPDUUsername),
-						PDUPassword: os.Getenv(VLABEnvPDUPassword),
-						WaitReady:   true,
-					}
-					slog.Debug("Running switch-reinstall", "mode", reinstallOpts.Mode, "waitReady", reinstallOpts.WaitReady)
-					if err := c.VLABSwitchReinstall(ctx, reinstallOpts); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
-					}
+					// it's --hw=reinstall and done right away
 				case OnReadySetupVPCs:
 					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,

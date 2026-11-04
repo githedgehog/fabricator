@@ -24,6 +24,11 @@ const (
 	NodeTypeAnnotation = "type.hhfab.githedgehog.com"
 	NodeTypeHW         = "hw"
 
+	// UnusedAnnotation set to "true" marks the hardware switches and nodes that are kept powered off and out of VLAB
+	UnusedAnnotation = "unused.hhfab.githedgehog.com"
+	// UnusedDescription marks the switch unused if there is no annotation, as the lab wirings did before it
+	UnusedDescription = "unused"
+
 	// GatewayHugePages1G is the 1G hugepages of the gateway VMs, set on their FabNodes and Gateways unless already there
 	GatewayHugePages1G = 4
 )
@@ -62,6 +67,23 @@ func GatewayKernel(nicID uint8) string {
 	}
 
 	return RootPortKernel(nicID - 1)
+}
+
+// IsUnused checks the unused annotation, falling back to the description (empty for nodes), the annotation wins
+func IsUnused(annotations map[string]string, description string) (bool, error) {
+	val, ok := annotations[UnusedAnnotation]
+	if !ok {
+		return description == UnusedDescription, nil
+	}
+
+	switch val {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid %s annotation value %q, expected true or false", UnusedAnnotation, val) //nolint:err113
+	}
 }
 
 // IsGatewayVM reports whether the node is a gateway VM and not a hardware one of a hybrid VLAB

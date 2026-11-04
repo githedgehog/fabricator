@@ -19,6 +19,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -169,9 +170,7 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	for _, node := range nodes {
 		switch node.Type {
 		case NodeTypeSwitch:
-			// Check if switch is marked as "unused" in description
-			desc, hasDesc := node.Properties[PropDescription]
-			if hasDesc && desc == "unused" {
+			if node.Properties[PropUnused] == PropTrue {
 				result.Unused = append(result.Unused, node)
 
 				continue
@@ -679,6 +678,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		node.Label = fmt.Sprintf("%s\n%s", sw.Name, role)
 
 		node.Properties[PropDescription] = sw.Spec.Description
+		if unused, _ := vlabcomp.IsUnused(sw.Annotations, sw.Spec.Description); unused {
+			node.Properties[PropUnused] = PropTrue
+		}
 		setTopologyProps(node.Properties, sw.Spec.Topology.Fabric, sw.Spec.Topology.Domains...)
 
 		// Extract redundancy group information

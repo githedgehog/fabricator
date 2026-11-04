@@ -24,6 +24,7 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
@@ -75,7 +76,10 @@ const (
 	FlagNameBuildGateways         = "build-gateways"
 	FlagNameObservabilityTargets  = "o11y-targets"
 	FlagNameAutoUpgrade           = "auto-upgrade"
-	FlagNameNodeReinstall         = "node-reinstall"
+	FlagNameHW                    = "hw"
+	FlagNameHWSwitches            = "hw-switches"
+	FlagNameHWNodes               = "hw-nodes"
+	FlagNameHWPowerOffUnused      = "hw-power-off-unused"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
@@ -561,6 +565,9 @@ func Run(ctx context.Context) error {
 			EnvVars: []string{hhfab.VLABEnvPDUPassword},
 		},
 	}
+
+	hwModesUsage := fmt.Sprintf("%s reinstalls the ones not installed into this VLAB before, %s all of them, %s leaves them as is (if not set: %s)",
+		hhfab.HWModeAuto, hhfab.HWModeReinstall, hhfab.HWModeDisabled, hhfab.HWModeAuto)
 
 	bmcFlags := []cli.Flag{
 		&cli.StringFlag{
@@ -1325,7 +1332,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "up",
 						Usage: "run VLAB",
-						Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, bmcFlags, []cli.Flag{
+						Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, pduFlags, bmcFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    FlagNameReCreate,
 								Aliases: []string{"f"},
@@ -1356,11 +1363,27 @@ func Run(ctx context.Context) error {
 								EnvVars: []string{"HHFAB_AUTO_UPGRADE"},
 								Value:   false,
 							},
+							&cli.StringFlag{
+								Name:    FlagNameHWSwitches,
+								Usage:   "hardware switches over PDU: " + hwModesUsage,
+								EnvVars: []string{hhfab.VLABEnvHWSwitches},
+							},
+							&cli.StringFlag{
+								Name:    FlagNameHWNodes,
+								Usage:   "hardware nodes over BMC: " + hwModesUsage,
+								EnvVars: []string{hhfab.VLABEnvHWNodes},
+							},
+							&cli.StringFlag{
+								Name: FlagNameHW,
+								Usage: fmt.Sprintf("sets both --%s and --%s, --%s=%s is the same as %s",
+									FlagNameHWSwitches, FlagNameHWNodes, FlagNameReady, hhfab.OnReadySwitchReinstall, hhfab.HWModeReinstall),
+								EnvVars: []string{hhfab.VLABEnvHW},
+							},
 							&cli.BoolFlag{
-								Name: FlagNameNodeReinstall,
-								Usage: "install hardware nodes with " + hhfab.HHFabCfgBMC + " annotation from the ISO over BMC " +
-									"(skipped if installed into this VLAB before), not for --" + FlagNameAutoUpgrade + " that upgrades all nodes",
-								EnvVars: []string{hhfab.VLABEnvNodeReinstall},
+								Name:    FlagNameHWPowerOffUnused,
+								Usage:   "power off the hardware switches and nodes with " + vlabcomp.UnusedAnnotation + "=true annotation",
+								EnvVars: []string{hhfab.VLABEnvHWPowerOff},
+								Value:   true,
 							},
 							&cli.BoolFlag{
 								Name:  FlagNameFailFast,
@@ -1520,6 +1543,11 @@ func Run(ctx context.Context) error {
 										Disk: c.Uint("server-disk"),
 									},
 								},
+								HWModes: hhfab.HWModeFlags{
+									All:      hhfab.HWMode(c.String(FlagNameHW)),
+									Switches: hhfab.HWMode(c.String(FlagNameHWSwitches)),
+									Nodes:    hhfab.HWMode(c.String(FlagNameHWNodes)),
+								},
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:                c.Bool(FlagNameKillStale),
 									ControlsRestricted:       c.Bool(FlagNameControlsRestricted),
@@ -1538,7 +1566,9 @@ func Run(ctx context.Context) error {
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
 									InterfaceMTU:             ifMTU,
 									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
-									NodeReinstall:            c.Bool(FlagNameNodeReinstall),
+									HWPowerOffUnused:         c.Bool(FlagNameHWPowerOffUnused),
+									PDUUsername:              c.String("pdu-username"),
+									PDUPassword:              c.String("pdu-password"),
 									BMC: hhfab.BMCOpts{
 										Username: c.String("bmc-username"),
 										Password: c.String("bmc-password"),

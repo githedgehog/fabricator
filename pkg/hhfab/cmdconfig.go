@@ -68,6 +68,7 @@ type Config struct {
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
 	Client   kclient.Client // all resources (fab, fabric and gateway)
+	UnusedHW UnusedHW       // removed from the above
 	Shutdown atomic.Int32
 }
 

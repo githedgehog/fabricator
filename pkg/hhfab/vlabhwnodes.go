@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -32,7 +33,7 @@ import (
 )
 
 const (
-	// VLABHWDir keeps the markers of the hardware nodes installed into this VLAB
+	// VLABHWDir keeps the markers of the hardware switches and nodes installed into this VLAB
 	VLABHWDir             = "hw"
 	VLABHWInstalledSuffix = ".installed"
 )
@@ -121,9 +122,9 @@ func (c *Config) serveNodeISOs(ctx context.Context, nodes []string) (context.Con
 	return srvCtx, stop, nil
 }
 
-// hwNodeInstall installs the hardware node from the ISO over BMC, skipped if already installed into this VLAB unless
-// forced; it's cancelled when mediaCtx is done (nil if the server is in another process)
-func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *artificer.Downloader, name, endpoint string, opts VLABRunOpts, force bool) (err error) {
+// hwNodeInstall installs the hardware node from the ISO over BMC, it's cancelled when mediaCtx is done (nil if the
+// server is in another process)
+func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *artificer.Downloader, name, endpoint string, opts VLABRunOpts) (err error) {
 	vm := VM{Name: name, Type: VMTypeGateway}
 
 	if mediaCtx != nil {
@@ -135,20 +136,9 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		})()
 	}
 
-	marker := filepath.Join(c.WorkDir, VLABDir, VLABHWDir, name+VLABHWInstalledSuffix)
-	if !force {
-		if _, err := os.Stat(marker); err == nil {
-			slog.Info("Hardware node was already installed, skipping", "node", name)
-
-			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("checking install marker: %w", err)
-		}
-	}
-
 	// the node joins the existing cluster, so it has to be the same version
 	var kube kclient.Client
-	if force || !vlab.Created {
+	if !vlab.Created {
 		var cluster *fabapi.Fabricator
 		kube, cluster, err = c.clusterFab(ctx)
 		if err != nil {
@@ -159,8 +149,8 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		}
 	}
 
-	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("removing install marker: %w", err)
+	if err := c.resetHWInstalled(name); err != nil {
+		return err
 	}
 
 	// the media server failure cancels the install, so report why
@@ -239,11 +229,8 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		slog.Warn("Failed to eject virtual media after install", "node", name, "err", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
-		return fmt.Errorf("creating install marker dir: %w", err)
-	}
-	if err := os.WriteFile(marker, nil, 0o600); err != nil {
-		return fmt.Errorf("writing install marker: %w", err)
+	if err := c.setHWInstalled(name); err != nil {
+		return err
 	}
 
 	slog.Info("Hardware node installed", "node", name)
@@ -281,11 +268,18 @@ func checkFreshInstall(out string, now, resetAt time.Time) error {
 	return nil
 }
 
-// selectBMCNodes returns all BMC nodes if no names given
-func (c *Config) selectBMCNodes(names []string) (map[string]string, error) {
+// selectBMCNodes returns all BMC nodes if no names given, unused ones only by name
+func (c *Config) selectBMCNodes(names []string, withUnused bool) (map[string]string, error) {
 	all, err := c.bmcNodes()
 	if err != nil {
 		return nil, err
+	}
+	if withUnused && len(names) > 0 {
+		for _, node := range c.UnusedHW.Nodes {
+			if endpoint, _ := getBMCEndpoint(&node); endpoint != "" { // validated when dropped
+				all[node.Name] = endpoint
+			}
+		}
 	}
 
 	nodes := all
@@ -307,7 +301,7 @@ func (c *Config) selectBMCNodes(names []string) (map[string]string, error) {
 }
 
 func (c *Config) VLABNodePower(ctx context.Context, opts NodePowerOpts) error {
-	nodes, err := c.selectBMCNodes(opts.Nodes)
+	nodes, err := c.selectBMCNodes(opts.Nodes, true)
 	if err != nil {
 		return err
 	}
@@ -320,7 +314,7 @@ func (c *Config) VLABNodePower(ctx context.Context, opts NodePowerOpts) error {
 
 	errs := []error{}
 	for _, name := range slices.Sorted(maps.Keys(nodes)) {
-		if err := nodePower(ctx, nodes[name], opts); err != nil {
+		if err := powerNode(ctx, nodes[name], opts.Action, opts.BMC); err != nil {
 			slog.Error("Failed to power manage node", "node", name, "action", opts.Action, "err", err)
 			errs = append(errs, fmt.Errorf("node %s: %w", name, err))
 
@@ -333,14 +327,14 @@ func (c *Config) VLABNodePower(ctx context.Context, opts NodePowerOpts) error {
 	return errors.Join(errs...)
 }
 
-func nodePower(ctx context.Context, endpoint string, opts NodePowerOpts) error {
-	client, err := bmc.Connect(ctx, endpoint, opts.BMC.Username, opts.BMC.Password)
+func powerNode(ctx context.Context, endpoint string, action pdu.Action, creds BMCOpts) error {
+	client, err := bmc.Connect(ctx, endpoint, creds.Username, creds.Password)
 	if err != nil {
 		return fmt.Errorf("connecting to BMC: %w", err)
 	}
 	defer client.Close()
 
-	switch opts.Action {
+	switch action {
 	case pdu.ActionOn:
 		err = client.PowerOn(ctx)
 	case pdu.ActionOff:
@@ -348,17 +342,17 @@ func nodePower(ctx context.Context, endpoint string, opts NodePowerOpts) error {
 	case pdu.ActionCycle:
 		err = client.Reset(ctx)
 	default:
-		return fmt.Errorf("unsupported power action %q", opts.Action) //nolint:err113
+		return fmt.Errorf("unsupported power action %q", action) //nolint:err113
 	}
 	if err != nil {
-		return fmt.Errorf("powering %s: %w", opts.Action, err)
+		return fmt.Errorf("powering %s: %w", action, err)
 	}
 
 	return nil
 }
 
 func (c *Config) VLABNodeReinstall(ctx context.Context, vlab *VLAB, opts NodeReinstallOpts) error {
-	nodes, err := c.selectBMCNodes(opts.Nodes)
+	nodes, err := c.selectBMCNodes(opts.Nodes, false)
 	if err != nil {
 		return err
 	}
@@ -383,7 +377,7 @@ func (c *Config) VLABNodeReinstall(ctx context.Context, vlab *VLAB, opts NodeRei
 	group := &errgroup.Group{}
 	for name, endpoint := range nodes {
 		group.Go(func() error {
-			if err := c.hwNodeInstall(ctx, nil, vlab, nil, name, endpoint, runOpts, true); err != nil {
+			if err := c.hwNodeInstall(ctx, nil, vlab, nil, name, endpoint, runOpts); err != nil {
 				return fmt.Errorf("reinstalling node %s: %w", name, err)
 			}
 
@@ -402,7 +396,7 @@ func (c *Config) clusterFab(ctx context.Context) (kclient.Client, *fabapi.Fabric
 	defer cancel()
 
 	for {
-		kube, err := kubeutil.NewClientWithCore(ctx, kubeconfig, fabapi.AddToScheme)
+		kube, err := kubeutil.NewClientWithCore(ctx, kubeconfig, fabapi.AddToScheme, agentapi.AddToScheme)
 		if err == nil {
 			f := &fabapi.Fabricator{}
 			if err = kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err == nil {

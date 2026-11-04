@@ -115,6 +115,8 @@ const (
 	PropESLAGServer      = "eslag_server"
 	PropGateway          = "gateway"
 	PropDescription      = "description"
+	PropUnused           = "unused"
+	PropTrue             = "true"
 	PropRole             = "role"
 	PropRedundancyGroup  = "redundancyGroup"
 	PropRedundancyType   = "redundancyType"

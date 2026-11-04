@@ -5,8 +5,6 @@ package hhfab
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -43,20 +41,20 @@ func TestSelectBMCNodes(t *testing.T) {
 		},
 	}
 
-	nodes, err := c.selectBMCNodes(nil)
+	nodes, err := c.selectBMCNodes(nil, false)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"gateway-bm": "https://10.0.0.2"}, nodes)
 
-	nodes, err = c.selectBMCNodes([]string{"gateway-bm"})
+	nodes, err = c.selectBMCNodes([]string{"gateway-bm"}, false)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"gateway-bm": "https://10.0.0.2"}, nodes)
 
 	for _, name := range []string{"gateway-1", "gateway-hw", "gateway-2"} {
-		_, err := c.selectBMCNodes([]string{name})
+		_, err := c.selectBMCNodes([]string{name}, false)
 		require.Error(t, err, name)
 	}
 
-	_, err = (&Config{}).selectBMCNodes(nil)
+	_, err = (&Config{}).selectBMCNodes(nil, false)
 	require.Error(t, err)
 }
 
@@ -72,11 +70,6 @@ func TestCheckBMCNodes(t *testing.T) {
 	require.ErrorIs(t, checkBMCNodes(t.Context(), nodes, noPassword), ErrBMCCredentials)
 
 	require.Error(t, checkBMCNodes(t.Context(), map[string]string{"gateway-bm": "https://192.0.2.1"}, opts))
-}
-
-func TestVLABUpRejectsNodeReinstallWithUpgrade(t *testing.T) {
-	err := VLABUp(t.Context(), t.TempDir(), t.TempDir(), nil, VLABUpOpts{AutoUpgrade: true, NodeReinstall: true})
-	require.ErrorContains(t, err, "--node-reinstall")
 }
 
 func TestCheckClusterVersion(t *testing.T) {
@@ -118,16 +111,4 @@ func TestCheckFreshInstall(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestHWNodeInstallSkipsInstalled(t *testing.T) {
-	c := &Config{WorkDir: t.TempDir()}
-
-	marker := filepath.Join(c.WorkDir, VLABDir, VLABHWDir, "gateway-bm"+VLABHWInstalledSuffix)
-	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0o700))
-	require.NoError(t, os.WriteFile(marker, nil, 0o600))
-
-	// nothing else is set up, so anything past the marker check fails
-	err := c.hwNodeInstall(t.Context(), nil, &VLAB{}, nil, "gateway-bm", "https://192.0.2.1", VLABRunOpts{}, false)
-	require.NoError(t, err)
 }
