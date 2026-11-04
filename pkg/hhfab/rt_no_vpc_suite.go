@@ -1412,7 +1412,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 		return false, reverts, fmt.Errorf("error configuring networking on servers: %w", err)
 	}
 
-	// TODO: remove this when we move past the oldest release without the iperf server in the butane template
+	// hardware servers don't get the iperf server from the butane template
 	for serverName, ssh := range sshClients {
 		if err := ensureIperf3Daemon(ctx, ssh, serverName); err != nil {
 			return false, reverts, fmt.Errorf("ensuring iperf3 daemon on %s: %w", serverName, err)
