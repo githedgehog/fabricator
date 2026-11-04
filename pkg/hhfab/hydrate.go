@@ -139,10 +139,6 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 		}
 	}
 
-	if err := injectUpgradeDefaultFabric(ctx, l, c.Fab, os.Getenv(UpgradeFromEnv)); err != nil {
-		return nil, err
-	}
-
 	return l, nil
 }
 
