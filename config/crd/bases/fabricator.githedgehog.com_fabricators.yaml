@@ -356,6 +356,21 @@ spec:
                               type: integer
                           type: object
                         type: array
+                      vpcWorkaroundSubnet:
+                        description: 'Deprecated: ignored, kept so configs exported
+                          by older releases can be imported'
+                        type: string
+                      vpcWorkaroundVLANs:
+                        description: 'Deprecated: ignored, kept so configs exported
+                          by older releases can be imported'
+                        items:
+                          properties:
+                            from:
+                              type: integer
+                            to:
+                              type: integer
+                          type: object
+                        type: array
                       vtepSubnet:
                         type: string
                     type: object
@@ -624,6 +639,8 @@ spec:
                           dataplane:
                             type: string
                           frr:
+                            description: 'Deprecated: ignored, FRR is part of the
+                              dataplane'
                             type: string
                         type: object
                       platform:
@@ -856,6 +873,7 @@ spec:
                       dataplane:
                         type: string
                       frr:
+                        description: 'Deprecated: ignored, FRR is part of the dataplane'
                         type: string
                     type: object
                   platform:
