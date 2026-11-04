@@ -93,6 +93,10 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 		return err
 	}
 
+	if err := c.checkVLABNames(ctx); err != nil {
+		return err
+	}
+
 	if err := c.dropUnusedHW(ctx); err != nil {
 		return err
 	}

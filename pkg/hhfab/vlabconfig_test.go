@@ -229,6 +229,30 @@ func TestVLABSSHKey(t *testing.T) {
 	require.Equal(t, []string{pub}, c.Fab.Spec.Config.Fabric.DefaultSwitchUsers["admin"].AuthorizedKeys)
 }
 
+func TestCheckVLABNames(t *testing.T) {
+	ctx := t.Context()
+
+	newConfig := func(t *testing.T, switchName, serverName string) *Config {
+		t.Helper()
+
+		l := apiutil.NewLoader()
+		require.NoError(t, l.Add(ctx,
+			&wiringapi.Switch{Name: switchName, Namespace: kmetav1.NamespaceDefault},
+			&wiringapi.Server{Name: serverName, Namespace: kmetav1.NamespaceDefault},
+		))
+
+		return &Config{
+			Client:   l.GetClient(),
+			Controls: []fabapi.ControlNode{{Name: "control-1"}},
+			Nodes:    []fabapi.FabNode{{Name: "gateway-1"}},
+		}
+	}
+
+	require.NoError(t, newConfig(t, "leaf-1", "server-1").checkVLABNames(ctx))
+	require.ErrorContains(t, newConfig(t, "gateway-1", "server-1").checkVLABNames(ctx), `switch "gateway-1" has the same name as node`)
+	require.ErrorContains(t, newConfig(t, "leaf-1", "control-1").checkVLABNames(ctx), `server "control-1" has the same name as control node`)
+}
+
 func TestSetVLABHugePages(t *testing.T) {
 	hp := func(val string) map[string]string {
 		return map[string]string{gwapi.AnnotationHugePages1G: val}
