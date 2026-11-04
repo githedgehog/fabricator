@@ -102,7 +102,7 @@ func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivi
 	for _, agent := range agents.Items {
 		g.Go(func() error {
 			// first of all, disable RoCE if it is enabled, as breakout operations are forbidden while RoCE is enabled
-			if err := setRoCE(ctx, testCtx.kube, agent.Name, false); err != nil {
+			if _, err := setRoCE(ctx, testCtx.kube, agent.Name, false); err != nil {
 				return fmt.Errorf("disabling RoCE on switch %s: %w", agent.Name, err)
 			}
 			// get which ports are used on this switch
