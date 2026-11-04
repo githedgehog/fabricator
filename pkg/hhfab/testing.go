@@ -1246,6 +1246,23 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	for _, vpc := range existingVPCs.Items {
 		if opts.ForceCleanup || !vpcNames[vpc.Name] {
 			if err := kube.Delete(ctx, &vpc); err != nil {
+				// Record what the API server holds for this VPC right now: the webhook's
+				// own error does not name the attachment that blocked the delete.
+				// Read through an uncached client: kube lists from the informer cache, which can
+				// still hold the attachments deleted just before.
+				live := &vpcapi.VPCAttachmentList{}
+				if direct, derr := kubeutil.NewClient(ctx, filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig), schemeBuilders...); derr != nil {
+					slog.Warn("Creating uncached kube client after VPC delete failure", "vpc", vpc.Name, "err", derr)
+				} else if lerr := direct.List(ctx, live, kclient.MatchingLabels{vpcapi.LabelVPC: vpc.Name}); lerr != nil {
+					slog.Warn("Listing attachments after VPC delete failure", "vpc", vpc.Name, "err", lerr)
+				}
+				for _, a := range live.Items {
+					slog.Warn("Attachment present after VPC delete failure", "vpc", vpc.Name, "attachment", a.Name,
+						"resourceVersion", a.ResourceVersion, "created", a.CreationTimestamp, "deletion", a.DeletionTimestamp,
+						"finalizers", a.Finalizers, "at", time.Now().Format(time.RFC3339Nano))
+				}
+				slog.Warn("VPC delete failed", "vpc", vpc.Name, "attachmentsListed", len(live.Items), "at", time.Now().Format(time.RFC3339Nano))
+
 				return nil, nil, fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
 			}
 			slog.Info("Deleted", "vpc", vpc.Name)
