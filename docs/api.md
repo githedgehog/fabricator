@@ -404,7 +404,7 @@ _Appears in:_
 | `eslagESIPrefix` _string_ |  |  |  |
 | `mclagSessionSubnet` _Prefix_ |  |  |  |
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
-| `defaultAlloyConfig` _AlloyConfig_ |  |  |  |
+| `defaultAlloyConfig` _AlloyConfig_ | Deprecated: ignored, kept so configs exported by 26.05 can be imported |  |  |
 | `excludeNOSInstallers` _boolean_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
 | `includeBCM` _boolean_ |  |  |  |
