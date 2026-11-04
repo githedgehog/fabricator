@@ -24,6 +24,8 @@ import (
 // has no Fabric/default, which validation requires and which the controller
 // creates in the cluster on upgrade. For those releases hhfab injects it when
 // loading the wiring, so the rest of the upgrade sees what the cluster will.
+// VLAB upgrades also skip the config export and import check for releases
+// whose k3s can't start on the current VLAB before the upgrade.
 //
 // Keyed on the release rather than on the wiring lacking a Fabric, so that it
 // stops applying by itself once those releases are no longer upgraded from.
@@ -35,15 +37,31 @@ const UpgradeFromEnv = "HHFAB_UPGRADE_FROM"
 // predates Fabric objects.
 var upgradeFromWithoutFabrics = []string{"26.03", "26.04"}
 
-// upgradeFromWithoutFabric reports whether a release predates Fabric objects,
-// ignoring a leading "v" and the patch version.
+// upgradeFromWithoutNICRules lists, as major.minor, the releases whose VLAB
+// nodes lack the virtio NIC naming rule, so their k3s can't start on the
+// current VLAB until the upgrade installs it.
+var upgradeFromWithoutNICRules = []string{"26.03", "26.04"}
+
+// upgradeFromWithoutFabric reports whether a release predates Fabric objects.
 func upgradeFromWithoutFabric(release string) bool {
+	return upgradeFromIn(release, upgradeFromWithoutFabrics)
+}
+
+// upgradeFromWithoutNICRule reports whether a release predates the VLAB virtio
+// NIC naming rule.
+func upgradeFromWithoutNICRule(release string) bool {
+	return upgradeFromIn(release, upgradeFromWithoutNICRules)
+}
+
+// upgradeFromIn reports whether a release is one of the major.minor releases,
+// ignoring a leading "v" and the patch version.
+func upgradeFromIn(release string, releases []string) bool {
 	parts := strings.SplitN(strings.TrimPrefix(strings.TrimSpace(release), "v"), ".", 3)
 	if len(parts) < 2 {
 		return false
 	}
 
-	return slices.Contains(upgradeFromWithoutFabrics, parts[0]+"."+parts[1])
+	return slices.Contains(releases, parts[0]+"."+parts[1])
 }
 
 // injectUpgradeDefaultFabric adds Fabric/default, with the spec the controller
