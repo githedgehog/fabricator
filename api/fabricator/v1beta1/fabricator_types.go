@@ -716,7 +716,7 @@ func (f *Fabricator) Default() {
 		f.Spec.Config.Observability.Targets.Pyroscope[name] = target
 	}
 
-	// TODO fallback for upgrades from versions before 26.01
+	// Broadcom SONiC is the default if no other platform support is included
 	if !f.Spec.Config.Fabric.IncludeBCM && !f.Spec.Config.Fabric.IncludeCLSP && !f.Spec.Config.Fabric.IncludeCumulus {
 		f.Spec.Config.Fabric.IncludeBCM = true
 	}
