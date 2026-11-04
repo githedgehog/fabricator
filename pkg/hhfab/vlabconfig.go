@@ -1484,6 +1484,52 @@ func (c *Config) hardwareNodes() []fabapi.FabNode {
 	return nodes
 }
 
+// checkVLABNames makes sure the names are unique as they're shared by VMs, hardware markers and SSH targets
+func (c *Config) checkVLABNames(ctx context.Context) error {
+	kinds := map[string]string{}
+	add := func(kind, name string) error {
+		if other, exist := kinds[name]; exist {
+			return fmt.Errorf("%s %q has the same name as %s", kind, name, other) //nolint:err113
+		}
+		kinds[name] = kind
+
+		return nil
+	}
+
+	for _, control := range c.Controls {
+		if err := add("control node", control.Name); err != nil {
+			return err
+		}
+	}
+	for _, node := range c.Nodes {
+		if err := add("node", node.Name); err != nil {
+			return err
+		}
+	}
+
+	switches := &wiringapi.SwitchList{}
+	if err := c.Client.List(ctx, switches); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+	for _, sw := range switches.Items {
+		if err := add("switch", sw.Name); err != nil {
+			return err
+		}
+	}
+
+	servers := &wiringapi.ServerList{}
+	if err := c.Client.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+	for _, server := range servers.Items {
+		if err := add("server", server.Name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // getBMCEndpoint returns empty if it isn't a hardware node or the annotation isn't set
 func getBMCEndpoint(node *fabapi.FabNode) (string, error) {
 	endpoint := node.GetAnnotations()[HHFabCfgBMC]
