@@ -706,6 +706,49 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 	return topology, nil
 }
 
+// logLiveVPCAttachments logs the attachments the API server holds for a VPC whose delete was
+// rejected: the webhook's error does not name the attachment that blocked it.
+// It reads through an uncached client, since the informer cache can still hold the attachments
+// deleted just before. The client gets an HTTP timeout: REST mapper discovery on the first List
+// does not honor ctx, and a hung API server must not delay the original delete error.
+func (c *Config) logLiveVPCAttachments(ctx context.Context, vpcName string) {
+	cfg, err := kubeutil.NewClientConfig(ctx, filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig))
+	if err != nil {
+		slog.Warn("Loading kubeconfig after VPC delete failure", "vpc", vpcName, "err", err)
+
+		return
+	}
+	cfg.Timeout = 10 * time.Second
+
+	scheme, err := kubeutil.NewScheme(schemeBuilders...)
+	if err != nil {
+		slog.Warn("Creating scheme after VPC delete failure", "vpc", vpcName, "err", err)
+
+		return
+	}
+
+	direct, err := kclient.New(cfg, kclient.Options{Scheme: scheme})
+	if err != nil {
+		slog.Warn("Creating uncached kube client after VPC delete failure", "vpc", vpcName, "err", err)
+
+		return
+	}
+
+	live := &vpcapi.VPCAttachmentList{}
+	if err := direct.List(ctx, live, kclient.MatchingLabels{vpcapi.LabelVPC: vpcName}); err != nil {
+		slog.Warn("Listing attachments after VPC delete failure", "vpc", vpcName, "err", err)
+
+		return
+	}
+
+	for _, a := range live.Items {
+		slog.Warn("Attachment present after VPC delete failure", "vpc", vpcName, "attachment", a.Name,
+			"resourceVersion", a.ResourceVersion, "created", a.CreationTimestamp, "deletion", a.DeletionTimestamp,
+			"finalizers", a.Finalizers, "at", time.Now().Format(time.RFC3339Nano))
+	}
+	slog.Warn("VPC delete failed", "vpc", vpcName, "attachmentsListed", len(live.Items), "at", time.Now().Format(time.RFC3339Nano))
+}
+
 // SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
 // and returns one Endpoint per (server, vpc, subnet) attachment with the
 // discovered IP and HostBGP flag populated.
@@ -1246,6 +1289,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	for _, vpc := range existingVPCs.Items {
 		if opts.ForceCleanup || !vpcNames[vpc.Name] {
 			if err := kube.Delete(ctx, &vpc); err != nil {
+				if ctx.Err() == nil && strings.Contains(err.Error(), "VPC has attachments") {
+					c.logLiveVPCAttachments(ctx, vpc.Name)
+				}
+
 				return nil, nil, fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
 			}
 			slog.Info("Deleted", "vpc", vpc.Name)
