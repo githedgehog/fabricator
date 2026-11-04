@@ -119,8 +119,6 @@ env:
   HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
   HHFAB_VLAB_COLLECT: true
   HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
-  # lets the new hhfab handle wiring from the release being upgraded from, empty when not upgrading
-  HHFAB_UPGRADE_FROM: ${{ inputs.upgradefrom }}
   # DPDK gateways busy-poll every worker and the VLABs share the hosts, so CI runs fewer than the default
   VLAB_GATEWAY_WORKERS: 3
 

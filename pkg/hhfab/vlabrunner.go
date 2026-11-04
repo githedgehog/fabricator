@@ -1118,9 +1118,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				slog.Info("Node install was already completed", "vm", vm.Name, "type", vm.Type)
 			} else {
 				if vm.Type == VMTypeControl && opts.AutoUpgrade {
-					if upgradeFrom := os.Getenv(UpgradeFromEnv); upgradeFromWithoutNICRule(upgradeFrom) {
-						slog.Warn("Skipping config export and import check, k3s of the release upgraded from can't start before the upgrade", "vm", vm.Name, "from", upgradeFrom, "env", UpgradeFromEnv)
-					} else if err := c.checkConfigExportImport(ctx, ssh, vm.Name); err != nil {
+					if err := c.checkConfigExportImport(ctx, ssh, vm.Name); err != nil {
 						return fmt.Errorf("checking config export and import before upgrade: %w", err)
 					}
 				}
