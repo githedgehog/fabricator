@@ -356,8 +356,6 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting gateway dataplane status: %w", err)
 	}
 
-	f.Status.Components.GatewayFRR = nil
-
 	f.Status.Components.GatewayAlloy, err = alloy.StatusGateway(ctx, r.Client, *f)
 	if err != nil {
 		return fmt.Errorf("getting gateway alloy status: %w", err)
