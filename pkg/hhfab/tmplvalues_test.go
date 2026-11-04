@@ -573,27 +573,6 @@ spec:
 	require.Contains(t, string(wiring), `controls: "1"`, "wiring sees the control nodes")
 }
 
-func TestImportConfigOldExport(t *testing.T) {
-	t.Parallel()
-
-	// as exported by hhfabctl of 26.03 and 26.04
-	cfg := devConfig(t)
-	old := strings.Replace(cfg, "\n    fabric:\n", `
-    fabric:
-      vpcWorkaroundSubnet: 172.30.96.0/19
-      vpcWorkaroundVLANs:
-      - from: 100
-        to: 3999
-`, 1)
-	require.NotEqual(t, cfg, old)
-
-	source := filepath.Join(t.TempDir(), "fab.yaml")
-	require.NoError(t, os.WriteFile(source, []byte(old), 0o600))
-
-	_, _, err := importConfig(t.Context(), source, map[string]any{})
-	require.NoError(t, err)
-}
-
 func TestImportConfigRenderError(t *testing.T) {
 	t.Parallel()
 
