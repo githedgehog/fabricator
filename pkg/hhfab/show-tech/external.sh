@@ -61,6 +61,16 @@ OUTPUT_FILE="/tmp/show-tech.log"
   vtysh -c "show bgp vrf all summary"
   echo -e "\n=== show bgp vrf all neighbors ==="
   vtysh -c "show bgp vrf all neighbors"
+  # The zebra route ages in "show ip route vrf all" are relative to the
+  # collection instant, so they date when a prefix reached the external; the
+  # kernel table above has no timestamps, frr.log carries no per-UPDATE lines,
+  # and the compact BGP table below has no ages, it only lists the paths.
+  echo -e "\n=== collection time ==="
+  date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+  echo -e "\n=== show ip route vrf all ==="
+  vtysh -c "show ip route vrf all"
+  echo -e "\n=== show bgp vrf all ipv4 unicast ==="
+  vtysh -c "show bgp vrf all ipv4 unicast"
   echo -e "\n=== running-config ==="
   vtysh -c "show running-config"
 } >> "$OUTPUT_FILE" 2>&1

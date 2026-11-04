@@ -209,6 +209,10 @@ no host `vtysh`, so all FRR commands run via `docker exec frr vtysh`.
   is owned by the container's `frr` user)
 - **BGP**: `show bgp summary`, per-VRF BGP summary and neighbor detail,
   running config
+- **FRR routes**: collection time (UTC), `show ip route vrf all` and
+  `show bgp vrf all ipv4 unicast`. The ages in the route table are relative to
+  the collection time, so they date when a prefix reached the external; the
+  BGP table lists the paths without ages
 - **Sockets**: `ss -tlnp`, explicit check for a `:179` listener
 - **FRR config files**: `/etc/frr/frr.conf`, `/etc/frr/daemons`,
   `/etc/frr/vtysh.conf`
