@@ -39,6 +39,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -264,6 +265,11 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 				return fmt.Errorf("agent %s NOS version %s does not satisfy constraint %s", ag.Name, nosVersion, fabNOSConstr) //nolint:err113
 			}
 		}
+	}
+
+	// not starting the upgrade if the running fabric controller isn't done with all objects
+	if err := checkFabricCtrlReady(ctx, kube); err != nil {
+		return err
 	}
 
 	// refuse upgrade if there is any MCLAG switch or connection
@@ -523,6 +529,25 @@ func waitFabricCtrlInitialized(ctx context.Context, kube kclient.Reader, version
 			return obj.Status.InitializedVersion == version, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for fabric controller initialized: %w", err)
+	}
+
+	return nil
+}
+
+// checkFabricCtrlReady makes sure the running fabric controller refreshed all objects with its defaults and is ready.
+// Only failing to get it is retried, not it being unready.
+func checkFabricCtrlReady(ctx context.Context, kube kclient.Reader) error {
+	fc := &fcintapi.FabricController{}
+	if err := retry.OnError(retry.DefaultBackoff, func(err error) bool {
+		return !kapierrors.IsNotFound(err)
+	}, func() error {
+		return kube.Get(ctx, kclient.ObjectKey{Name: fcintapi.FabricControllerName, Namespace: comp.FabNamespace}, fc)
+	}); err != nil {
+		return fmt.Errorf("getting fabric controller: %w", err)
+	}
+
+	if !fc.IsReady(fc.Status.Version) {
+		return fmt.Errorf("fabric controller %s is not ready, initialized %q, error %q", fc.Status.Version, fc.Status.InitializedVersion, fc.Status.Error) //nolint:err113
 	}
 
 	return nil
