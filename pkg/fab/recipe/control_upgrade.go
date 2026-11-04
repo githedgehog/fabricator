@@ -165,11 +165,6 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("installing k9s: %w", err)
 	}
 
-	// before the new fabric controller requests the hugepages for the dataplane
-	if err := setVLABHugePages(ctx, kube); err != nil {
-		return err
-	}
-
 	if err := c.installFabricator(ctx, kube, false); err != nil {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
