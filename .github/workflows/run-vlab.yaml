@@ -138,15 +138,9 @@ jobs:
       - name: Check gateway driver
         env:
           INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
-          INPUT_UPGRADE_FROM: ${{ inputs.upgradefrom }}
         run: |
           if [[ -n "$INPUT_GATEWAY_DRIVER" && "$INPUT_GATEWAY_DRIVER" != "kernel" && "$INPUT_GATEWAY_DRIVER" != "dpdk" ]]; then
             echo "Unsupported gateway driver: $INPUT_GATEWAY_DRIVER" >&2
-            exit 1
-          fi
-          # TODO remove once upgrades are only supported from 26.05 onwards
-          if [[ -n "$INPUT_UPGRADE_FROM" && "$INPUT_GATEWAY_DRIVER" == "dpdk" ]]; then
-            echo "Upgrades only support the kernel gateway driver as older releases only have kernel gateways in vlab" >&2
             exit 1
           fi
 
@@ -194,15 +188,6 @@ jobs:
           repository: githedgehog/lab-ci
           path: "./lab-ci"
 
-      - name: Pre-populate hhfab-cache
-        if: ${{ inputs.upgradefrom == '26.01' || inputs.upgradefrom == '26.02' }}
-        run: |
-          if [ -d "/hostcache/.hhfab-cache" ]; then
-            rsync -aW --inplace --exclude='download-*' --stats /hostcache/.hhfab-cache ~/
-          else
-            echo "Host cache not available"
-          fi
-
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
@@ -228,13 +213,17 @@ jobs:
           curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ inputs.upgradefrom }}" bash
 
       - name: (${{ inputs.upgradefrom }}) Init hhfab for virtual mode
+        env:
+          INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
         if: ${{ inputs.upgradefrom != '' && !inputs.hybrid }}
         run: |
           old/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }}
-          old/hhfab vlab gen -v --gateway-workers="$VLAB_GATEWAY_WORKERS" --eslag-leaf-groups="2,2" --orphan-leafs-count=1 ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          old/hhfab vlab gen -v --gateway-workers="$VLAB_GATEWAY_WORKERS" --eslag-leaf-groups="2,2" --orphan-leafs-count=1 \
+            ${{ inputs.mesh && '--mesh-links-count=3' || '' }} \
+            ${INPUT_GATEWAY_DRIVER:+--gateway-driver="$INPUT_GATEWAY_DRIVER"}
 
       - name: (${{ inputs.upgradefrom }}) Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom != '' && inputs.hybrid }}
@@ -268,9 +257,9 @@ jobs:
             --vpc-mode="${{ inputs.vpcmode != 'l2vni' && inputs.vpcmode || ''  }}" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ inputs.hybrid && '--ready switch-reinstall' || '' }} \
-            ${{ inputs.upgradefrom != '25.04' && '--ready=inspect' || '' }} \
+            --ready=inspect \
             --ready=setup-vpcs \
-            ${{ inputs.upgradefrom != '25.03' && '--ready=setup-peerings' || '' }} \
+            --ready=setup-peerings \
             --ready=exit
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
