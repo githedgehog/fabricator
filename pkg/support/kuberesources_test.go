@@ -326,8 +326,6 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 	fab.Spec.Config.Fabric.DefaultSwitchUsers = map[string]fabapi.SwitchUser{
 		"admin": {PasswordHash: leakedValue, Role: "admin", AuthorizedKeys: []string{leakedValue}},
 	}
-	fillStrings(reflect.ValueOf(&fab.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets).Elem())
-	fillStrings(reflect.ValueOf(&fab.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets).Elem())
 	fillStrings(reflect.ValueOf(&fab.Spec.Config.Observability.Targets).Elem())
 
 	agent := &agentapi.Agent{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault, Annotations: copyAnnotations}

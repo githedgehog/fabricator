@@ -277,7 +277,9 @@ type FabricConfig struct {
 	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"`
 
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
-	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"` // TODO remove, kept for backward compat, ignored
+	// Deprecated: ignored, kept so configs exported by 26.05 can be imported
+	// +optional
+	DefaultAlloyConfig fmeta.AlloyConfig `json:"defaultAlloyConfig,omitzero"` // TODO: remove after 26.06 release
 
 	ExcludeNOSInstallers bool `json:"excludeNOSInstallers,omitempty"`
 	IncludeONIE          bool `json:"includeONIE,omitempty"`
@@ -638,42 +640,9 @@ func (f *Fabricator) Default() {
 	if f.Spec.Config.Observability.Targets.Prometheus == nil {
 		f.Spec.Config.Observability.Targets.Prometheus = map[string]alloy.PrometheusTarget{}
 	}
-	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets {
-		if _, ok := f.Spec.Config.Observability.Targets.Prometheus[name]; !ok {
-			f.Spec.Config.Observability.Targets.Prometheus[name] = alloy.PrometheusTarget{
-				URL: target.URL,
-				BasicAuth: &alloy.TargetBasicAuth{
-					Username: target.BasicAuth.Username,
-					Password: target.BasicAuth.Password,
-				},
-				BearerToken:         target.BearerToken,
-				Labels:              target.Labels,
-				InsecureSkipVerify:  target.InsecureSkipVerify,
-				CAPEM:               target.CAPEM,
-				CertPEM:             target.CertPEM,
-				SendIntervalSeconds: target.SendIntervalSeconds,
-			}
-		}
-	}
 
 	if f.Spec.Config.Observability.Targets.Loki == nil {
 		f.Spec.Config.Observability.Targets.Loki = map[string]alloy.LokiTarget{}
-	}
-	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets {
-		if _, ok := f.Spec.Config.Observability.Targets.Loki[name]; !ok {
-			f.Spec.Config.Observability.Targets.Loki[name] = alloy.LokiTarget{
-				URL: target.URL,
-				BasicAuth: &alloy.TargetBasicAuth{
-					Username: target.BasicAuth.Username,
-					Password: target.BasicAuth.Password,
-				},
-				BearerToken:        target.BearerToken,
-				Labels:             target.Labels,
-				InsecureSkipVerify: target.InsecureSkipVerify,
-				CAPEM:              target.CAPEM,
-				CertPEM:            target.CertPEM,
-			}
-		}
 	}
 
 	if f.Spec.Config.Observability.Targets.Pyroscope == nil {
