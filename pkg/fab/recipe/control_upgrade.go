@@ -491,11 +491,6 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 		return fmt.Errorf("waiting for fabricator applied: %w", err)
 	}
 
-	// before waiting for ready as the gateways aren't ready until migrated
-	if err := migrateVLABGateways(ctx, kube, string(c.Fab.Status.Versions.Fabric.Controller)); err != nil {
-		return fmt.Errorf("migrating VLAB gateways: %w", err)
-	}
-
 	slog.Info("Waiting for fabricator ready, may take 2-5 minutes")
 
 	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
@@ -515,20 +510,6 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for fabricator ready: %w", err)
-	}
-
-	return nil
-}
-
-// waitFabricCtrlInitialized waits for the fabric controller of the version to refresh all objects with its defaults
-func waitFabricCtrlInitialized(ctx context.Context, kube kclient.Reader, version string) error {
-	slog.Info("Waiting for fabric controller initialized", "version", version)
-
-	if err := waitKube(ctx, kube, fcintapi.FabricControllerName, comp.FabNamespace,
-		&fcintapi.FabricController{}, func(obj *fcintapi.FabricController) (bool, error) {
-			return obj.Status.InitializedVersion == version, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabric controller initialized: %w", err)
 	}
 
 	return nil
