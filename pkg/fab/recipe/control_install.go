@@ -513,11 +513,50 @@ func waitKube[T kclient.Object](ctx context.Context, kube kclient.Reader, name, 
 }
 
 func isUbuntu() (bool, error) {
-	if osRelease, err := os.ReadFile("/etc/os-release"); err != nil {
-		return false, fmt.Errorf("reading os-release: %w", err)
-	} else if strings.Contains(strings.ToLower(string(osRelease)), "id=ubuntu") {
-		return true, nil
+	osRelease, err := readOSRelease()
+	if err != nil {
+		return false, err
 	}
 
-	return false, nil
+	return osRelease["ID"] == "ubuntu", nil
+}
+
+func readOSRelease() (map[string]string, error) {
+	content, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return nil, fmt.Errorf("reading os-release: %w", err)
+	}
+
+	return parseOSRelease(string(content)), nil
+}
+
+var osReleaseUnescaper = strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\$`, `$`, "\\`", "`")
+
+// parseOSRelease follows os-release(5): values may be unquoted, single or double quoted (with shell escapes)
+func parseOSRelease(content string) map[string]string {
+	res := map[string]string{}
+	for line := range strings.Lines(content) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || key == "" || strings.ContainsAny(key, " \t") {
+			continue
+		}
+
+		if len(value) >= 2 {
+			switch {
+			case value[0] == '"' && value[len(value)-1] == '"':
+				value = osReleaseUnescaper.Replace(value[1 : len(value)-1])
+			case value[0] == '\'' && value[len(value)-1] == '\'':
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		res[key] = value
+	}
+
+	return res
 }
