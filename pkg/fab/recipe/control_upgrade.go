@@ -22,7 +22,6 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	fcintapi "go.githedgehog.com/fabric/api/fcint/v1alpha1"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -265,39 +264,6 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 	// not starting the upgrade if the running fabric controller isn't done with all objects
 	if err := checkFabricCtrlReady(ctx, kube); err != nil {
 		return err
-	}
-
-	// refuse upgrade if there is any MCLAG switch or connection
-	var switches wiringapi.SwitchList
-	mclagSwitches := []string{}
-	if err := kube.List(ctx, &switches); err != nil {
-		return fmt.Errorf("listing switches: %w", err)
-	}
-	for _, sw := range switches.Items {
-		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
-			mclagSwitches = append(mclagSwitches, sw.Name)
-		}
-	}
-	if len(mclagSwitches) > 0 {
-		slices.Sort(mclagSwitches)
-
-		return fmt.Errorf("cannot upgrade while there are deprecated mclag switches: %s", strings.Join(mclagSwitches, ",")) //nolint:err113
-	}
-
-	var connections wiringapi.ConnectionList
-	mclagConns := []string{}
-	if err := kube.List(ctx, &connections); err != nil {
-		return fmt.Errorf("listing connections: %w", err)
-	}
-	for _, conn := range connections.Items {
-		if conn.Spec.MCLAG != nil || conn.Spec.MCLAGDomain != nil { //nolint:staticcheck // deprecated on purpose: we're looking for leftover MCLAG to refuse the upgrade
-			mclagConns = append(mclagConns, conn.Name)
-		}
-	}
-	if len(mclagConns) > 0 {
-		slices.Sort(mclagConns)
-
-		return fmt.Errorf("cannot upgrade while there are deprecated mclag connections: %s", strings.Join(mclagConns, ",")) //nolint:err113
 	}
 
 	// refuse upgrade if there is any remote peering
