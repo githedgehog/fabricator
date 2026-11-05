@@ -364,8 +364,6 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 	leafASNs := map[uint32]bool{}
 
-	mclagPeer := map[string]*wiringapi.Switch{}
-
 	switches := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, switches); err != nil {
 		return status, fmt.Errorf("listing switches: %w", err)
@@ -436,19 +434,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("leaf %s ASN %d is not in the fabric %s leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, swFabric, f.LeafASNStart, f.LeafASNEnd) //nolint:err113
 				}
 
-				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
-					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
-						if peer.Spec.ASN != sw.Spec.ASN {
-							return status, fmt.Errorf("mclag peers should have same ASNs: %s and %s", sw.Name, peer.Name) //nolint:err113
-						}
-					} else {
-						mclagPeer[sw.Spec.Redundancy.Group] = &sw
-
-						if _, exist := leafASNs[sw.Spec.ASN]; exist {
-							return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:err113
-						}
-					}
-				} else if _, exist := leafASNs[sw.Spec.ASN]; exist {
+				if _, exist := leafASNs[sw.Spec.ASN]; exist {
 					return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:err113
 				}
 				leafASNs[sw.Spec.ASN] = true
@@ -486,19 +472,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet) //nolint:err113
 				}
 
-				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
-					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
-						if peer.Spec.VTEPIP != sw.Spec.VTEPIP {
-							return status, fmt.Errorf("mclag peers should have same VTEP IPs: %s and %s", sw.Name, peer.Name) //nolint:err113
-						}
-					} else {
-						mclagPeer[sw.Spec.Redundancy.Group] = &sw
-
-						if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
-							return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:err113
-						}
-					}
-				} else if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
+				if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
 					return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:err113
 				}
 				vtepIPs[swVTEPIP.Addr()] = true
@@ -866,8 +840,6 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		return cmp.Compare(a.Spec.Role, b.Spec.Role)
 	})
 
-	mclagPeer := map[string]*wiringapi.Switch{}
-
 	for idx := range switches.Items {
 		sw := &switches.Items[idx]
 		if sw.Spec.Role == "" {
@@ -894,17 +866,6 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				return fmt.Errorf("spine %s: %w", sw.Name, err)
 			}
 			sw.Spec.ASN = domain.SpineASN
-		}
-
-		if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
-			if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
-				sw.Spec.ASN = peer.Spec.ASN
-				sw.Spec.VTEPIP = peer.Spec.VTEPIP
-
-				continue
-			}
-
-			mclagPeer[sw.Spec.Redundancy.Group] = sw
 		}
 
 		if sw.Spec.Role.IsLeaf() {
