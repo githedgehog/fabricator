@@ -49,7 +49,7 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 			require.NoError(t, l.List(ctx, fabrics))
 			require.Len(t, fabrics.Items, 1)
 			require.Equal(t, wiringapi.DefaultFabric, fabrics.Items[0].Name)
-			require.Equal(t, wiringapi.DefaultFabricSpec(cfg), fabrics.Items[0].Spec)
+			require.Equal(t, defaultFabricSpec(), fabrics.Items[0].Spec)
 
 			cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering, Connection: valid.Connection})
 			require.NoError(t, err)

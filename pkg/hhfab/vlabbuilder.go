@@ -18,7 +18,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -363,7 +363,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			GatewayASN: 4200006134, // 64087.502 in asdot
 		}}
 	}
-	if err := b.createDefaultFabric(ctx, f, extraDomains); err != nil {
+	if err := b.createDefaultFabric(ctx, extraDomains); err != nil {
 		return err
 	}
 
@@ -1129,7 +1129,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 	slog.Info(">>>", "units", b.ScalableUnits, "vpcCount", b.VPCs, "serversPerVPCPerUnit", b.ServersPerVPCPerUnit, "p2p", b.P2P)
 
-	if err := b.createDefaultFabric(ctx, f, nil); err != nil {
+	if err := b.createDefaultFabric(ctx, nil); err != nil {
 		return err
 	}
 
@@ -1333,15 +1333,9 @@ func (b *VLABBuilderBase) nextServerPort(serverName string) string {
 	return portName
 }
 
-// createDefaultFabric adds Fabric/default with the spec the controller seeds it
-// with from the fabric config, which everything the builders generate is in.
-func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabricator, extraDomains map[string]wiringapi.FabricDomainSpec) error {
-	cfg, err := fabcomp.GetFabricConfig(f)
-	if err != nil {
-		return fmt.Errorf("getting fabric config: %w", err)
-	}
-
-	spec := wiringapi.DefaultFabricSpec(cfg)
+// createDefaultFabric adds Fabric/default with the default ASNs, which everything the builders generate is in.
+func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, extraDomains map[string]wiringapi.FabricDomainSpec) error {
+	spec := defaultFabricSpec()
 	maps.Copy(spec.Domains, extraDomains)
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
@@ -1355,6 +1349,21 @@ func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabr
 	}
 
 	return nil
+}
+
+func defaultFabricSpec() wiringapi.FabricSpec {
+	d := fab.DefaultConfig
+
+	return wiringapi.FabricSpec{
+		LeafASNStart: d.Fabric.LeafASNStart,
+		LeafASNEnd:   d.Fabric.LeafASNEnd,
+		Domains: map[string]wiringapi.FabricDomainSpec{
+			wiringapi.DefaultFabricDomain: {
+				SpineASN:   d.Fabric.SpineASN,
+				GatewayASN: d.Gateway.ASN,
+			},
+		},
+	}
 }
 
 func (b *VLABBuilderBase) fabricAnnotations() map[string]string {
