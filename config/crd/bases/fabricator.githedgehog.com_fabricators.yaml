@@ -267,6 +267,8 @@ spec:
                       managementDHCPStart:
                         type: string
                       mclagSessionSubnet:
+                        description: 'Deprecated: ignored, kept so configs exported
+                          by 26.05 can be imported'
                         type: string
                       mode:
                         type: string
