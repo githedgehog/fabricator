@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -424,7 +423,7 @@ func selectStaticExternalTarget(ctx context.Context, kube kclient.Client, candid
 }
 
 /* This test replaces a server with a "static external" node, Here are the test steps:
- * 0. find an unbundled connection THAT IS NOT ATTACHED TO AN MCLAG SWITCH, take note of params (target server, switch, switch port, server port)
+ * 0. find an unbundled connection, take note of params (target server, switch, switch port, server port)
  * 1. find two VPCs with at least one server attached to each, i.e. vpc1 and vpc2
  * 2. delete the existing VPC attachement associated with the unbundled connection
  * 3. delete the unbundled connection
@@ -443,34 +442,13 @@ func selectStaticExternalTarget(ctx context.Context, kube kclient.Client, candid
  * 11. cleanup everything and restore the original state
  */
 func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
-	// find an unbundled connection not attached to an MCLAG switch (see https://github.com/githedgehog/fabricator/issues/673#issuecomment-3028423762)
+	// find an unbundled connection
 	connList := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(connList.Items) == 0 {
 		slog.Info("No unbundled connections found, skipping test")
-
-		return true, nil, errNoUnbundled
-	}
-	swList := &wiringapi.SwitchList{}
-	if err := testCtx.kube.List(ctx, swList); err != nil {
-		return false, nil, fmt.Errorf("listing switches: %w", err)
-	}
-	mclagSwitches := make(map[string]bool, 0)
-	for _, sw := range swList.Items {
-		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
-			mclagSwitches[sw.Name] = true
-		}
-	}
-	candidates := make([]wiringapi.Connection, 0, len(connList.Items))
-	for _, c := range connList.Items {
-		if !mclagSwitches[c.Spec.Unbundled.Link.Switch.DeviceName()] {
-			candidates = append(candidates, c)
-		}
-	}
-	if len(candidates) == 0 {
-		slog.Info("No unbundled connections found that are not attached to an MCLAG switch, skipping test")
 
 		return true, nil, errNoUnbundled
 	}
@@ -486,7 +464,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return true, nil, errNotEnoughVPCs
 	}
 
-	sel, err := selectStaticExternalTarget(ctx, testCtx.kube, candidates, vpcList)
+	sel, err := selectStaticExternalTarget(ctx, testCtx.kube, connList.Items, vpcList)
 	if err != nil {
 		if errors.Is(err, errNotEnoughVPCs) {
 			slog.Info("No unbundled connection can be replaced while leaving 2 VPCs with an attached server, skipping test")
@@ -760,13 +738,13 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return false, reverts, fmt.Errorf("pinging static external from %s after removing VPC: %w", inServer, err)
 	}
 	// Ping the addresses from a leaf switch that's not the one the static external is attached to, this should succeed
+	swList := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, swList); err != nil {
+		return false, reverts, fmt.Errorf("listing switches: %w", err)
+	}
 	success := false
 	for _, sw := range swList.Items {
 		if sw.Name == switchName || sw.Spec.Role.IsSpine() {
-			continue
-		}
-		// avoid pinging from MCLAG switches, as I'm seeing failures (probably due to asymmetric routing, since they share same VTEP IP)
-		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
 			continue
 		}
 		if sw.Spec.VTEPIP == "" {
