@@ -81,7 +81,7 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Running config**: full `show running-configuration`
 - **VLANs and VXLAN**: VLAN config/brief, VXLAN interface/VNI/VRF/tunnel/remote
   VTEP/remote MAC mappings, VLAN-VNI and VRF-VNI maps
-- **L2**: MAC address table, MCLAG brief and interfaces, port-channel summary
+- **L2**: MAC address table, port-channel summary
 - **BGP/EVPN**: IPv4 BGP summary, L2VPN EVPN summary and neighbors, EVPN routes,
   route-maps, BFD peer state and counters; EVPN VNI/MAC/ES detail, ARP cache;
   per-VRF route, ARP, and BGP IPv4 unicast summary and full table (best-path,

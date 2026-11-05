@@ -76,8 +76,6 @@ queue_sonic_cmd "VLAN/VXLAN" "show vxlan vrfvnimap"
 # L2 Information
 # ---------------------------
 queue_sonic_cmd "L2" "show mac address-table"
-queue_sonic_cmd "L2" "show mclag brief"
-queue_sonic_cmd "L2" "show mclag interface"
 queue_sonic_cmd "L2" "show port-channel summary"
 
 # teamd per-LAG state captures LACP partner info and member oper status,
