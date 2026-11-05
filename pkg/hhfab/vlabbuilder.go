@@ -363,7 +363,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			GatewayASN: 4200006134, // 64087.502 in asdot
 		}}
 	}
-	if err := b.createDefaultFabric(ctx, extraDomains); err != nil {
+	if err := b.createDefaultFabric(ctx, f, extraDomains); err != nil {
 		return err
 	}
 
@@ -1129,7 +1129,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 	slog.Info(">>>", "units", b.ScalableUnits, "vpcCount", b.VPCs, "serversPerVPCPerUnit", b.ServersPerVPCPerUnit, "p2p", b.P2P)
 
-	if err := b.createDefaultFabric(ctx, nil); err != nil {
+	if err := b.createDefaultFabric(ctx, f, nil); err != nil {
 		return err
 	}
 
@@ -1334,8 +1334,9 @@ func (b *VLABBuilderBase) nextServerPort(serverName string) string {
 }
 
 // createDefaultFabric adds Fabric/default with the default ASNs, which everything the builders generate is in.
-func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, extraDomains map[string]wiringapi.FabricDomainSpec) error {
+func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabricator, extraDomains map[string]wiringapi.FabricDomainSpec) error {
 	spec := defaultFabricSpec()
+	spec.DisableBFD = f.Spec.Config.Fabric.DisableBFD
 	maps.Copy(spec.Domains, extraDomains)
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
