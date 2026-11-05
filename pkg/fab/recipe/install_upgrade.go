@@ -356,12 +356,11 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 }
 
 // flatcarUpdateApplied reports whether the target version is already applied and waiting for a reboot. A pending
-// update to another version is discarded, as flatcar-update refuses to run until it's rebooted into or reset.
+// update to another version is an error, as flatcar-update refuses to run until it's rebooted into or discarded.
 func flatcarUpdateApplied(ctx context.Context, targetVersion string) (bool, error) {
 	out, err := exec.CommandContext(ctx, "update_engine_client", "-status").Output()
 	if err != nil {
-		// update-engine isn't running (e.g. masked), so nothing could be applied yet
-		slog.Debug("Failed to get update_engine status, assuming no pending update", "err", err)
+		slog.Warn("Failed to get update_engine status, assuming no pending update", "err", err)
 
 		return false, nil
 	}
@@ -377,16 +376,7 @@ func flatcarUpdateApplied(ctx context.Context, targetVersion string) (bool, erro
 		return true, nil
 	}
 
-	slog.Warn("Discarding pending Flatcar update", "version", pending)
-
-	cmd := exec.CommandContext(ctx, "update_engine_client", "-reset_status")
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update_engine_client: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update_engine_client: ")
-	if err := cmd.Run(); err != nil {
-		return false, fmt.Errorf("resetting update_engine status: %w", err)
-	}
-
-	return false, nil
+	return false, fmt.Errorf("flatcar %q is applied and pending a reboot, reboot into it and re-run or discard it with 'update_engine_client -reset_status'", pending) //nolint:err113
 }
 
 func runFlatcarUpdate(ctx context.Context, targetVersion string) error {
