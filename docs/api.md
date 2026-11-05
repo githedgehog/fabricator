@@ -391,9 +391,9 @@ _Appears in:_
 | `mode` _FabricMode_ |  |  |  |
 | `managementDHCPStart` _Addr_ |  |  |  |
 | `managementDHCPEnd` _Addr_ |  |  |  |
-| `spineASN` _integer_ |  |  |  |
-| `leafASNStart` _integer_ |  |  |  |
-| `leafASNEnd` _integer_ |  |  |  |
+| `spineASN` _integer_ |  |  | Format: int64 <br /> |
+| `leafASNStart` _integer_ |  |  | Format: int64 <br /> |
+| `leafASNEnd` _integer_ |  |  | Format: int64 <br /> |
 | `protocolSubnet` _Prefix_ |  |  |  |
 | `vtepSubnet` _Prefix_ |  |  |  |
 | `fabricSubnet` _Prefix_ |  |  |  |
@@ -543,7 +543,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enable` _boolean_ |  |  |  |
-| `asn` _integer_ |  |  |  |
+| `asn` _integer_ |  |  | Format: int64 <br /> |
 | `mac` _string_ |  |  |  |
 | `observability` _[GatewayObservability](#gatewayobservability)_ |  |  |  |
 | `communities` _object (keys:string, values:string)_ |  |  |  |
