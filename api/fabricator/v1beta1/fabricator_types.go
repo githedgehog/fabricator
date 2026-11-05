@@ -257,9 +257,12 @@ type FabricConfig struct {
 	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"`
 	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`
 
-	SpineASN     uint32 `json:"spineASN,omitempty"`
+	// +kubebuilder:validation:Format=int64
+	SpineASN uint32 `json:"spineASN,omitempty"`
+	// +kubebuilder:validation:Format=int64
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
-	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
+	// +kubebuilder:validation:Format=int64
+	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
 
 	ProtocolSubnet      meta.Prefix `json:"protocolSubnet,omitempty"`
 	VTEPSubnet          meta.Prefix `json:"vtepSubnet,omitempty"`
@@ -322,7 +325,8 @@ type SwitchUser struct {
 }
 
 type GatewayConfig struct {
-	Enable        bool                  `json:"enable,omitempty"`
+	Enable bool `json:"enable,omitempty"`
+	// +kubebuilder:validation:Format=int64
 	ASN           uint32                `json:"asn,omitempty"`
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`
