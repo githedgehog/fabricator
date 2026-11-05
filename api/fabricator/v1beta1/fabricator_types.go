@@ -274,7 +274,8 @@ type FabricConfig struct {
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
-	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"`
+	// Deprecated: ignored, kept so configs exported by 26.05 can be imported
+	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"` // TODO: remove after 26.06 release
 
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
 	// Deprecated: ignored, kept so configs exported by 26.05 can be imported
@@ -650,6 +651,7 @@ func (f *Fabricator) Default() {
 	}
 
 	f.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
+	f.Spec.Config.Fabric.MCLAGSessionSubnet = ""
 
 	for name, target := range f.Spec.Config.Observability.Targets.Prometheus {
 		if target.Labels == nil {
@@ -889,11 +891,6 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing fabric subnet: %w", err)
 	}
 
-	mclagSessionSubnet, err := f.Spec.Config.Fabric.MCLAGSessionSubnet.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing MCLAG session subnet: %w", err)
-	}
-
 	// TODO validate actual community
 	if f.Spec.Config.Fabric.BaseVPCCommunity == "" {
 		return fmt.Errorf("base VPC community is required") //nolint:err113
@@ -941,7 +938,6 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		vtepSubnet,
 		fabricSubnet,
 		dummySubnet,
-		mclagSessionSubnet,
 	}
 
 	for someIdx, some := range reservedSubnets {

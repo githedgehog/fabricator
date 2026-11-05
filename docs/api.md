@@ -402,7 +402,7 @@ _Appears in:_
 | `th5WorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
 | `eslagESIPrefix` _string_ |  |  |  |
-| `mclagSessionSubnet` _Prefix_ |  |  |  |
+| `mclagSessionSubnet` _Prefix_ | Deprecated: ignored, kept so configs exported by 26.05 can be imported |  |  |
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _AlloyConfig_ | Deprecated: ignored, kept so configs exported by 26.05 can be imported |  |  |
 | `excludeNOSInstallers` _boolean_ |  |  |  |
