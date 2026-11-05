@@ -529,8 +529,8 @@ func (c *ControlUpgrade) setupFirewall(ctx context.Context) error {
 
 func (c *ControlUpgrade) installSSHConfig() error {
 	// We do not support making changes and doing upgrades in the same step
-	// So this configuration comes from the running instance.
-	// Users will need to manually place the option or wait for the upgrade to 26.04
+	// So this configuration comes from the running instance, and changing
+	// NoPassAuth on it takes effect with the next upgrade.
 	fileContents, err := renderSSHDConfig(c.Fab.Spec.Config.Control.NoPassAuth)
 	if err != nil {
 		return fmt.Errorf("rendering sshd config: %w", err)
