@@ -168,7 +168,13 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 	require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
 		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
 		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
-		Spec: wiringapi.DefaultFabricSpec(cfg),
+		Spec: wiringapi.FabricSpec{
+			LeafASNStart: cfg.LeafASNStart,
+			LeafASNEnd:   cfg.LeafASNEnd,
+			Domains: map[string]wiringapi.FabricDomainSpec{
+				wiringapi.DefaultFabricDomain: {SpineASN: cfg.SpineASN, GatewayASN: cfg.GatewayASN},
+			},
+		},
 	}))
 
 	// Defaulted and stored as the new release's webhooks would on create, since
