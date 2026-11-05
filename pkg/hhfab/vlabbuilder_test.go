@@ -17,7 +17,7 @@ import (
 )
 
 // Everything the builders generate is in the default fabric, so the wiring has
-// to carry Fabric/default, with the spec the controller would seed it with.
+// to carry Fabric/default, with the default ASNs and the config's BFD setting.
 func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 	t.Parallel()
 
@@ -38,6 +38,7 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 			ctx := t.Context()
 			f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 			f.Default()
+			f.Spec.Config.Fabric.DisableBFD = true
 
 			l := apiutil.NewLoader()
 			require.NoError(t, builder.Build(ctx, l, f, nil))
@@ -49,7 +50,17 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 			require.NoError(t, l.List(ctx, fabrics))
 			require.Len(t, fabrics.Items, 1)
 			require.Equal(t, wiringapi.DefaultFabric, fabrics.Items[0].Name)
-			require.Equal(t, defaultFabricSpec(), fabrics.Items[0].Spec)
+			require.Equal(t, wiringapi.FabricSpec{
+				LeafASNStart: 4200006632, // 64087.1000 in asdot
+				LeafASNEnd:   4200015631, // 64087.9999 in asdot
+				DisableBFD:   true,
+				Domains: map[string]wiringapi.FabricDomainSpec{
+					wiringapi.DefaultFabricDomain: {
+						SpineASN:   4200005633, // 64087.1 in asdot
+						GatewayASN: 4200006133, // 64087.501 in asdot
+					},
+				},
+			}, fabrics.Items[0].Spec)
 
 			cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering, Connection: valid.Connection})
 			require.NoError(t, err)
