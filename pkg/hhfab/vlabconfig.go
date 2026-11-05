@@ -940,65 +940,49 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	}
 
 	for _, conn := range conns.Items {
-		if peerConn := icPeerConns[conn.Name]; peerConn != nil {
+		switch peerConn := icPeerConns[conn.Name]; {
+		case peerConn != nil:
 			// cabled once, from the connection that sorts first
 			if conn.Name < peerConn.Name {
 				if err := addLink(conn.Spec.External.Link.Switch.Port, peerConn.Spec.External.Link.Switch.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for interconnect connection %q: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.Fabric != nil {
+		case conn.Spec.Fabric != nil:
 			for _, link := range conn.Spec.Fabric.Links {
 				if err := addLink(link.Spine.Port, link.Leaf.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.Mesh != nil {
+		case conn.Spec.Mesh != nil:
 			for _, link := range conn.Spec.Mesh.Links {
 				if err := addLink(link.Leaf1.Port, link.Leaf2.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for mesh connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.Gateway != nil {
+		case conn.Spec.Gateway != nil:
 			for _, link := range conn.Spec.Gateway.Links {
 				if err := addLink(link.Switch.Port, link.Gateway.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for gateway connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.Unbundled != nil {
+		case conn.Spec.Unbundled != nil:
 			if err := addLink(conn.Spec.Unbundled.Link.Server.Port, conn.Spec.Unbundled.Link.Switch.Port); err != nil {
 				return nil, fmt.Errorf("failed to add link for unbundled connection %s: %w", conn.Name, err)
 			}
-		} else if conn.Spec.Bundled != nil {
+		case conn.Spec.Bundled != nil:
 			for _, link := range conn.Spec.Bundled.Links {
 				if err := addLink(link.Server.Port, link.Switch.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for bundled connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if mclag := conn.Spec.MCLAG; mclag != nil { //nolint:staticcheck // deprecated, but VLAB should still bring up pre-existing MCLAG wiring
-			for _, link := range mclag.Links {
-				if err := addLink(link.Server.Port, link.Switch.Port); err != nil {
-					return nil, fmt.Errorf("failed to add link for MCLAG connection %s: %w", conn.Name, err)
-				}
-			}
-		} else if conn.Spec.ESLAG != nil {
+		case conn.Spec.ESLAG != nil:
 			for _, link := range conn.Spec.ESLAG.Links {
 				if err := addLink(link.Server.Port, link.Switch.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for ESLAG connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if mclagDomain := conn.Spec.MCLAGDomain; mclagDomain != nil { //nolint:staticcheck // deprecated, but VLAB should still bring up pre-existing MCLAG wiring
-			for _, link := range mclagDomain.SessionLinks {
-				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {
-					return nil, fmt.Errorf("failed to add session link for MCLAG domain connection %s: %w", conn.Name, err)
-				}
-			}
-			for _, link := range mclagDomain.PeerLinks {
-				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {
-					return nil, fmt.Errorf("failed to add peer link for MCLAG domain connection %s: %w", conn.Name, err)
-				}
-			}
-		} else if conn.Spec.External != nil {
+		case conn.Spec.External != nil:
 			// check if the connection is for hardware or virtual externals
 			// (it cannot be both, complain if that is the case)
 			var hwExt, virtExt bool
