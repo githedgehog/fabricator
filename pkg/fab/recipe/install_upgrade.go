@@ -337,7 +337,7 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 	}
 
 	if reboot {
-		slog.Info("Rebooting Control Node")
+		slog.Info("Rebooting node")
 
 		cmd := exec.CommandContext(ctx, "reboot")
 		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
