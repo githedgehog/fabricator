@@ -257,10 +257,10 @@ spec:
                       includeONIE:
                         type: boolean
                       leafASNEnd:
-                        format: int32
+                        format: int64
                         type: integer
                       leafASNStart:
-                        format: int32
+                        format: int64
                         type: integer
                       managementDHCPEnd:
                         type: string
@@ -340,7 +340,7 @@ spec:
                       proxyExternalSubnet:
                         type: string
                       spineASN:
-                        format: int32
+                        format: int64
                         type: integer
                       th5WorkaroundVLANs:
                         items:
@@ -366,7 +366,7 @@ spec:
                   gateway:
                     properties:
                       asn:
-                        format: int32
+                        format: int64
                         type: integer
                       communities:
                         additionalProperties:
