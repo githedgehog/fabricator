@@ -121,7 +121,7 @@ without login.
    ```
    fabric-config/
    ├── vpcs/vpc-01.yaml
-   ├── vpcattachments/server-01--mclag--leaf-01--leaf-02--vpc-01--subnet-01.yaml
+   ├── vpcattachments/server-01--eslag--leaf-01--leaf-02--vpc-01--subnet-01.yaml
    ├── vpcpeerings/vpc-01--vpc-02.yaml
    ├── externalpeerings/external-1--vpc-1.yaml
    └── gatewaypeerings/vpc-02--vpc-03.yaml

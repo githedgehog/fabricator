@@ -36,7 +36,7 @@ Only difference is to enable Cumulus support, use Cumulus VX switch profiles and
 hhfab init --dev --include-cumulus -f
 
 # simple 2 spine, 2 leaf topology with a pair of servers attached to each leaf
-hhfab vlab gen --mclag-leafs-count=0 --eslag-leaf-groups="" --orphan-leafs-count=2 --bundled-servers=0 --unbundled-servers=2 --sp=cumulus-vx
+hhfab vlab gen --eslag-leaf-groups="" --orphan-leafs-count=2 --bundled-servers=0 --unbundled-servers=2 --sp=cumulus-vx
 
 # peerings aren't supported yet
 
