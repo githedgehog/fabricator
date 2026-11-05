@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
@@ -262,28 +261,7 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 	}
 
 	// not starting the upgrade if the running fabric controller isn't done with all objects
-	if err := checkFabricCtrlReady(ctx, kube); err != nil {
-		return err
-	}
-
-	// refuse upgrade if there is any remote peering
-	var vpcPeerings vpcapi.VPCPeeringList
-	remotePeerings := []string{}
-	if err := kube.List(ctx, &vpcPeerings); err != nil {
-		return fmt.Errorf("listing vpc peerings: %w", err)
-	}
-	for _, peering := range vpcPeerings.Items {
-		if peering.Spec.Remote != "" {
-			remotePeerings = append(remotePeerings, peering.Name)
-		}
-	}
-	if len(remotePeerings) > 0 {
-		slices.Sort(remotePeerings)
-
-		return fmt.Errorf("cannot upgrade while there are deprecated remote peerings: %s", strings.Join(remotePeerings, ",")) //nolint:err113
-	}
-
-	return nil
+	return checkFabricCtrlReady(ctx, kube)
 }
 
 func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password string) error {
