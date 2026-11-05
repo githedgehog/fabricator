@@ -68,7 +68,7 @@ type VLABBuilderDefault struct {
 	FabricLinksCount    uint8             // number of links for each spine <> leaf pair
 	MeshLinksCount      uint8             // number of mesh links for each leaf <> leaf pair
 	ESLAGLeafGroups     string            // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
-	OrphanLeafsCount    uint8             // number of non-MCLAG server-leafs to generate
+	OrphanLeafsCount    uint8             // number of non-ESLAG server-leafs to generate
 	ESLAGServers        uint8             // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers    uint8             // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers      uint8             // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
