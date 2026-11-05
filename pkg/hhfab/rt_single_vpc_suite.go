@@ -872,6 +872,8 @@ outer:
 	}
 	permitList := []string{subnet1Name, subnet2Name, subnet3Name}
 	waitTime := 5 * time.Second
+	tcOpts := testCtx.tcOpts
+	tcOpts.IPerfsSeconds = 0
 
 	// isolate subnet1
 	slog.Debug("Isolating subnet1", "subnet", subnet1Name)
@@ -904,7 +906,7 @@ outer:
 	time.Sleep(waitTime)
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		returnErr = fmt.Errorf("waiting for ready: %w", err)
-	} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 		returnErr = fmt.Errorf("testing connectivity with %s isolated: %w", subnet1Name, err)
 	}
 
@@ -919,7 +921,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with %s restricted: %w", subnet2Name, err)
 			}
 		}
@@ -937,7 +939,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with %s isolated and restricted: %w", subnet3Name, err)
 			}
 		}
@@ -956,7 +958,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with all subnets in permit list: %w", err)
 			}
 		}
@@ -1551,7 +1553,7 @@ func roceBasicTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	}
 
 	// Find a RoCE-capable leaf with server connections
-	var swName string
+	var swName, swServer string
 	sw := &wiringapi.Switch{}
 outer:
 	for _, candidateSwitch := range testCtx.roceLeaves {
@@ -1581,6 +1583,18 @@ outer:
 		for _, conn := range connList.Items {
 			if connHasSingleHomedServer(candidateSwitch, conn) {
 				swName = candidateSwitch
+				switch {
+				case conn.Spec.Unbundled != nil:
+					swServer = conn.Spec.Unbundled.Link.Server.DeviceName()
+				case conn.Spec.Bundled != nil:
+					for _, link := range conn.Spec.Bundled.Links {
+						if link.Switch.DeviceName() == swName {
+							swServer = link.Server.DeviceName()
+
+							break
+						}
+					}
+				}
 				slog.Debug("Selected RoCE leaf with non-MCLAG server connection", "switch", swName, "connection", conn.Name)
 
 				break outer
@@ -1608,6 +1622,8 @@ outer:
 
 	dscpOpts := testCtx.tcOpts
 	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
+	// one server behind the leaf is enough to put marked traffic through it
+	dscpOpts.IPerfServers = []string{swServer}
 
 	slog.Debug("Clearing queue counters on switch", "switch", swName)
 	if err := execConfigCmd(ctx, swSSH, swName, "clear queue counters"); err != nil {

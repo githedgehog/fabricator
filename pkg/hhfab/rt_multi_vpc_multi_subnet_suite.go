@@ -157,6 +157,7 @@ func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 	time.Sleep(waitTime)
 	tcOpts := testCtx.tcOpts
 	tcOpts.WaitSwitchesReady = true
+	tcOpts.IPerfsSeconds = 0
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		returnErr = fmt.Errorf("waiting for ready: %w", err)
 	} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {

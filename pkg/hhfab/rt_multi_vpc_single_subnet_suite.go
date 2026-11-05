@@ -189,6 +189,9 @@ func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 // Test connectivity between all VPCs in a full mesh configuration, including all externals
 // Then, remove one external peering and test connectivity again.
 func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	tcOpts := testCtx.tcOpts
+	tcOpts.IPerfsSeconds = 0
+
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full mesh VPC peerings: %w", err)
@@ -205,7 +208,7 @@ func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
 		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -225,7 +228,7 @@ func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 		if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
 			return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 		}
-		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
 			return false, nil, err
 		}
 	}

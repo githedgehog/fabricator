@@ -2611,6 +2611,8 @@ type TestConnectivityOpts struct {
 	IPerfsMaxSpeed    float64
 	IPerfsDSCP        uint8
 	IPerfsTOS         uint8
+	// IPerfServers limits iperf3 to pairs with at least one of these servers; pings and curls still run on all pairs.
+	IPerfServers      []string
 	CurlsCount        int
 	Sources           []string
 	Destinations      []string
@@ -2890,6 +2892,11 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 
+			pairOpts := opts
+			if len(opts.IPerfServers) > 0 && !slices.Contains(opts.IPerfServers, serverA) && !slices.Contains(opts.IPerfServers, serverB) {
+				pairOpts.IPerfsSeconds = 0
+			}
+
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 				wg.Go(func() {
 					expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
@@ -2926,7 +2933,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					clientA := clientAR.(*sshutil.Config)
 
 					bidir := false
-					if opts.IPerfsSeconds > 0 && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
+					if pairOpts.IPerfsSeconds > 0 && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
 						revReachable, err := IsServerReachable(ctx, kube, serverB, serverA, c.Fab.Spec.Config.Gateway.Enable)
 						if err != nil {
 							errChan <- fmt.Errorf("checking reverse reachability for bidir: %w", err)
@@ -2938,7 +2945,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 					}
 
-					for _, e := range runPingIperfPair(ctx, opts, pingIperfPairArgs{
+					for _, e := range runPingIperfPair(ctx, pairOpts, pingIperfPairArgs{
 						From:     serverA,
 						To:       serverB,
 						FromSSH:  clientA,

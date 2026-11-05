@@ -308,11 +308,15 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	slog.Debug("Waiting 5 seconds")
 	time.Sleep(5 * time.Second)
 
+	// only the failed link's server changes path, so iperf3 runs on its pairs alone
+	tcOpts := testCtx.tcOpts
+	tcOpts.IPerfServers = []string{link.Server.DeviceName()}
+
 	var connCheckErr error
 	if matrix == nil {
-		connCheckErr = DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
+		connCheckErr = DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts)
 	} else {
-		connCheckErr = DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix)
+		connCheckErr = DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix)
 	}
 
 	return connCheckErr
