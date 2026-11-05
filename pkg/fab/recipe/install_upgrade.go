@@ -381,7 +381,7 @@ func flatcarUpdateApplied(ctx context.Context, targetVersion string) (bool, erro
 		pending = "unknown"
 	}
 
-	return false, fmt.Errorf("flatcar %q is applied and pending a reboot, reboot into it and re-run or discard it with 'update_engine_client -reset_status'", pending) //nolint:err113
+	return false, fmt.Errorf("flatcar %q is applied and pending a reboot, reboot into it and consider re-running", pending) //nolint:err113
 }
 
 func runFlatcarUpdate(ctx context.Context, targetVersion string) error {
