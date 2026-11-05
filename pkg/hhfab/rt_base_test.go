@@ -26,7 +26,7 @@ func TestRegexpSelection(t *testing.T) {
 				Name: "Static External",
 			},
 			{
-				Name: "MCLAG",
+				Name: "That other deprecated LAG",
 			},
 			{
 				Name: "ESLAG",

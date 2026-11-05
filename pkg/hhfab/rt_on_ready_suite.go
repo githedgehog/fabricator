@@ -15,7 +15,6 @@ import (
 	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
@@ -58,7 +57,6 @@ type ortServerInfo struct {
 	conns        []wiringapi.Connection
 	switches     []string
 	isUnbundled  bool
-	isMclag      bool
 	isMultihomed bool
 }
 
@@ -91,19 +89,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	kube := testCtx.kube
 	reverts := []RevertFunc{} //nolint:prealloc
 
-	// ── Phase 1: Discover switches and classify MCLAG ────────────────────
-	swList := &wiringapi.SwitchList{}
-	if err := kube.List(ctx, swList); err != nil {
-		return false, nil, fmt.Errorf("listing switches: %w", err)
-	}
-	mclagSwitches := map[string]bool{}
-	for _, sw := range swList.Items {
-		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
-			mclagSwitches[sw.Name] = true
-		}
-	}
-
-	// ── Phase 2: Discover servers and their connections ───────────────────
+	// ── Discover servers and their connections ───────────────────
 	servers := &wiringapi.ServerList{}
 	if err := kube.List(ctx, servers); err != nil {
 		return false, nil, fmt.Errorf("listing servers: %w", err)
@@ -167,27 +153,18 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		for _, c := range conns.Items[1:] {
 			switches = append(switches, c.Spec.Unbundled.Link.Switch.DeviceName())
 		}
-		isMclag := false
-		for _, sw := range switches {
-			if mclagSwitches[sw] {
-				isMclag = true
-
-				break
-			}
-		}
 		available = append(available, ortServerInfo{
 			name:         server.Name,
 			conn:         conn,
 			conns:        conns.Items,
 			switches:     switches,
 			isUnbundled:  conn.Spec.Unbundled != nil,
-			isMclag:      isMclag,
 			isMultihomed: multihomed,
 		})
 	}
 	slog.Info("Discovered available servers", "count", len(available))
 
-	// ── Phase 3: Discover externals ──────────────────────────────────────
+	// ── Discover externals ──────────────────────────────────────
 	extList := &vpcapi.ExternalList{}
 	if err := kube.List(ctx, extList); err != nil {
 		return false, nil, fmt.Errorf("listing externals: %w", err)
@@ -250,7 +227,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	slog.Info("Discovered externals",
 		"bgp", bgpExtName, "staticNonProxy", staticExtNonProxyName, "staticProxy", staticExtProxyName)
 
-	// ── Phase 4: Validate preconditions ──────────────────────────────────
+	// ── Validate preconditions ──────────────────────────────────
 	if bgpExtName == "" {
 		return false, nil, fmt.Errorf("no BGP external found, cannot run on-ready test") //nolint:err113
 	}
@@ -262,7 +239,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return false, nil, fmt.Errorf("not enough servers: need at least %d, found %d", minServers, len(available)) //nolint:err113
 	}
 
-	// ── Phase 5: Allocate servers to VPC roles ───────────────────────────
+	// ── Allocate servers to VPC roles ───────────────────────────
 	// We consume servers from the `available` slice as we assign them.
 	used := map[string]bool{}
 	take := func(pred func(s ortServerInfo) bool) (ortServerInfo, bool) {
@@ -281,30 +258,27 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return ortServerInfo{}, false
 	}
 
-	// VPC B: 1 hostBGP subnet – needs unbundled, non-MCLAG. Prefer a multihomed server,
+	// VPC B: 1 hostBGP subnet – needs unbundled. Prefer a multihomed server,
 	// so that all of its links get attached to the shared hostBGP subnet; any other
 	// multihomed server left for a regular VPC is attached over its first link only.
 	hostBGPServer, ok := take(func(s ortServerInfo) bool {
-		return s.isMultihomed && !s.isMclag
+		return s.isMultihomed
 	})
 	if !ok {
 		hostBGPServer, ok = take(func(s ortServerInfo) bool {
-			return s.isUnbundled && !s.isMclag
+			return s.isUnbundled
 		})
 	}
 	if !ok {
-		return false, nil, fmt.Errorf("no unbundled non-MCLAG server available for hostBGP VPC") //nolint:err113
+		return false, nil, fmt.Errorf("no multihomed or unbundled server available for hostBGP VPC") //nolint:err113
 	}
 
-	// VPC C: 1 subnet, 2 servers on different non mclag switches
-	vpcCServer1, ok := take(func(s ortServerInfo) bool { return !s.isMclag })
+	// VPC C: 1 subnet, 2 servers on different switches
+	vpcCServer1, ok := take(func(s ortServerInfo) bool { return true })
 	if !ok {
 		return false, nil, fmt.Errorf("not enough servers for multi-switch VPC") //nolint:err113
 	}
 	vpcCServer2, ok := take(func(s ortServerInfo) bool {
-		if s.isMclag {
-			return false
-		}
 		// Must be on a different switch than vpcCServer1
 		for _, sw := range s.switches {
 			if slices.Contains(vpcCServer1.switches, sw) {
@@ -346,7 +320,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		"vpcC_multiSwitch", []string{vpcCServer1.name, vpcCServer2.name},
 		"singleServerVPCs", len(singleServers))
 
-	// ── Phase 6: Allocate VLANs and subnets ──────────────────────────────
+	// ── Allocate VLANs and subnets ──────────────────────────────
 	alloc, err := newVPCSubnetAllocator(ctx, kube, testCtx.setupOpts.VLANNamespace, testCtx.setupOpts.IPv4Namespace)
 	if err != nil {
 		return false, nil, fmt.Errorf("setting up VPC subnet allocator: %w", err)
@@ -356,7 +330,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	vpcMode := testCtx.setupOpts.VPCMode
 	hashPolicy := testCtx.setupOpts.HashPolicy
 
-	// ── Phase 7: Build VPCs, attachments, and server netconf commands ────
+	// ── Build VPCs, attachments, and server netconf commands ────
 	type vpcPlan struct {
 		vpc      *vpcapi.VPC
 		attaches []*vpcapi.VPCAttachment
@@ -546,7 +520,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		})
 	}
 
-	// ── Phase 8: Create VPCs and attachments in Kubernetes ────────────────
+	// ── Create VPCs and attachments in Kubernetes ────────────────
 	slog.Info("Creating VPCs and attachments", "vpcs", len(plans))
 
 	// Register a cleanup revert that removes everything we created
@@ -598,7 +572,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return false, reverts, fmt.Errorf("waiting for ready after creating VPCs: %w", err)
 	}
 
-	// ── Phase 9: Configure server networking ─────────────────────────────
+	// ── Configure server networking ─────────────────────────────
 	slog.Info("Configuring server networking")
 
 	g := &errgroup.Group{}
@@ -676,7 +650,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		time.Sleep(10 * time.Second)
 	}
 
-	// ── Phase 10: Build the connectivity matrix ──────────────────────────
+	// ── Build the connectivity matrix ──────────────────────────
 	// The matrix the suite handed us is empty: on-ready runs with noSetup, so nothing
 	// collected the endpoints of the VPCs we just created. Endpoints only depend on the
 	// attachments and on the addresses the servers acquired, so we build them here and
@@ -690,7 +664,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return false, reverts, fmt.Errorf("building connectivity matrix: %w", err)
 	}
 
-	// ── Phase 11: Build and apply peerings ───────────────────────────────
+	// ── Build and apply peerings ───────────────────────────────
 	slog.Info("Setting up peerings")
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -841,7 +815,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		overlayExternalNoEgress(matrix, vpcCName, staticExtProxyName)
 	}
 
-	// ── Phase 12: Test connectivity ──────────────────────────────────────
+	// ── Test connectivity ──────────────────────────────────────
 	slog.Info("Running connectivity test")
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {

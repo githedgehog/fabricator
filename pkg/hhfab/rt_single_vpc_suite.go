@@ -206,7 +206,7 @@ func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	for _, conn := range conns.Items {
 		slog.Debug("Testing Bundled connection", "connection", conn.Name)
 		if len(conn.Spec.Bundled.Links) < 2 {
-			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:err113
+			return false, nil, fmt.Errorf("bundled connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:err113
 		}
 		for _, link := range conn.Spec.Bundled.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
@@ -1513,7 +1513,7 @@ func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 				time.Sleep(5 * time.Second)
 
 				// Refresh the matrix entry for this server. Without
-				// this, follow-up tests (MCLAG/ESLAG failover) probe the
+				// this, follow-up tests such as ESLAG failover probe the
 				// stale matrix IP and never reach the server.
 				if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, server.Name); err != nil {
 					return fmt.Errorf("refreshing matrix endpoint for %s after DHCP revert: %w", server.Name, err)
@@ -1574,25 +1574,24 @@ outer:
 		}
 
 		// Prefer leaves whose server connections are single-homed (Unbundled or
-		// Bundled). MCLAG and ESLAG members err-disable for minutes after a
+		// Bundled). ESLAG members err-disable for minutes after a
 		// rebooting peer comes back, which races against the UC3 polling
-		// window. MCLAG is also on the deprecation path, so we don't want
-		// post-RoCE tests baking MCLAG-specific timing assumptions in.
+		// window.
 		for _, conn := range connList.Items {
 			if connHasSingleHomedServer(candidateSwitch, conn) {
 				swName = candidateSwitch
-				slog.Debug("Selected RoCE leaf with non-MCLAG server connection", "switch", swName, "connection", conn.Name)
+				slog.Debug("Selected RoCE leaf with single-homed server connection", "switch", swName, "connection", conn.Name)
 
 				break outer
 			}
 		}
-		slog.Debug("Skipping RoCE leaf with no non-MCLAG server connections", "switch", candidateSwitch)
+		slog.Debug("Skipping RoCE leaf with no single-homed server connections", "switch", candidateSwitch)
 	}
 
 	if swName == "" {
-		slog.Info("No RoCE-capable leaves with non-MCLAG server connections found, skipping test")
+		slog.Info("No RoCE-capable leaves with single-homed server connections found, skipping test")
 
-		return true, nil, fmt.Errorf("no RoCE leaves with non-MCLAG server connections found") //nolint:err113
+		return true, nil, fmt.Errorf("no RoCE leaves with single-homed server connections found") //nolint:err113
 	}
 	slog.Debug("Using RoCE leaf switch for test", "switch", swName)
 
