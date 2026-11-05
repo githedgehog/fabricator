@@ -41,7 +41,6 @@ var DefaultConfig = fabapi.FabConfig{
 		},
 		ESLAGMACBase:       "f2:00:00:00:00:00", // TODO make sure it's really used
 		ESLAGESIPrefix:     "00:f2:00:00:",      // TODO make sure it's really used
-		MCLAGSessionSubnet: "172.30.95.0/31",
 		DefaultSwitchUsers: map[string]fabapi.SwitchUser{},
 		TH5WorkaroundVLANs: []fmeta.VLANRange{
 			{From: 3900, To: 3999},
