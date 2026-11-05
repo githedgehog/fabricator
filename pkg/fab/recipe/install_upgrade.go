@@ -376,6 +376,11 @@ func flatcarUpdateApplied(ctx context.Context, targetVersion string) (bool, erro
 		return true, nil
 	}
 
+	// update_engine only keeps the version in memory, it's reset to 0.0.0 on restart
+	if pending == "" || pending == "0.0.0" {
+		pending = "unknown"
+	}
+
 	return false, fmt.Errorf("flatcar %q is applied and pending a reboot, reboot into it and re-run or discard it with 'update_engine_client -reset_status'", pending) //nolint:err113
 }
 
