@@ -282,32 +282,26 @@ func setupTimesync(ctx context.Context, controlVIP string) error {
 	return nil
 }
 
-const (
-	FlatcarVersionPrefix = "VERSION="
-)
-
 func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
-	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
+	osRelease, err := readOSRelease()
+	if err != nil {
+		return err
+	}
+
+	switch id := osRelease["ID"]; id {
+	case "flatcar":
+	case "ubuntu":
 		// TODO do something on ubuntu
 		slog.Warn("Skipping flatcar upgrade on ubuntu")
 
 		return nil
+	default:
+		return fmt.Errorf("unsupported os %q, expected flatcar or ubuntu", id) //nolint:err113
 	}
 
 	slog.Info("Upgrading Flatcar")
-	const filename = "/etc/os-release"
 
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("could not read /etc/os-release : %w", err)
-	}
-
-	version := ""
-	for line := range strings.Lines(string(content)) {
-		if after, ok := strings.CutPrefix(line, FlatcarVersionPrefix); ok {
-			version = strings.TrimSpace(after)
-		}
-	}
+	version := osRelease["VERSION_ID"]
 	if version == "" {
 		return fmt.Errorf("could not find flatcar version in /etc/os-release") //nolint:err113
 	}
