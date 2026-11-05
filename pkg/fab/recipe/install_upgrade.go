@@ -312,10 +312,85 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 		return nil
 	}
 
-	slog.Info("Upgrading Flatcar to", "version", targetVersion)
-
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+
+	applied, err := flatcarUpdateApplied(ctx, targetVersion)
+	if err != nil {
+		return err
+	}
+	if applied {
+		slog.Info("Flatcar upgrade already applied, reboot pending", "version", targetVersion)
+	} else if err := runFlatcarUpdate(ctx, targetVersion); err != nil {
+		return err
+	}
+
+	reboot := yes
+	if !reboot && isatty.IsTerminal(os.Stdout.Fd()) {
+		ok, err := askForConfirmation("Do you really want to reboot your system?")
+		if err != nil {
+			slog.Warn("Failed asking for confirmation, assuming 'no'", "err", err)
+		}
+		if ok {
+			reboot = true
+		}
+	}
+
+	if reboot {
+		slog.Info("Rebooting Control Node")
+
+		cmd := exec.CommandContext(ctx, "reboot")
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
+
+		return nil
+	}
+
+	slog.Warn("A reboot is necessary for the changes to take effect")
+
+	return nil
+}
+
+// flatcarUpdateApplied reports whether the target version is already applied and waiting for a reboot. A pending
+// update to another version is discarded, as flatcar-update refuses to run until it's rebooted into or reset.
+func flatcarUpdateApplied(ctx context.Context, targetVersion string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "update_engine_client", "-status").Output()
+	if err != nil {
+		// update-engine isn't running (e.g. masked), so nothing could be applied yet
+		slog.Debug("Failed to get update_engine status, assuming no pending update", "err", err)
+
+		return false, nil
+	}
+
+	// same KEY=value format as os-release
+	status := parseOSRelease(string(out))
+	if status["CURRENT_OP"] != "UPDATE_STATUS_UPDATED_NEED_REBOOT" {
+		return false, nil
+	}
+
+	pending := status["NEW_VERSION"]
+	if strings.TrimPrefix(pending, "v") == strings.TrimPrefix(targetVersion, "v") {
+		return true, nil
+	}
+
+	slog.Warn("Discarding pending Flatcar update", "version", pending)
+
+	cmd := exec.CommandContext(ctx, "update_engine_client", "-reset_status")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update_engine_client: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update_engine_client: ")
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("resetting update_engine status: %w", err)
+	}
+
+	return false, nil
+}
+
+func runFlatcarUpdate(ctx context.Context, targetVersion string) error {
+	slog.Info("Upgrading Flatcar to", "version", targetVersion)
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -349,33 +424,6 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 
 		return fmt.Errorf("retrying upgrading Flatcar: %w", lastErr)
 	}
-
-	reboot := yes
-	if !reboot && isatty.IsTerminal(os.Stdout.Fd()) {
-		ok, err := askForConfirmation("Do you really want to reboot your system?")
-		if err != nil {
-			slog.Warn("Failed asking for confirmation, assuming 'no'", "err", err)
-		}
-		if ok {
-			reboot = true
-		}
-	}
-
-	if reboot {
-		slog.Info("Rebooting Control Node")
-
-		cmd := exec.CommandContext(ctx, "reboot")
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("rebooting: %w", err)
-		}
-
-		return nil
-	}
-
-	slog.Warn("A reboot is necessary for the changes to take effect")
 
 	return nil
 }
