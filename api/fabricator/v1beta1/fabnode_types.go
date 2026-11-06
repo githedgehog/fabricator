@@ -12,7 +12,6 @@ import (
 	"github.com/samber/lo"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
-	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -151,7 +150,7 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 				return fmt.Errorf("listing control nodes: %w", err)
 			}
 			fabnodes := &FabNodeList{}
-			if err := kube.List(ctx, fabnodes, kclient.InNamespace(FabNamespace)); err != nil && !kmeta.IsNoMatchError(err) {
+			if err := kube.List(ctx, fabnodes, kclient.InNamespace(FabNamespace)); err != nil {
 				return fmt.Errorf("listing fabricator nodes: %w", err)
 			}
 			dummyIPs := map[netip.Addr]bool{}
