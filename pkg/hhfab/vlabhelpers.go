@@ -795,7 +795,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 		} else {
 			for _, subnet := range dhcpSubnets.Items {
 				for _, alloc := range subnet.Status.Allocated {
-					if alloc.Discover || alloc.Hostname == "" || alloc.IP == "" {
+					if alloc.Hostname == "" || alloc.IP == "" {
 						continue
 					}
 					serverHostIPs[alloc.Hostname] = alloc.IP

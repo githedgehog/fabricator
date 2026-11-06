@@ -604,7 +604,7 @@ func dhcpServerMAC(idx int) net.HardwareAddr {
 }
 
 // dhcpProbeMAC is the readiness probe's MAC for a subnet, apart from every
-// server's so its leftover offer is never mistaken for one.
+// server's so it's never mistaken for one.
 func dhcpProbeMAC(subnetIdx int) net.HardwareAddr {
 	return net.HardwareAddr{0x02, 0xdc, 0x01, byte(subnetIdx >> 16), byte(subnetIdx >> 8), byte(subnetIdx)} //nolint:gosec // truncated to bytes on purpose
 }
