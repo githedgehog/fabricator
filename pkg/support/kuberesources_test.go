@@ -162,7 +162,7 @@ func TestCollectsAllOwnKinds(t *testing.T) {
 }
 
 // credentialField matches the names of the fields that may hold a credential, so the ones a kind gains later fail
-// the test below until they are either redacted or reviewed. No "session" as it's the BGP and MCLAG ones in our API.
+// the test below until they are either redacted or reviewed. No "session" as it's the BGP ones in our API.
 var credentialField = regexp.MustCompile(
 	`(?i)pass|pwd|secret|token|key|hash|cred|auth|bearer|pem|private|ssh|psk|header|cookie|salt|otp|license|kubeconfig`)
 
