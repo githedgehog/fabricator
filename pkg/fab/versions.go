@@ -17,7 +17,7 @@ import (
 
 const (
 	// User-facing release version for the whole project (as referenced in docs.hedgehog.cloud)
-	Release = "26.05.0"
+	Release = "26.06.0"
 
 	// Fabric version used for all fabric components
 	FabricVersion = meta.Version("v0.144.1")
