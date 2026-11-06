@@ -1092,7 +1092,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 		return fmt.Errorf("syncing temporary script file: %w", err)
 	}
 
-	err = ssh.UploadPath(tmpfile.Name(), remoteScriptPath)
+	err = ssh.UploadPath(ctx, tmpfile.Name(), remoteScriptPath)
 	if err != nil {
 		return fmt.Errorf("uploading script to %s: %w", entryName, err)
 	}
@@ -1108,7 +1108,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	localFilePath := filepath.Join(outputDir, entryName+"-show-tech.log")
-	err = ssh.DownloadPath(remoteOutputPath, localFilePath)
+	err = ssh.DownloadPath(ctx, remoteOutputPath, localFilePath)
 	if err != nil {
 		return fmt.Errorf("downloading show-tech output from %s: %w", entryName, err)
 	}
@@ -1343,7 +1343,7 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 					break
 				}
 
-				if err := ssh.DownloadPath(k3s.KubeConfigPath, kubeconfig); err != nil {
+				if err := ssh.DownloadPath(ctx, k3s.KubeConfigPath, kubeconfig); err != nil {
 					slog.Warn("Failed to download kubeconfig", "vm", vm.Name)
 				}
 
