@@ -24,8 +24,10 @@ import (
 // FabricSpec defines the desired state of Fabric
 type FabricSpec struct {
 	// LeafASNStart is the first ASN of the range leaves of this Fabric are allocated from
+	// +kubebuilder:validation:Format=int64
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
 	// LeafASNEnd is the last ASN of the range leaves of this Fabric are allocated from
+	// +kubebuilder:validation:Format=int64
 	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
 	// DisableBFD disables BFD on the links between switches and on the sessions with the gateways
 	DisableBFD bool `json:"disableBFD,omitempty"`
@@ -36,8 +38,10 @@ type FabricSpec struct {
 // FabricDomainSpec defines a single spine layer of a Fabric
 type FabricDomainSpec struct {
 	// SpineASN is the ASN shared by all spines of this domain, outside the leaf ASN range
+	// +kubebuilder:validation:Format=int64
 	SpineASN uint32 `json:"spineASN,omitempty"`
 	// GatewayASN is the ASN shared by all gateways attached to this domain, outside the leaf ASN range
+	// +kubebuilder:validation:Format=int64
 	GatewayASN uint32 `json:"gatewayASN,omitempty"`
 }
 
@@ -137,18 +141,6 @@ func (fabric *Fabric) domainASNs() (map[uint32]string, error) {
 	}
 
 	return asns, nil
-}
-
-// DefaultFabricSpec is the spec Fabric/default is seeded with from the controller config
-func DefaultFabricSpec(cfg *meta.FabricConfig) FabricSpec {
-	return FabricSpec{
-		LeafASNStart: cfg.LeafASNStart,
-		LeafASNEnd:   cfg.LeafASNEnd,
-		DisableBFD:   cfg.DisableBFD,
-		Domains: map[string]FabricDomainSpec{
-			DefaultFabricDomain: {SpineASN: cfg.SpineASN, GatewayASN: cfg.GatewayASN},
-		},
-	}
 }
 
 // GetFabricSpec returns the spec of the named fabric
