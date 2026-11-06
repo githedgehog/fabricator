@@ -90,7 +90,7 @@ func SetupFabricatorReconcilerWith(mgr kctrl.Manager) error {
 func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request) (kctrl.Result, error) {
 	l := kctrllog.FromContext(ctx)
 
-	if req.Name != comp.FabName && req.Namespace != comp.FabNamespace {
+	if req.Name != comp.FabName || req.Namespace != comp.FabNamespace {
 		l.Info("Ignoring incorrect Fabricator")
 
 		return kctrl.Result{}, nil
