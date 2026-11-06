@@ -129,7 +129,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `ControlNode` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[ControlNodeSpec](#controlnodespec)_ |  |  |  |
 | `status` _[ControlNodeStatus](#controlnodestatus)_ |  |  |  |
 
@@ -305,7 +305,7 @@ FabNode is the Schema for the nodes API.
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `FabNode` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[FabNodeSpec](#fabnodespec)_ |  |  |  |
 | `status` _[FabNodeStatus](#fabnodestatus)_ |  |  |  |
 
@@ -454,7 +454,7 @@ Fabricator defines configuration for the Fabricator controller
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `Fabricator` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[FabricatorSpec](#fabricatorspec)_ |  |  |  |
 | `status` _[FabricatorStatus](#fabricatorstatus)_ |  |  |  |
 
@@ -492,13 +492,13 @@ _Appears in:_
 | `isBootstrap` _boolean_ |  |  |  |
 | `isInstall` _boolean_ |  |  |  |
 | `versions` _[Versions](#versions)_ |  |  |  |
-| `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
+| `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
 | `lastAttemptGen` _integer_ | Generation of the last attempt to apply configuration |  |  |
-| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last successful configuration application |  |  |
+| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | Time of the last successful configuration application |  |  |
 | `lastAppliedGen` _integer_ | Generation of the last successful configuration application |  |  |
 | `lastAppliedController` _string_ | Controller version that applied the last successful configuration |  |  |
-| `lastStatusCheck` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last status check |  |  |
-| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
+| `lastStatusCheck` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#time-v1-meta)_ | Time of the last status check |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.37/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
 | `components` _[ComponentsStatus](#componentsstatus)_ |  |  |  |
 | `release` _string_ |  |  |  |
 | `releaseChannel` _string_ |  |  |  |
