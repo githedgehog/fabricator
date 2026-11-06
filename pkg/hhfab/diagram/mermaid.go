@@ -94,13 +94,18 @@ func generateMermaid(topo Topology) string {
 		}
 
 		interconnects := []Node{}
-		for _, link := range topo.Links {
-			if link.Type == EdgeTypeInterconnect {
-				interconnects = append(interconnects, findNode(topo.Nodes, link.Source), findNode(topo.Nodes, link.Target))
-			}
-		}
 		isInterconnect := func(node Node) bool {
 			return slices.ContainsFunc(interconnects, func(n Node) bool { return n.ID == node.ID })
+		}
+		for _, link := range topo.Links {
+			if link.Type != EdgeTypeInterconnect {
+				continue
+			}
+			for _, id := range []string{link.Source, link.Target} {
+				if node := findNode(topo.Nodes, id); !isInterconnect(node) {
+					interconnects = append(interconnects, node)
+				}
+			}
 		}
 		externals := slices.DeleteFunc(slices.Clone(layers.External), isInterconnect)
 		writeExternals := func(subgraph string, nodes []Node) {
