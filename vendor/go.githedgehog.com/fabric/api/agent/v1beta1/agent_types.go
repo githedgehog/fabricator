@@ -36,10 +36,11 @@ import (
 // AgentSpec defines the desired state of the Agent and includes all relevant information required to fully configure
 // the switch and manage its lifecycle. It is not intended to be used directly by users.
 type AgentSpec struct {
-	Role                 wiringapi.SwitchRole                     `json:"role,omitempty"`
-	Description          string                                   `json:"description,omitempty"`
-	Config               AgentSpecConfig                          `json:"config,omitempty"`
-	Alloy                meta.AlloyConfig                         `json:"alloy,omitempty"` // TODO ignored, remove in future releases
+	Role        wiringapi.SwitchRole `json:"role,omitempty"`
+	Description string               `json:"description,omitempty"`
+	Config      AgentSpecConfig      `json:"config,omitempty"`
+	// Deprecated: ignored. TODO: remove after 26.06 release
+	Alloy                meta.AlloyConfig                         `json:"alloy,omitempty"`
 	Version              AgentVersion                             `json:"version,omitempty"`
 	Users                []UserCreds                              `json:"users,omitempty"`
 	Switch               wiringapi.SwitchSpec                     `json:"switch,omitempty"`
@@ -88,21 +89,23 @@ type AgentSpecConfig struct {
 	ESLAGMACBase          string                    `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix        string                    `json:"eslagESIPrefix,omitempty"`
 	DefaultMaxPathsEBGP   uint32                    `json:"defaultMaxPathsEBGP,omitempty"`
-	MCLAGSessionSubnet    string                    `json:"mclagSessionSubnet,omitempty"`
-	GatewayASN            uint32                    `json:"gatewayASN,omitempty"`
-	SpineASN              uint32                    `json:"spineASN,omitempty"`
-	ProtocolSubnet        string                    `json:"protocolSubnet,omitempty"`
-	VTEPSubnet            string                    `json:"vtepSubnet,omitempty"`
-	FabricSubnet          string                    `json:"fabricSubnet,omitempty"`
-	ProxyExternalSubnet   string                    `json:"proxyExternalSubnet,omitempty"`
-	DisableBFD            bool                      `json:"disableBFD,omitempty"`
-	GatewayBFD            bool                      `json:"gatewayBFD,omitempty"`
-	Alloy                 alloy.Config              `json:"alloy,omitempty"`
-	GatewayCommunities    map[string]string         `json:"gatewayCommunities,omitempty"`
-	HeartbeatInterval     uint32                    `json:"heartbeatInterval,omitempty"` // seconds, default and minimum 15
-	EnforceInterval       uint32                    `json:"enforceInterval,omitempty"`   // seconds, default and minimum 120
-	// Domains holds every domain of the switch's fabric. It replaces GatewayASN and SpineASN, which
-	// are still filled in for older agents and read only from configs saved before Domains existed.
+	// Deprecated: ignored, Domains has it. TODO: remove after 26.06 release
+	// +kubebuilder:validation:Format=int64
+	GatewayASN uint32 `json:"gatewayASN,omitempty"`
+	// Deprecated: ignored, Domains has it. TODO: remove after 26.06 release
+	// +kubebuilder:validation:Format=int64
+	SpineASN            uint32            `json:"spineASN,omitempty"`
+	ProtocolSubnet      string            `json:"protocolSubnet,omitempty"`
+	VTEPSubnet          string            `json:"vtepSubnet,omitempty"`
+	FabricSubnet        string            `json:"fabricSubnet,omitempty"`
+	ProxyExternalSubnet string            `json:"proxyExternalSubnet,omitempty"`
+	DisableBFD          bool              `json:"disableBFD,omitempty"`
+	GatewayBFD          bool              `json:"gatewayBFD,omitempty"`
+	Alloy               alloy.Config      `json:"alloy,omitempty"`
+	GatewayCommunities  map[string]string `json:"gatewayCommunities,omitempty"`
+	HeartbeatInterval   uint32            `json:"heartbeatInterval,omitempty"` // seconds, default and minimum 15
+	EnforceInterval     uint32            `json:"enforceInterval,omitempty"`   // seconds, default and minimum 120
+	// Domains holds every domain of the switch's fabric
 	Domains map[string]wiringapi.FabricDomainSpec `json:"domains,omitempty"`
 }
 
@@ -122,8 +125,6 @@ type AgentVersion struct {
 	// Agent information
 	Repo    string `json:"repo,omitempty"`
 	Default string `json:"default,omitempty"`
-	// TODO: remove after 26.05 release
-	Override string `json:"override,omitempty"`
 
 	// Alloy information
 	AlloyRepo    string `json:"alloyRepo,omitempty"`
@@ -376,24 +377,26 @@ type SwitchStateLLDPNeighbor struct {
 }
 
 type SwitchStateBGPNeighbor struct {
-	ConnectionsDropped     uint64                                    `json:"connDropped,omitempty"`
-	Enabled                bool                                      `json:"enabled,omitempty"`
-	EstablishedTransitions uint64                                    `json:"estabTrans,omitempty"`
-	LastEstablished        kmetav1.Time                              `json:"lastEstab,omitempty"`
-	LastRead               kmetav1.Time                              `json:"lastRead,omitempty"`
-	LastResetReason        string                                    `json:"lastResetReason,omitempty"`
-	LastResetTime          kmetav1.Time                              `json:"lastReset,omitempty"`
-	LastWrite              kmetav1.Time                              `json:"lastWrite,omitempty"`
-	LocalAS                uint32                                    `json:"localAS,omitempty"`
-	Messages               BGPMessages                               `json:"msgs,omitempty"`
-	PeerAS                 uint32                                    `json:"peerAS,omitempty"`
-	PeerGroup              string                                    `json:"peerGroup,omitempty"`
-	PeerPort               uint16                                    `json:"peerPort,omitempty"`
-	PeerType               BGPPeerType                               `json:"peerType,omitempty"`
-	RemoteRouterID         string                                    `json:"remoteRouterID,omitempty"`
-	SessionState           BGPNeighborSessionState                   `json:"state,omitempty"`
-	ShutdownMessage        string                                    `json:"shutdownMsg,omitempty"`
-	Prefixes               map[string]SwitchStateBGPNeighborPrefixes `json:"prefixes,omitempty"`
+	ConnectionsDropped     uint64       `json:"connDropped,omitempty"`
+	Enabled                bool         `json:"enabled,omitempty"`
+	EstablishedTransitions uint64       `json:"estabTrans,omitempty"`
+	LastEstablished        kmetav1.Time `json:"lastEstab,omitempty"`
+	LastRead               kmetav1.Time `json:"lastRead,omitempty"`
+	LastResetReason        string       `json:"lastResetReason,omitempty"`
+	LastResetTime          kmetav1.Time `json:"lastReset,omitempty"`
+	LastWrite              kmetav1.Time `json:"lastWrite,omitempty"`
+	// +kubebuilder:validation:Format=int64
+	LocalAS  uint32      `json:"localAS,omitempty"`
+	Messages BGPMessages `json:"msgs,omitempty"`
+	// +kubebuilder:validation:Format=int64
+	PeerAS          uint32                                    `json:"peerAS,omitempty"`
+	PeerGroup       string                                    `json:"peerGroup,omitempty"`
+	PeerPort        uint16                                    `json:"peerPort,omitempty"`
+	PeerType        BGPPeerType                               `json:"peerType,omitempty"`
+	RemoteRouterID  string                                    `json:"remoteRouterID,omitempty"`
+	SessionState    BGPNeighborSessionState                   `json:"state,omitempty"`
+	ShutdownMessage string                                    `json:"shutdownMsg,omitempty"`
+	Prefixes        map[string]SwitchStateBGPNeighborPrefixes `json:"prefixes,omitempty"`
 }
 
 type SwitchStateBGPNeighborPrefixes struct {
