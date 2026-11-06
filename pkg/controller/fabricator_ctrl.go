@@ -26,6 +26,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/version"
 	coreapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kctrl "sigs.k8s.io/controller-runtime"
@@ -100,7 +101,19 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 	if err := r.Get(ctx, req.NamespacedName, f); err != nil {
 		return kctrl.Result{}, fmt.Errorf("fetching fabricator: %w", err)
 	}
+
+	// store what Default changes, e.g. cleared deprecated fields, as upgrades don't rewrite the object
+	orig := f.Spec.DeepCopy()
 	f.Default()
+	if !equality.Semantic.DeepEqual(orig, &f.Spec) {
+		if err := r.Update(ctx, f); err != nil {
+			return kctrl.Result{}, fmt.Errorf("updating defaulted fabricator: %w", err)
+		}
+		l.Info("Fabricator defaulted and updated")
+
+		// the update triggers another reconcile
+		return kctrl.Result{}, nil
+	}
 
 	l = l.WithValues("gen", f.Generation, "res", f.ResourceVersion)
 

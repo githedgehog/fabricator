@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
+    controller-gen.kubebuilder.io/version: v0.23.0
   name: fabricators.fabricator.githedgehog.com
 spec:
   group: fabricator.githedgehog.com
@@ -257,10 +257,10 @@ spec:
                       includeONIE:
                         type: boolean
                       leafASNEnd:
-                        format: int32
+                        format: int64
                         type: integer
                       leafASNStart:
-                        format: int32
+                        format: int64
                         type: integer
                       managementDHCPEnd:
                         type: string
@@ -340,7 +340,7 @@ spec:
                       proxyExternalSubnet:
                         type: string
                       spineASN:
-                        format: int32
+                        format: int64
                         type: integer
                       th5WorkaroundVLANs:
                         items:
@@ -366,7 +366,7 @@ spec:
                   gateway:
                     properties:
                       asn:
-                        format: int32
+                        format: int64
                         type: integer
                       communities:
                         additionalProperties:

@@ -20,7 +20,7 @@ const (
 	Release = "26.06.0"
 
 	// Fabric version used for all fabric components
-	FabricVersion = meta.Version("v0.144.1")
+	FabricVersion = meta.Version("v0.145.0")
 
 	// Gateway Dataplane version (including WASM validator and FRR)
 	DataplaneVersion = meta.Version("v0.38.2")
@@ -50,7 +50,7 @@ const (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:               "v1.36.4-k3s1",
+		K3s:               "v1.37.2-k3s1",
 		Zot:               "v2.1.21",
 		ZotChart:          "v0.1.67-hh1",
 		CertManager:       "v1.21.2",

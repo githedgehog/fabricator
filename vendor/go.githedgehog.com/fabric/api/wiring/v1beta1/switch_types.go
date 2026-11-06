@@ -167,6 +167,7 @@ type SwitchSpec struct {
 	// VLANNamespaces is a list of VLAN namespaces the switch is part of, their VLAN ranges could not overlap
 	VLANNamespaces []string `json:"vlanNamespaces,omitempty"`
 	// ASN is the ASN of the switch
+	// +kubebuilder:validation:Format=int64
 	ASN uint32 `json:"asn,omitempty"`
 	// IP is the IP of the switch that could be used to access it from other switches and control nodes in the Fabric
 	IP string `json:"ip,omitempty"`
@@ -541,8 +542,7 @@ func (sw *Switch) HydrationValidation(ctx context.Context, kube kclient.Reader, 
 
 	// check leaf ASN uniqueness
 	if sw.Spec.Role.IsLeaf() {
-		// TODO: remove MCLAG exception once we don't need to worry about upgrading systems which still support it
-		if _, exist := leafASNs[sw.Spec.ASN]; exist && sw.Spec.Redundancy.Type != meta.RedundancyTypeMCLAG {
+		if _, exist := leafASNs[sw.Spec.ASN]; exist {
 			return errors.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN)
 		}
 	}
@@ -583,8 +583,7 @@ func (sw *Switch) HydrationValidation(ctx context.Context, kube kclient.Reader, 
 			return errors.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet)
 		}
 
-		// TODO: remove MCLAG exception once we don't need to worry about upgrading systems which still support it
-		if _, exist := VTEPs[sw.Spec.VTEPIP]; exist && sw.Spec.Redundancy.Type != meta.RedundancyTypeMCLAG {
+		if _, exist := VTEPs[sw.Spec.VTEPIP]; exist {
 			return errors.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP)
 		}
 	}
@@ -896,8 +895,6 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 		switch sw.Spec.Redundancy.Type {
 		case meta.RedundancyTypeNone:
 			// No redundancy, nothing to check
-		case meta.RedundancyTypeMCLAG:
-			warnings = append(warnings, "MCLAG is deprecated and no longer supported")
 		case meta.RedundancyTypeESLAG:
 			if !sp.Spec.Features.ESLAG {
 				return nil, errors.Errorf("ESLAG is not supported on switch profile %s", sw.Spec.Profile)
