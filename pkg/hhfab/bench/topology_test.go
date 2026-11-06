@@ -101,6 +101,7 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 		"name=dc1,spines=2,leaves=3,server-ports=1,vpcs=1,attach=1",
 		"name=dc2,spines=2,leaves=2,server-ports=1,vpcs=1,attach=1",
 	}, true)
+	fabCfg := defaultFab().Spec.Config
 
 	fabrics := &wiringapi.FabricList{}
 	require.NoError(t, l.List(ctx, fabrics))
@@ -130,7 +131,7 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 		require.Empty(t, sw.Spec.Topology.Domains, "switch %s", sw.Name)
 
 		if sw.Spec.Role.IsSpine() {
-			require.Equal(t, cfg.SpineASN, sw.Spec.ASN, "spine %s", sw.Name)
+			require.Equal(t, fabCfg.Fabric.SpineASN, sw.Spec.ASN, "spine %s", sw.Name)
 		} else {
 			leafASNs = append(leafASNs, sw.Spec.ASN)
 		}
@@ -160,7 +161,7 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 	slices.Sort(leafASNs)
 	want := []uint32{} //nolint:prealloc
 	for idx := range uint32(5) {
-		want = append(want, cfg.LeafASNStart+idx)
+		want = append(want, fabCfg.Fabric.LeafASNStart+idx)
 	}
 	require.Equal(t, want, leafASNs, "leaves of both fabrics share the fab.yaml range without overlap")
 
@@ -169,10 +170,10 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
 		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
 		Spec: wiringapi.FabricSpec{
-			LeafASNStart: cfg.LeafASNStart,
-			LeafASNEnd:   cfg.LeafASNEnd,
+			LeafASNStart: fabCfg.Fabric.LeafASNStart,
+			LeafASNEnd:   fabCfg.Fabric.LeafASNEnd,
 			Domains: map[string]wiringapi.FabricDomainSpec{
-				wiringapi.DefaultFabricDomain: {SpineASN: cfg.SpineASN, GatewayASN: cfg.GatewayASN},
+				wiringapi.DefaultFabricDomain: {SpineASN: fabCfg.Fabric.SpineASN, GatewayASN: fabCfg.Gateway.ASN},
 			},
 		},
 	}))
