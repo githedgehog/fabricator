@@ -2731,6 +2731,10 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 		return errs
 	}
 
+	if len(opts.IPerfServers) > 0 && !slices.Contains(opts.IPerfServers, args.From) && !slices.Contains(opts.IPerfServers, args.To) {
+		return errs
+	}
+
 	// In bidir mode the lex-larger direction has nothing left to drive.
 	if args.Bidir && args.From > args.To {
 		return errs
@@ -2892,11 +2896,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 
-			pairOpts := opts
-			if len(opts.IPerfServers) > 0 && !slices.Contains(opts.IPerfServers, serverA) && !slices.Contains(opts.IPerfServers, serverB) {
-				pairOpts.IPerfsSeconds = 0
-			}
-
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 				wg.Go(func() {
 					expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
@@ -2933,7 +2932,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					clientA := clientAR.(*sshutil.Config)
 
 					bidir := false
-					if pairOpts.IPerfsSeconds > 0 && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
+					if opts.IPerfsSeconds > 0 && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
 						revReachable, err := IsServerReachable(ctx, kube, serverB, serverA, c.Fab.Spec.Config.Gateway.Enable)
 						if err != nil {
 							errChan <- fmt.Errorf("checking reverse reachability for bidir: %w", err)
@@ -2945,7 +2944,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 					}
 
-					for _, e := range runPingIperfPair(ctx, pairOpts, pingIperfPairArgs{
+					for _, e := range runPingIperfPair(ctx, opts, pingIperfPairArgs{
 						From:     serverA,
 						To:       serverB,
 						FromSSH:  clientA,
