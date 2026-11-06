@@ -339,10 +339,10 @@ func TestDHCPObjectsValidate(t *testing.T) {
 			Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
 			Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
 			Spec: wiringapi.FabricSpec{
-				LeafASNStart: f.Spec.Config.Fabric.LeafASNStart,
-				LeafASNEnd:   f.Spec.Config.Fabric.LeafASNEnd,
+				LeafASNStart: fab.DefaultLeafASNStart,
+				LeafASNEnd:   fab.DefaultLeafASNEnd,
 				Domains: map[string]wiringapi.FabricDomainSpec{
-					wiringapi.DefaultFabricDomain: {SpineASN: f.Spec.Config.Fabric.SpineASN, GatewayASN: f.Spec.Config.Gateway.ASN},
+					wiringapi.DefaultFabricDomain: {SpineASN: fab.DefaultSpineASN, GatewayASN: fab.DefaultGatewayASN},
 				},
 			},
 		}))

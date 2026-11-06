@@ -38,7 +38,6 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 			ctx := t.Context()
 			f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
 			f.Default()
-			f.Spec.Config.Fabric.DisableBFD = true
 
 			l := apiutil.NewLoader()
 			require.NoError(t, builder.Build(ctx, l, f, nil))
@@ -53,7 +52,6 @@ func TestVLABBuildersGenerateDefaultFabric(t *testing.T) {
 			require.Equal(t, wiringapi.FabricSpec{
 				LeafASNStart: 4200006632, // 64087.1000 in asdot
 				LeafASNEnd:   4200015631, // 64087.9999 in asdot
-				DisableBFD:   true,
 				Domains: map[string]wiringapi.FabricDomainSpec{
 					wiringapi.DefaultFabricDomain: {
 						SpineASN:   4200005633, // 64087.1 in asdot

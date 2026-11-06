@@ -257,12 +257,15 @@ type FabricConfig struct {
 	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"`
 	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`
 
+	// Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported
 	// +kubebuilder:validation:Format=int64
-	SpineASN uint32 `json:"spineASN,omitempty"`
+	SpineASN uint32 `json:"spineASN,omitempty"` // TODO: remove after 26.06 release
+	// Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported
 	// +kubebuilder:validation:Format=int64
-	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
+	LeafASNStart uint32 `json:"leafASNStart,omitempty"` // TODO: remove after 26.06 release
+	// Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported
 	// +kubebuilder:validation:Format=int64
-	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
+	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"` // TODO: remove after 26.06 release
 
 	ProtocolSubnet      meta.Prefix `json:"protocolSubnet,omitempty"`
 	VTEPSubnet          meta.Prefix `json:"vtepSubnet,omitempty"`
@@ -293,7 +296,8 @@ type FabricConfig struct {
 
 	AllowExtraSwitchProfiles bool `json:"allowExtraSwitchProfiles,omitempty"`
 
-	DisableBFD bool `json:"disableBFD,omitempty"`
+	// Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported
+	DisableBFD bool `json:"disableBFD,omitempty"` // TODO: remove after 26.06 release
 
 	// AgentHeartbeatInterval is how often switch agents report their status and refresh metrics, in seconds: 15 (default) to 3600
 	AgentHeartbeatInterval uint32 `json:"agentHeartbeatInterval,omitempty"`
@@ -326,8 +330,9 @@ type SwitchUser struct {
 
 type GatewayConfig struct {
 	Enable bool `json:"enable,omitempty"`
+	// Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported
 	// +kubebuilder:validation:Format=int64
-	ASN           uint32                `json:"asn,omitempty"`
+	ASN           uint32                `json:"asn,omitempty"` // TODO: remove after 26.06 release
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`
 	Communities   map[string]string     `json:"communities,omitempty"`
@@ -528,13 +533,6 @@ func (f *Fabricator) Default() {
 		}
 	}
 
-	if f.Spec.Config.Fabric.LeafASNEnd == 65534 {
-		if f.Spec.Config.Gateway.ASN == 0 || f.Spec.Config.Gateway.ASN == 65534 {
-			f.Spec.Config.Fabric.LeafASNEnd = 65533
-			f.Spec.Config.Gateway.ASN = 65534
-		}
-	}
-
 	// apply new default to IRB VLANs if it was unchanged, to avoid TH5 clash during upgrade
 	if len(f.Spec.Config.Fabric.VPCIRBVLANs) == 1 && f.Spec.Config.Fabric.VPCIRBVLANs[0].From == 3000 && f.Spec.Config.Fabric.VPCIRBVLANs[0].To == 3999 {
 		f.Spec.Config.Fabric.VPCIRBVLANs[0].To = 3899
@@ -656,6 +654,11 @@ func (f *Fabricator) Default() {
 
 	f.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
 	f.Spec.Config.Fabric.MCLAGSessionSubnet = ""
+	f.Spec.Config.Fabric.SpineASN = 0
+	f.Spec.Config.Fabric.LeafASNStart = 0
+	f.Spec.Config.Fabric.LeafASNEnd = 0
+	f.Spec.Config.Fabric.DisableBFD = false
+	f.Spec.Config.Gateway.ASN = 0
 
 	for name, target := range f.Spec.Config.Observability.Targets.Prometheus {
 		if target.Labels == nil {
@@ -849,35 +852,6 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	fm := f.Spec.Config.Fabric.Mode
 	if !slices.Contains(fmeta.FabricModes, fm) {
 		return fmt.Errorf("invalid fabric mode %q", fm) //nolint:err113
-	}
-
-	if fm == fmeta.FabricModeSpineLeaf {
-		if f.Spec.Config.Fabric.SpineASN == 0 {
-			return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:err113
-		}
-		if f.Spec.Config.Fabric.SpineASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Fabric.SpineASN <= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("spine ASN must be outside leaf ASN range") //nolint:err113
-		}
-
-		if f.Spec.Config.Fabric.LeafASNStart == 0 {
-			return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:err113
-		}
-		if f.Spec.Config.Fabric.LeafASNEnd == 0 {
-			return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:err113
-		}
-		if f.Spec.Config.Fabric.LeafASNStart >= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:err113
-		}
-
-		if f.Spec.Config.Gateway.ASN == 0 {
-			return fmt.Errorf("gateway ASN is required for spine-leaf mode") //nolint:err113
-		}
-		if f.Spec.Config.Gateway.ASN == f.Spec.Config.Fabric.SpineASN {
-			return fmt.Errorf("gateway ASN must be different from spine ASN") //nolint:err113
-		}
-		if f.Spec.Config.Gateway.ASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Gateway.ASN <= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("gateway ASN must be outside leaf ASN range") //nolint:err113
-		}
 	}
 
 	protoSubnet, err := f.Spec.Config.Fabric.ProtocolSubnet.Parse()

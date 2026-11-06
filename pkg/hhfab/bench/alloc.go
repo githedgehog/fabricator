@@ -12,6 +12,7 @@ import (
 
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab"
 )
 
 // Addresses are handed out per unit: one domain of one fabric, in --fabric
@@ -32,7 +33,7 @@ const (
 )
 
 // Every bench fabric is its own Fabric object with its own ASNs, taken from the
-// 32-bit private range (RFC 6996) rather than fab.yaml. ASNBenchStart leaves
+// 32-bit private range (RFC 6996). ASNBenchStart leaves
 // the bottom of that range to the stock default fabric and the VLAB extra
 // fabric and domain, so bench fabrics never compete with them or with each
 // other.
@@ -85,12 +86,6 @@ type Allocator struct {
 
 	fabricSubnet netip.Prefix
 	fabricBase   netip.Addr
-
-	// The default fabric's ASNs from fab.yaml, used instead of the per-fabric
-	// blocks when every switch goes into the default fabric.
-	defaultSpineASN     uint32
-	defaultLeafASNStart uint32
-	defaultLeafASNEnd   uint32
 }
 
 // NewAllocator parses the pools out of the cluster's Fabricator object and
@@ -130,10 +125,6 @@ func NewAllocator(f fabapi.Fabricator, controls, nodes, gateways uint, specs []F
 	if a.fabricSubnet, err = f.Spec.Config.Fabric.FabricSubnet.Parse(); err != nil {
 		return nil, fmt.Errorf("parsing fabric subnet: %w", err)
 	}
-
-	a.defaultSpineASN = f.Spec.Config.Fabric.SpineASN
-	a.defaultLeafASNStart = f.Spec.Config.Fabric.LeafASNStart
-	a.defaultLeafASNEnd = f.Spec.Config.Fabric.LeafASNEnd
 
 	// hydrate() reserves 4 addresses after the VIP, then gives one management
 	// IP to each ControlNode and FabNode, in that order. Bench switches start
@@ -208,7 +199,7 @@ func (a *Allocator) preflight() error {
 	slots := a.Slots()
 	units := a.Units()
 
-	// ASNs come from the private range, not fab.yaml, so this only fails at a
+	// ASNs come from the private range, so this only fails at a
 	// fabric count no address pool could carry either.
 	if last := uint64(ASNBenchStart) + uint64(slots)*StrideASNs - 1; last > ASNPrivate32End {
 		return fmt.Errorf("%d fabrics need ASNs up to %d, past the end of the 32-bit private range %d", //nolint:err113
@@ -399,13 +390,8 @@ func (a *Allocator) LeafASN(slot, domain, leafIdx uint) (uint32, error) {
 
 // CheckDefaultFabric verifies that every fabric fits into the default fabric:
 // one domain each, since the default fabric has only the one, and all their
-// leaves within the fab.yaml leaf ASN range, which they share.
+// leaves within the default fabric's leaf ASN range, which they share.
 func (a *Allocator) CheckDefaultFabric() error {
-	if a.defaultSpineASN == 0 || a.defaultLeafASNStart == 0 || a.defaultLeafASNEnd < a.defaultLeafASNStart {
-		return fmt.Errorf("fab.yaml has no usable default fabric ASNs: spineASN %d, leafASNStart %d, leafASNEnd %d", //nolint:err113
-			a.defaultSpineASN, a.defaultLeafASNStart, a.defaultLeafASNEnd)
-	}
-
 	leaves := uint64(0)
 	for _, spec := range a.specs {
 		if spec.Domains != 1 {
@@ -414,9 +400,9 @@ func (a *Allocator) CheckDefaultFabric() error {
 		leaves += uint64(spec.Leaves)
 	}
 
-	if capacity := uint64(a.defaultLeafASNEnd) - uint64(a.defaultLeafASNStart) + 1; leaves > capacity {
-		return fmt.Errorf("%d leaves need more ASNs than the %d in fab.yaml leafASNStart-leafASNEnd (%d-%d). Widen it", //nolint:err113
-			leaves, capacity, a.defaultLeafASNStart, a.defaultLeafASNEnd)
+	if capacity := uint64(fab.DefaultLeafASNEnd) - uint64(fab.DefaultLeafASNStart) + 1; leaves > capacity {
+		return fmt.Errorf("%d leaves need more ASNs than the %d in the default fabric leaf range (%d-%d)", //nolint:err113
+			leaves, capacity, fab.DefaultLeafASNStart, fab.DefaultLeafASNEnd)
 	}
 
 	return nil
@@ -424,11 +410,11 @@ func (a *Allocator) CheckDefaultFabric() error {
 
 // DefaultSpineASN is the ASN every spine has in the default fabric.
 func (a *Allocator) DefaultSpineASN() uint32 {
-	return a.defaultSpineASN
+	return fab.DefaultSpineASN
 }
 
 // DefaultLeafASN returns the ASN for a leaf in the default fabric, where the
-// leaves of every fabric share the fab.yaml range, numbered in --fabric order.
+// leaves of every fabric share its leaf range, numbered in --fabric order.
 // leafIdx is the leaf's index within its fabric.
 func (a *Allocator) DefaultLeafASN(slot, leafIdx uint) (uint32, error) {
 	if slot >= a.Slots() {
@@ -443,12 +429,12 @@ func (a *Allocator) DefaultLeafASN(slot, leafIdx uint) (uint32, error) {
 		offset += uint64(spec.Leaves)
 	}
 
-	asn := uint64(a.defaultLeafASNStart) + offset
-	if asn > uint64(a.defaultLeafASNEnd) {
-		return 0, fmt.Errorf("leaf ASN %d is past fab.yaml leafASNEnd %d", asn, a.defaultLeafASNEnd) //nolint:err113
+	asn := uint64(fab.DefaultLeafASNStart) + offset
+	if asn > uint64(fab.DefaultLeafASNEnd) {
+		return 0, fmt.Errorf("leaf ASN %d is past the default fabric leaf range end %d", asn, fab.DefaultLeafASNEnd) //nolint:err113
 	}
 
-	return uint32(asn), nil //nolint:gosec // bounded by defaultLeafASNEnd above
+	return uint32(asn), nil // bounded by DefaultLeafASNEnd above
 }
 
 // FabricLinkIPs returns the /31 pair for one fabric link: the spine side and

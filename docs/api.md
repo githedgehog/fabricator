@@ -390,9 +390,9 @@ _Appears in:_
 | `mode` _FabricMode_ |  |  |  |
 | `managementDHCPStart` _Addr_ |  |  |  |
 | `managementDHCPEnd` _Addr_ |  |  |  |
-| `spineASN` _integer_ |  |  | Format: int64 <br /> |
-| `leafASNStart` _integer_ |  |  | Format: int64 <br /> |
-| `leafASNEnd` _integer_ |  |  | Format: int64 <br /> |
+| `spineASN` _integer_ | Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported |  | Format: int64 <br /> |
+| `leafASNStart` _integer_ | Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported |  | Format: int64 <br /> |
+| `leafASNEnd` _integer_ | Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported |  | Format: int64 <br /> |
 | `protocolSubnet` _Prefix_ |  |  |  |
 | `vtepSubnet` _Prefix_ |  |  |  |
 | `fabricSubnet` _Prefix_ |  |  |  |
@@ -411,7 +411,7 @@ _Appears in:_
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
 | `allowExtraSwitchProfiles` _boolean_ |  |  |  |
-| `disableBFD` _boolean_ |  |  |  |
+| `disableBFD` _boolean_ | Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported |  |  |
 | `agentHeartbeatInterval` _integer_ | AgentHeartbeatInterval is how often switch agents report their status and refresh metrics, in seconds: 15 (default) to 3600 |  |  |
 | `agentEnforceInterval` _integer_ | AgentEnforceInterval is how often switch agents re-apply their full config, in seconds: 120 (default) to 86400 |  |  |
 | `observability` _Observability_ |  |  |  |
@@ -540,7 +540,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enable` _boolean_ |  |  |  |
-| `asn` _integer_ |  |  | Format: int64 <br /> |
+| `asn` _integer_ | Deprecated: ignored, the Fabric object has it, kept so configs exported by 26.05 can be imported |  | Format: int64 <br /> |
 | `mac` _string_ |  |  |  |
 | `observability` _[GatewayObservability](#gatewayobservability)_ |  |  |  |
 | `communities` _object (keys:string, values:string)_ |  |  |  |
