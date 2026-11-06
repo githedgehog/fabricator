@@ -20,6 +20,10 @@ KUBECTL="/opt/bin/kubectl"
 
     echo -e "\n=== K3s Version ==="
     /opt/bin/k3s --version
+
+    echo -e "\n=== Date/Time ==="
+    date -Iseconds
+    timedatectl 2>&1
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------

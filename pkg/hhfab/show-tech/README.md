@@ -48,6 +48,12 @@ Console fallback requires `expect` to be installed and credentials set via
 All devices are collected in parallel. Switches get a 10-minute timeout;
 everything else gets 5 minutes.
 
+Over SSH, each node first gets a dedicated clock query (`date -u +%s.%N`). The
+runner logs it as `Clock sample` with its own time just before and just after
+the query, so the node's clock offset can be read within one SSH round trip.
+Timestamps inside the show-tech files are not suitable for this: they are
+taken after the runner's own collection has finished.
+
 ## What each script collects
 
 ### runner.sh - CI runner host
@@ -111,6 +117,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 ### control.sh - control node (k3s)
 
 - **System**: kernel version, OS release, k3s version
+- **Date/Time**: `date -Iseconds` and `timedatectl` (clock sync status) at
+  collection start
 - **Networking**: `ip addr/route/neigh/link`, per-NIC ethtool stats and offload
   settings, ping+ARP+SSH reachability check to every switch listed in the
   `Switch` CRD, disk usage, process list
