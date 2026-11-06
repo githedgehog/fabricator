@@ -1339,6 +1339,12 @@ func Run(ctx context.Context) error {
 								Value: true,
 							},
 							&cli.BoolFlag{
+								Name:    "inspect-gateway-lldp-strict",
+								Usage:   "fail the run (instead of warn) when a switch doesn't see a wired gateway as an LLDP neighbor when using --ready=inspect",
+								EnvVars: []string{"HHFAB_INSPECT_GATEWAY_LLDP_STRICT"},
+								Value:   true,
+							},
+							&cli.BoolFlag{
 								Name:    "inspect-pods-strict",
 								Usage:   "fail the run (instead of warn) on container restarts in the fab namespace when using --ready=inspect-pods",
 								EnvVars: []string{"HHFAB_INSPECT_PODS_STRICT"},
@@ -1509,6 +1515,7 @@ func Run(ctx context.Context) error {
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
 									InterfaceMTU:             ifMTU,
 									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
+									InspectGatewayLLDPStrict: c.Bool("inspect-gateway-lldp-strict"),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -1910,12 +1917,20 @@ Examples:
 								Usage: "fail if any switch is not ready or not inspected",
 								Value: true,
 							},
+							&cli.BoolFlag{
+								Name:    "gateway-lldp-strict",
+								Usage:   "fail (instead of warn) when a switch doesn't see a wired gateway as an LLDP neighbor",
+								EnvVars: []string{"HHFAB_INSPECT_GATEWAY_LLDP_STRICT"},
+								Value:   true,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir, hhfab.InspectOpts{
 								WaitAppliedFor: time.Duration(c.Int64("wait-applied-for")) * time.Second,
 								Strict:         c.Bool("strict"),
+
+								GatewayLLDPStrict: c.Bool("gateway-lldp-strict"),
 							}); err != nil {
 								return fmt.Errorf("inspect: %w", err)
 							}

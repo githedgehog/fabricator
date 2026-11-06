@@ -4236,6 +4236,9 @@ type InspectOpts struct {
 	WaitAppliedFor time.Duration
 	Strict         bool
 	Attempts       int
+	// GatewayLLDPStrict fails the inspection when a switch port wired to a gateway doesn't see it as an LLDP neighbor,
+	// otherwise it's only reported as a warning.
+	GatewayLLDPStrict bool
 }
 
 // lldpRenderOnly strips the WithErrors implementation so inspect.Render only
@@ -4273,6 +4276,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		FabricConns:   true,
 		ExternalConns: true,
 		ServerConns:   true,
+		GatewayConns:  true,
 	}
 	var lldpOut inspect.Out[inspect.LLDPIn]
 	var lldpErr error
@@ -4292,6 +4296,10 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		lldpOut, lldpErr = inspect.LLDP(ctx, kube, lldpIn)
 
 		if lldpErr == nil {
+			if len(gatewayLLDPErrorsOf(lldpOut)) > 0 {
+				continue
+			}
+
 			if withErrors, ok := lldpOut.(inspect.WithErrors); ok {
 				if len(withErrors.Errors()) == 0 {
 					break
@@ -4314,6 +4322,15 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 			// LLDP neighbor discovery is unreliable on some switch platforms, so
 			// a missing neighbor is reported but doesn't fail the inspection.
 			slog.Warn("Inspecting LLDP reveals some errors", "errors", we.Errors())
+		}
+		// unlike the other neighbors, a wired gateway that isn't seen fails the inspection unless it's relaxed
+		if gwErrs := gatewayLLDPErrorsOf(lldpOut); len(gwErrs) > 0 {
+			if opts.GatewayLLDPStrict {
+				slog.Error("Inspecting LLDP: gateways missing from the neighbors", "errors", gwErrs)
+				fail = true
+			} else {
+				slog.Warn("Inspecting LLDP: gateways missing from the neighbors", "errors", gwErrs)
+			}
 		}
 	}
 
