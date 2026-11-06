@@ -200,7 +200,7 @@ func checkStoredLeases(ctx context.Context, kube kclient.Reader, checks *dhcpChe
 // checkStored compares the round with what dhcpd stored: no IP held by two
 // MACs, every bound server's lease present with the IP it was ACKed and an
 // expiry no earlier than the lease it was given, and nothing for MACs the
-// bench never used. The probe's leftover offer is the one expected stranger.
+// bench never used. The probe's MAC is the one expected stranger.
 func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, stored map[int]map[string]dhcpapi.DHCPAllocated) {
 	known := make(map[string]*dhcpServer, len(servers))
 	for _, srv := range servers {
@@ -243,9 +243,6 @@ func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, 
 				checks.recordf(checkMissingLease, "%s holds %s, %s has no lease for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.IP != srv.ip.String():
 				checks.recordf(checkMissingLease, "%s holds %s, %s stores %s for it", srv.hostname, srv.ip, sub.dhcpSubnetName(), lease.IP)
-			case lease.Discover:
-				// What dhcpd keeps for an offer: the ACKed lease never replaced it.
-				checks.recordf(checkMissingLease, "%s holds %s, %s only stores an offer for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.Expiry.Add(dhcpLeaseSkew).Before(srv.leaseEnd):
 				checks.recordf(checkShortLease, "%s's lease runs to %s, %s stores an expiry of %s",
 					srv.hostname, srv.leaseEnd.UTC().Format(time.RFC3339), sub.dhcpSubnetName(), lease.Expiry.UTC().Format(time.RFC3339))

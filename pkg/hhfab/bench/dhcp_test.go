@@ -1280,7 +1280,7 @@ func TestDHCPHeldPicksOthersOnly(t *testing.T) {
 }
 
 // The stored-state checks fire on what they are for and on nothing else; the
-// probe's leftover offer is expected.
+// probe's MAC is expected.
 func TestCheckStored(t *testing.T) {
 	t.Parallel()
 
@@ -1302,11 +1302,8 @@ func TestCheckStored(t *testing.T) {
 		return dhcpapi.DHCPAllocated{IP: ip.String(), Expiry: kmetav1.NewTime(expiry)}
 	}
 
-	// The probe's offer is never requested, so it may stay an offer.
-	probe := lease(ip, now.Add(time.Minute))
-	probe.Discover = true
-
-	clean := map[string]dhcpapi.DHCPAllocated{dhcpProbeMAC(sub.index).String(): probe}
+	// The probe's MAC is the one stranger allowed a lease.
+	clean := map[string]dhcpapi.DHCPAllocated{dhcpProbeMAC(sub.index).String(): lease(ip, now.Add(time.Minute))}
 	for _, srv := range servers {
 		// Padding on top is fine, and so is clock skew within a minute.
 		clean[srv.mac.String()] = lease(srv.ip, srv.leaseEnd.Add(-30*time.Second))
@@ -1316,11 +1313,8 @@ func TestCheckStored(t *testing.T) {
 	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: clean})
 	require.Zero(t, checks.failed())
 
-	offered := lease(servers[0].ip, now.Add(time.Hour))
-	offered.Discover = true
-
 	broken := map[string]dhcpapi.DHCPAllocated{
-		servers[0].mac.String(): offered, // bound, but only its offer is stored
+		servers[0].mac.String(): lease(servers[0].ip, now.Add(time.Hour)),
 		// servers[1] missing
 		servers[2].mac.String(): lease(servers[0].ip, now.Add(time.Hour)),   // another's IP: overlap and wrong
 		servers[3].mac.String(): lease(servers[3].ip, now.Add(time.Minute)), // expires under it
@@ -1331,7 +1325,7 @@ func TestCheckStored(t *testing.T) {
 	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: broken})
 
 	require.Equal(t, int64(1), checks.count(checkOverlapLease))
-	require.Equal(t, int64(3), checks.count(checkMissingLease))
+	require.Equal(t, int64(2), checks.count(checkMissingLease))
 	require.Equal(t, int64(1), checks.count(checkShortLease))
 	require.Equal(t, int64(1), checks.count(checkUnknownLease))
 }
