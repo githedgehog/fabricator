@@ -78,26 +78,29 @@ type UserCreds struct {
 }
 
 type FabricConfig struct {
-	DeploymentID             string        `json:"deploymentID,omitempty"`
-	ControlVIP               string        `json:"controlVIP,omitempty"`
-	APIServer                string        `json:"apiServer,omitempty"`
-	AgentRepo                string        `json:"agentRepo,omitempty"`
-	VPCIRBVLANRanges         []VLANRange   `json:"vpcIRBVLANRange,omitempty"`
-	VPCPeeringVLANRanges     []VLANRange   `json:"vpcPeeringVLANRange,omitempty"` // Deprecated: ignored, still set by fabricator
-	TH5WorkaroundVLANRange   []VLANRange   `json:"th5WorkaroundVLANRange"`
-	VPCPeeringDisabled       bool          `json:"vpcPeeringDisabled,omitempty"`
-	ReservedSubnets          []string      `json:"reservedSubnets,omitempty"`
-	Users                    []UserCreds   `json:"users,omitempty"`
-	FabricMode               FabricMode    `json:"fabricMode,omitempty"`
-	BaseVPCCommunity         string        `json:"baseVPCCommunity,omitempty"`  // TODO: rename? now only used to mark external prefixes
-	VPCLoopbackSubnet        string        `json:"vpcLoopbackSubnet,omitempty"` // Deprecated: ignored, still set by fabricator
-	FabricMTU                uint16        `json:"fabricMTU,omitempty"`
-	ServerFacingMTUOffset    uint16        `json:"serverFacingMTUOffset,omitempty"`
-	ESLAGMACBase             string        `json:"eslagMACBase,omitempty"`
-	ESLAGESIPrefix           string        `json:"eslagESIPrefix,omitempty"`
-	AlloyRepo                string        `json:"alloyRepo,omitempty"`
-	AlloyVersion             string        `json:"alloyVersion,omitempty"`
-	Alloy                    AlloyConfig   `json:"alloy,omitempty"` // TODO: not used anymore, remove in future releases
+	DeploymentID     string      `json:"deploymentID,omitempty"`
+	ControlVIP       string      `json:"controlVIP,omitempty"`
+	APIServer        string      `json:"apiServer,omitempty"`
+	AgentRepo        string      `json:"agentRepo,omitempty"`
+	VPCIRBVLANRanges []VLANRange `json:"vpcIRBVLANRange,omitempty"`
+	// Deprecated: ignored. TODO: remove once fabricator stops setting it
+	VPCPeeringVLANRanges   []VLANRange `json:"vpcPeeringVLANRange,omitempty"`
+	TH5WorkaroundVLANRange []VLANRange `json:"th5WorkaroundVLANRange"`
+	VPCPeeringDisabled     bool        `json:"vpcPeeringDisabled,omitempty"`
+	ReservedSubnets        []string    `json:"reservedSubnets,omitempty"`
+	Users                  []UserCreds `json:"users,omitempty"`
+	FabricMode             FabricMode  `json:"fabricMode,omitempty"`
+	BaseVPCCommunity       string      `json:"baseVPCCommunity,omitempty"` // TODO: rename? now only used to mark external prefixes
+	// Deprecated: ignored. TODO: remove once fabricator stops setting it
+	VPCLoopbackSubnet     string `json:"vpcLoopbackSubnet,omitempty"`
+	FabricMTU             uint16 `json:"fabricMTU,omitempty"`
+	ServerFacingMTUOffset uint16 `json:"serverFacingMTUOffset,omitempty"`
+	ESLAGMACBase          string `json:"eslagMACBase,omitempty"`
+	ESLAGESIPrefix        string `json:"eslagESIPrefix,omitempty"`
+	AlloyRepo             string `json:"alloyRepo,omitempty"`
+	AlloyVersion          string `json:"alloyVersion,omitempty"`
+	// Deprecated: ignored. TODO: remove once fabricator stops setting it
+	Alloy                    AlloyConfig   `json:"alloy,omitempty"`
 	AlloyTargets             alloy.Targets `json:"alloyTargets,omitempty"`
 	Observability            Observability `json:"observability,omitempty"`
 	AgentHeartbeatInterval   uint32        `json:"agentHeartbeatInterval,omitempty"` // seconds, default and minimum 15
@@ -105,22 +108,27 @@ type FabricConfig struct {
 	ControlProxyURL          string        `json:"controlProxyURL,omitempty"`
 	DefaultMaxPathsEBGP      uint32        `json:"defaultMaxPathsEBGP,omitempty"`
 	AllowExtraSwitchProfiles bool          `json:"allowExtraSwitchProfiles,omitempty"`
-	MCLAGSessionSubnet       string        `json:"mclagSessionSubnet,omitempty"` // TODO: deprecated, remove in future releases
-	GatewayASN               uint32        `json:"gatewayASN,omitempty"`         // Temporarily assuming that all GWs are in the same AS
-	GatewayAPISync           bool          `json:"gatewayAPISync,omitempty"`
-	IncludeSONiCCLSPlus      bool          `json:"includeSONiCCLSPlus,omitempty"` // Include Celestica SONiC+
-	IncludeCumulus           bool          `json:"includeCumulus,omitempty"`      // Include Cumulus
-	ProtocolSubnet           string        `json:"protocolSubnet,omitempty"`
-	VTEPSubnet               string        `json:"vtepSubnet,omitempty"`
-	FabricSubnet             string        `json:"fabricSubnet,omitempty"`
-	DisableBFD               bool          `json:"disableBFD,omitempty"`
-	// Deprecated: not read, the Fabric's DisableBFD covers the gateway sessions too
+	// Deprecated: ignored. TODO: remove once fabricator stops setting it
+	MCLAGSessionSubnet  string `json:"mclagSessionSubnet,omitempty"`
+	GatewayAPISync      bool   `json:"gatewayAPISync,omitempty"`
+	IncludeSONiCCLSPlus bool   `json:"includeSONiCCLSPlus,omitempty"` // Include Celestica SONiC+
+	IncludeCumulus      bool   `json:"includeCumulus,omitempty"`      // Include Cumulus
+	ProtocolSubnet      string `json:"protocolSubnet,omitempty"`
+	VTEPSubnet          string `json:"vtepSubnet,omitempty"`
+	FabricSubnet        string `json:"fabricSubnet,omitempty"`
+	// Deprecated: ignored, the Fabric has it. TODO: remove once fabricator stops setting it
+	GatewayASN uint32 `json:"gatewayASN,omitempty"`
+	// Deprecated: ignored, the Fabric has it. TODO: remove once fabricator stops setting it
+	DisableBFD bool `json:"disableBFD,omitempty"`
+	// Deprecated: ignored, the Fabric's DisableBFD covers the gateway sessions too. TODO: remove once fabricator stops
+	// setting it
 	GatewayBFD bool `json:"gatewayBFD,omitempty"`
-	// These, and GatewayASN and DisableBFD, only seed Fabric/default at first startup (or stand in
-	// for it while it does not exist). Editing them afterwards has no effect: edit the Fabric instead
-	SpineASN     uint32 `json:"spineASN,omitempty"`
+	// Deprecated: ignored, the Fabric has it. TODO: remove once fabricator stops setting it
+	SpineASN uint32 `json:"spineASN,omitempty"`
+	// Deprecated: ignored, the Fabric has it. TODO: remove once fabricator stops setting it
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
-	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
+	// Deprecated: ignored, the Fabric has it. TODO: remove once fabricator stops setting it
+	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
 
 	ManagementSubnet      string            `json:"managementSubnet,omitempty"`
 	ManagementDHCPStart   string            `json:"managementDHCPStart,omitempty"`
@@ -133,8 +141,6 @@ type FabricConfig struct {
 	GatewayNamespace      string              `json:"gatewayNamespace,omitempty"` // Namespace where pods for gateways are deployed
 	GatewayTolerations    []corev1.Toleration `json:"gatewayTolerations,omitempty"`
 	DataplaneRef          string              `json:"dataplaneRef,omitempty"`
-	FRRRef                string              `json:"frrRef,omitempty"`     // TODO: remove after 26.05 release
-	ToolboxRef            string              `json:"toolboxRef,omitempty"` // TODO: remove after 26.05 release
 	DataplaneMetricsPort  uint16              `json:"dataplaneMetricsPort,omitempty"`
 	FRRMetricsPort        uint16              `json:"frrMetricsPort,omitempty"`
 	DataplaneValidatorRef string              `json:"dataplaneValidatorRef,omitempty"`
@@ -374,25 +380,6 @@ func (cfg *FabricConfig) Init(extraValidators ExtraValidators) (*FabricConfig, e
 		return nil, errors.Errorf("config: defaultMaxPathsEBGP is required")
 	}
 
-	if cfg.GatewayASN == 0 {
-		return nil, errors.Errorf("config: gatewayASN is required")
-	}
-
-	if cfg.SpineASN == 0 {
-		return nil, errors.Errorf("config: spineASN is required")
-	}
-	if cfg.LeafASNStart == 0 {
-		return nil, errors.Errorf("config: leafASNStart is required")
-	}
-	if cfg.LeafASNEnd == 0 {
-		return nil, errors.Errorf("config: leafASNEnd is required")
-	}
-	if cfg.LeafASNEnd < cfg.LeafASNStart {
-		return nil, errors.Errorf("config: leafASNEnd must be greater than or equal to leafASNStart")
-	}
-	if cfg.SpineASN >= cfg.LeafASNStart && cfg.SpineASN <= cfg.LeafASNEnd {
-		return nil, errors.Errorf("config: spineASN must not be in the leaf ASN range")
-	}
 	if cfg.ManagementSubnet == "" {
 		return nil, errors.Errorf("config: managementSubnet is required")
 	}
