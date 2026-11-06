@@ -331,8 +331,8 @@ func TestCollectKubeObjectsRedacts(t *testing.T) {
 	agent := &agentapi.Agent{Name: "leaf-1", Namespace: kmetav1.NamespaceDefault, Annotations: copyAnnotations}
 	agent.Spec.Version = agentapi.AgentVersion{Username: "user", Password: leakedValue}
 	agent.Spec.Users = []agentapi.UserCreds{{Name: "admin", Password: leakedValue, Role: "admin", SSHKeys: []string{leakedValue}}}
-	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.PrometheusTargets).Elem())
-	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.LokiTargets).Elem())
+	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.PrometheusTargets).Elem()) //nolint:staticcheck // stored Agents may still have it
+	fillStrings(reflect.ValueOf(&agent.Spec.Alloy.LokiTargets).Elem())       //nolint:staticcheck // stored Agents may still have it
 	fillStrings(reflect.ValueOf(&agent.Spec.Config.Alloy.Targets).Elem())
 	agent.Spec.Config.Alloy.Scrapes = map[string]alloy.Scrape{
 		"remote": {Address: "127.0.0.1:9100", HTTPHeaders: map[string]string{"Authorization": leakedValue}},
