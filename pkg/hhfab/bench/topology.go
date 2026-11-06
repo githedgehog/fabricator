@@ -69,8 +69,8 @@ func NewGenerator(specs []FabricSpec, alloc *Allocator, profiles map[string]*wir
 
 // InDefaultFabric makes the generator put every switch in the default fabric,
 // the way a release from before Fabric objects and domains created them: no
-// Fabric objects, no fabric or domain on any object, and ASNs from fab.yaml
-// rather than per-fabric blocks. That lets a topology be created on such a
+// Fabric objects, no fabric or domain on any object, and the default fabric's
+// ASNs rather than per-fabric blocks. That lets a topology be created on such a
 // release and carried through the upgrade that introduces them. Each bench
 // fabric is still a separate group of switches with its own namespaces.
 func (g *Generator) InDefaultFabric() error {
@@ -320,7 +320,7 @@ type domainGen struct {
 	spineASN uint32
 
 	// defaultFabric leaves the fabric and domain off its objects, so they
-	// land in the default fabric, and takes ASNs from fab.yaml.
+	// land in the default fabric, and takes its ASNs.
 	defaultFabric bool
 
 	// VPCs are numbered and addressed across the whole fabric, since they

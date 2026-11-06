@@ -42,8 +42,8 @@ func defaultSpecs(t *testing.T, n int) []bench.FabricSpec {
 	return specs
 }
 
-// ASNs do not come from fab.yaml, so its leaf ASN range is not a limit. On the
-// stock config the binding one is the fabric link subnet: a /17 holds the /31s
+// ASNs come from the private range, so they are not a limit. On the stock
+// config the binding one is the fabric link subnet: a /17 holds the /31s
 // for exactly 8 numbered fabrics of the default shape.
 func TestAllocatorCapacityOnStockDefaults(t *testing.T) {
 	t.Parallel()
@@ -351,9 +351,8 @@ func TestAllocatorASNBlocksAreConsistent(t *testing.T) {
 
 	// All of it is in the 32-bit private range, clear of the stock default fabric.
 	require.LessOrEqual(t, blocks[len(blocks)-1].LeafEnd, uint32(bench.ASNPrivate32End))
-	def := fab.DefaultConfig
-	defLo := min(def.Fabric.SpineASN, def.Fabric.LeafASNStart, def.Gateway.ASN)
-	defHi := max(def.Fabric.SpineASN, def.Fabric.LeafASNEnd, def.Gateway.ASN)
+	defLo := min(fab.DefaultSpineASN, fab.DefaultLeafASNStart, fab.DefaultGatewayASN)
+	defHi := max(fab.DefaultSpineASN, fab.DefaultLeafASNEnd, fab.DefaultGatewayASN)
 	for i, block := range blocks {
 		require.False(t, block.Spines[0] <= defHi && defLo <= block.LeafEnd, "slot %d ASNs overlap the default fabric's %d-%d", i, defLo, defHi)
 	}
@@ -475,37 +474,24 @@ func TestAllocatorIndexBounds(t *testing.T) {
 	require.ErrorContains(t, err, "slot 1 out of range")
 }
 
-// In the default fabric every fabric's leaves share the fab.yaml leaf range, in
-// --fabric order, so they have to fit it together.
+// In the default fabric every fabric's leaves share its leaf range, in
+// --fabric order.
 func TestAllocatorDefaultFabric(t *testing.T) {
 	t.Parallel()
 
-	f := defaultFab()
-	cfg := f.Spec.Config.Fabric
-
-	a, err := bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 2))
+	a, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 2))
 	require.NoError(t, err)
 	require.NoError(t, a.CheckDefaultFabric())
-	require.Equal(t, cfg.SpineASN, a.DefaultSpineASN())
+	require.Equal(t, fab.DefaultSpineASN, a.DefaultSpineASN())
 
 	first, err := a.DefaultLeafASN(0, 0)
 	require.NoError(t, err)
-	require.Equal(t, cfg.LeafASNStart, first)
+	require.Equal(t, fab.DefaultLeafASNStart, first)
 
 	second, err := a.DefaultLeafASN(1, 0)
 	require.NoError(t, err)
-	require.Equal(t, cfg.LeafASNStart+bench.StrideLeaves, second, "the second fabric continues after the first one's leaves")
+	require.Equal(t, fab.DefaultLeafASNStart+bench.StrideLeaves, second, "the second fabric continues after the first one's leaves")
 
 	_, err = a.DefaultLeafASN(0, bench.StrideLeaves)
 	require.ErrorContains(t, err, "out of range")
-
-	// a range of exactly six fabrics' leaves takes six, not seven
-	f.Spec.Config.Fabric.LeafASNEnd = cfg.LeafASNStart + 6*bench.StrideLeaves - 1
-	a, err = bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 6))
-	require.NoError(t, err)
-	require.NoError(t, a.CheckDefaultFabric())
-
-	a, err = bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 7))
-	require.NoError(t, err)
-	require.ErrorContains(t, a.CheckDefaultFabric(), "leaves need more ASNs")
 }

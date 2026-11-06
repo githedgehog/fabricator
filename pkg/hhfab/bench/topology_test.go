@@ -17,6 +17,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	fabriccomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -90,9 +91,9 @@ func generateWith(t *testing.T, values []string, defaultFabric bool) (*apiutil.L
 
 // In the default fabric the topology must look like one a release from before
 // Fabric objects created: no Fabric objects, no fabric or domain on anything,
-// spines on the fab.yaml spine ASN and leaves numbered across every fabric from
-// the fab.yaml leaf range. After the upgrade the controller seeds Fabric/default
-// from that same config, and the objects have to be valid against it.
+// spines on the default spine ASN and leaves numbered across every fabric from
+// the default leaf range. The objects have to be valid against a Fabric/default
+// with those ASNs.
 func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 	t.Parallel()
 
@@ -101,7 +102,6 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 		"name=dc1,spines=2,leaves=3,server-ports=1,vpcs=1,attach=1",
 		"name=dc2,spines=2,leaves=2,server-ports=1,vpcs=1,attach=1",
 	}, true)
-	fabCfg := defaultFab().Spec.Config
 
 	fabrics := &wiringapi.FabricList{}
 	require.NoError(t, l.List(ctx, fabrics))
@@ -131,7 +131,7 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 		require.Empty(t, sw.Spec.Topology.Domains, "switch %s", sw.Name)
 
 		if sw.Spec.Role.IsSpine() {
-			require.Equal(t, fabCfg.Fabric.SpineASN, sw.Spec.ASN, "spine %s", sw.Name)
+			require.Equal(t, fab.DefaultSpineASN, sw.Spec.ASN, "spine %s", sw.Name)
 		} else {
 			leafASNs = append(leafASNs, sw.Spec.ASN)
 		}
@@ -161,19 +161,19 @@ func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
 	slices.Sort(leafASNs)
 	want := []uint32{} //nolint:prealloc
 	for idx := range uint32(5) {
-		want = append(want, fabCfg.Fabric.LeafASNStart+idx)
+		want = append(want, fab.DefaultLeafASNStart+idx)
 	}
-	require.Equal(t, want, leafASNs, "leaves of both fabrics share the fab.yaml range without overlap")
+	require.Equal(t, want, leafASNs, "leaves of both fabrics share the default range without overlap")
 
 	// what the controller creates on the release that introduces Fabric objects
 	require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
 		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
 		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
 		Spec: wiringapi.FabricSpec{
-			LeafASNStart: fabCfg.Fabric.LeafASNStart,
-			LeafASNEnd:   fabCfg.Fabric.LeafASNEnd,
+			LeafASNStart: fab.DefaultLeafASNStart,
+			LeafASNEnd:   fab.DefaultLeafASNEnd,
 			Domains: map[string]wiringapi.FabricDomainSpec{
-				wiringapi.DefaultFabricDomain: {SpineASN: fabCfg.Fabric.SpineASN, GatewayASN: fabCfg.Gateway.ASN},
+				wiringapi.DefaultFabricDomain: {SpineASN: fab.DefaultSpineASN, GatewayASN: fab.DefaultGatewayASN},
 			},
 		},
 	}))

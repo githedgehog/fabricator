@@ -363,7 +363,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			GatewayASN: 4200006134, // 64087.502 in asdot
 		}}
 	}
-	if err := b.createDefaultFabric(ctx, f, extraDomains); err != nil {
+	if err := b.createDefaultFabric(ctx, extraDomains); err != nil {
 		return err
 	}
 
@@ -982,7 +982,6 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		Spec: wiringapi.FabricSpec{
 			LeafASNStart: 4200072168, // 64088.1000 in asdot
 			LeafASNEnd:   4200081167, // 64088.9999 in asdot
-			DisableBFD:   f.Spec.Config.Fabric.DisableBFD,
 			Domains: map[string]wiringapi.FabricDomainSpec{
 				wiringapi.DefaultFabricDomain: {
 					SpineASN:   4200071169, // 64088.1 in asdot
@@ -1129,7 +1128,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 	slog.Info(">>>", "units", b.ScalableUnits, "vpcCount", b.VPCs, "serversPerVPCPerUnit", b.ServersPerVPCPerUnit, "p2p", b.P2P)
 
-	if err := b.createDefaultFabric(ctx, f, nil); err != nil {
+	if err := b.createDefaultFabric(ctx, nil); err != nil {
 		return err
 	}
 
@@ -1334,9 +1333,8 @@ func (b *VLABBuilderBase) nextServerPort(serverName string) string {
 }
 
 // createDefaultFabric adds Fabric/default with the default ASNs, which everything the builders generate is in.
-func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabricator, extraDomains map[string]wiringapi.FabricDomainSpec) error {
+func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, extraDomains map[string]wiringapi.FabricDomainSpec) error {
 	spec := defaultFabricSpec()
-	spec.DisableBFD = f.Spec.Config.Fabric.DisableBFD
 	maps.Copy(spec.Domains, extraDomains)
 
 	if err := b.data.Add(ctx, &wiringapi.Fabric{
@@ -1353,15 +1351,13 @@ func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabr
 }
 
 func defaultFabricSpec() wiringapi.FabricSpec {
-	d := fab.DefaultConfig
-
 	return wiringapi.FabricSpec{
-		LeafASNStart: d.Fabric.LeafASNStart,
-		LeafASNEnd:   d.Fabric.LeafASNEnd,
+		LeafASNStart: fab.DefaultLeafASNStart,
+		LeafASNEnd:   fab.DefaultLeafASNEnd,
 		Domains: map[string]wiringapi.FabricDomainSpec{
 			wiringapi.DefaultFabricDomain: {
-				SpineASN:   d.Fabric.SpineASN,
-				GatewayASN: d.Gateway.ASN,
+				SpineASN:   fab.DefaultSpineASN,
+				GatewayASN: fab.DefaultGatewayASN,
 			},
 		},
 	}

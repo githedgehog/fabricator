@@ -239,6 +239,8 @@ spec:
                           type: object
                         type: object
                       disableBFD:
+                        description: 'Deprecated: ignored, the Fabric object has it,
+                          kept so configs exported by 26.05 can be imported'
                         type: boolean
                       eslagESIPrefix:
                         type: string
@@ -257,9 +259,13 @@ spec:
                       includeONIE:
                         type: boolean
                       leafASNEnd:
+                        description: 'Deprecated: ignored, the Fabric object has it,
+                          kept so configs exported by 26.05 can be imported'
                         format: int64
                         type: integer
                       leafASNStart:
+                        description: 'Deprecated: ignored, the Fabric object has it,
+                          kept so configs exported by 26.05 can be imported'
                         format: int64
                         type: integer
                       managementDHCPEnd:
@@ -340,6 +346,8 @@ spec:
                       proxyExternalSubnet:
                         type: string
                       spineASN:
+                        description: 'Deprecated: ignored, the Fabric object has it,
+                          kept so configs exported by 26.05 can be imported'
                         format: int64
                         type: integer
                       th5WorkaroundVLANs:
@@ -366,6 +374,8 @@ spec:
                   gateway:
                     properties:
                       asn:
+                        description: 'Deprecated: ignored, the Fabric object has it,
+                          kept so configs exported by 26.05 can be imported'
                         format: int64
                         type: integer
                       communities:

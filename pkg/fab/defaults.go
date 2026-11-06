@@ -8,7 +8,15 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
-// IPs for ~1000 switches. ASNs use one asdot block: spines from .1, gateways from .501 and leafs .1000-.9999
+// ASNs of the default fabric VLAB and bench generate, one asdot block: spines from .1, gateways from .501 and leafs .1000-.9999
+const (
+	DefaultSpineASN     uint32 = 4200005633 // 64087.1 in asdot
+	DefaultGatewayASN   uint32 = 4200006133 // 64087.501 in asdot
+	DefaultLeafASNStart uint32 = 4200006632 // 64087.1000 in asdot
+	DefaultLeafASNEnd   uint32 = 4200015631 // 64087.9999 in asdot
+)
+
+// IPs for ~1000 switches
 var DefaultConfig = fabapi.FabConfig{
 	Control: fabapi.ControlConfig{
 		ManagementSubnet:  "172.30.0.0/21", // 2046 hosts: 172.30.0.1 - 172.30.7.254
@@ -28,9 +36,6 @@ var DefaultConfig = fabapi.FabConfig{
 		Mode:                fmeta.FabricModeSpineLeaf,
 		ManagementDHCPStart: "172.30.4.0", // second half of the management subnet
 		ManagementDHCPEnd:   "172.30.7.254",
-		SpineASN:            4200005633,        // 64087.1 in asdot
-		LeafASNStart:        4200006632,        // 64087.1000 in asdot
-		LeafASNEnd:          4200015631,        // 64087.9999 in asdot
 		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
 		VTEPSubnet:          "172.30.12.0/22",  // 1022 hosts: 172.30.12.1 - 172.30.15.254
 		ProxyExternalSubnet: "172.30.16.0/22",  // 516 /31 subnets: 172.30.16.0/31 - 172.30.19.254/31
@@ -45,8 +50,5 @@ var DefaultConfig = fabapi.FabConfig{
 		TH5WorkaroundVLANs: []fmeta.VLANRange{
 			{From: 3900, To: 3999},
 		},
-	},
-	Gateway: fabapi.GatewayConfig{
-		ASN: 4200006133, // 64087.501 in asdot
 	},
 }
