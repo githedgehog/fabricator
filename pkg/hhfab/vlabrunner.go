@@ -1094,8 +1094,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		if err := orasUploadAndInstall(ctx, d, ssh, ftp, "toolbox", flatcar.ToolboxVersion(c.Fab), toolboxPath, flatcar.ToolboxArchiveRef, flatcar.ToolboxArchiveBin); err != nil {
 			return fmt.Errorf("installing toolbox: %w", err)
 		}
-		if _, _, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
-			return fmt.Errorf("trying toolbox: %w", err)
+		if sshOut, sshErr, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
+			return fmt.Errorf("trying 'toolbox hostname': %w (stdout: %s, stderr: %s)", err, sshOut, sshErr)
 		}
 
 		hostBGPPath := filepath.Join(flatcar.Home, "hostbgp")
