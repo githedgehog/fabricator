@@ -352,6 +352,14 @@ func installToolbox(ctx context.Context) error {
 		return fmt.Errorf("writing toolbox config: %w", err)
 	}
 
+	// not fatal: the toolbox script can still set itself up
+	cmd := exec.CommandContext(ctx, "bash", "-c", flatcar.ToolboxRootfsScript) //nolint:gosec
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "toolbox-rootfs: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "toolbox-rootfs: ")
+	if err := cmd.Run(); err != nil {
+		slog.Warn("Failed to prepare toolbox rootfs, toolbox may fail after a reboot", "err", err)
+	}
+
 	return nil
 }
 
