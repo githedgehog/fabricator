@@ -114,8 +114,9 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Networking**: `ip addr/route/neigh/link`, per-NIC ethtool stats and offload
   settings, ping+ARP+SSH reachability check to every switch listed in the
   `Switch` CRD, disk usage, process list
-- **Kubernetes**: nodes (`-o wide`), all pods (`-A -o wide`), events sorted by
-  time
+- **Kubernetes**: nodes (`-o wide`), all pods (`-A -o wide`), pod start and
+  Ready transition times, services and EndpointSlices (`-A -o wide`), events
+  sorted by time
 - **Pod detail**: `kubectl describe` + current and previous logs for every pod
   in every namespace
 - **Hedgehog CRDs**: `kubectl get` and `kubectl describe` for every
