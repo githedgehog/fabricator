@@ -163,6 +163,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   plus its journal. The container runs with `--rm` and is recreated on restart,
   so after a daemon crash `docker logs` is empty; the unit's exit status,
   restart count and start/stop times are still recorded here
+- **Docker**: `docker.service`/`containerd.service` status and journal, and
+  `docker images`
 
 ### gateway.sh - gateway node (dataplane incl. FRR)
 
