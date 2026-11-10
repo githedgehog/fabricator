@@ -36,15 +36,18 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
+	discoveryapi "k8s.io/api/discovery/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -79,7 +82,10 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 	gwapi.AddToScheme,
 	gwintapi.AddToScheme,
 	coreapi.AddToScheme,
+	discoveryapi.AddToScheme,
 }
+
+const fabricWebhookService = "fabric-webhook-service"
 
 func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, kclient.Client, error) {
 	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
@@ -797,6 +803,28 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil, nil, fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
 		}
 		sshConfigs[vm.Name] = sshCfg
+	}
+
+	// fabric-ctrl may still be rolling out (e.g. right after an upgrade), and every write below goes
+	// through its webhooks, so wait until the webhook service has a ready endpoint
+	if err := wait.PollUntilContextTimeout(ctx, 2*time.Second, time.Minute, true, func(ctx context.Context) (bool, error) {
+		epSlices := &discoveryapi.EndpointSliceList{}
+		if err := kube.List(ctx, epSlices, kclient.InNamespace(comp.FabNamespace),
+			kclient.MatchingLabels{discoveryapi.LabelServiceName: fabricWebhookService}); err != nil {
+			return false, fmt.Errorf("listing endpoint slices: %w", err)
+		}
+		for _, epSlice := range epSlices.Items {
+			for _, ep := range epSlice.Endpoints {
+				if ep.Conditions.Ready == nil || *ep.Conditions.Ready {
+					return true, nil
+				}
+			}
+		}
+		slog.Info("Waiting for fabric webhook endpoints", "service", fabricWebhookService)
+
+		return false, nil
+	}); err != nil {
+		return nil, nil, fmt.Errorf("waiting for fabric webhook endpoints: %w", err)
 	}
 
 	if !opts.KeepPeerings {
