@@ -4,6 +4,7 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   @if [ -n "{{vlab_workdir}}" ]; then mkdir -p test-diagram/live; fi
   @mkdir -p test-diagram/default test-diagram/3spine test-diagram/mesh test-diagram/4eslag2orphan
   @mkdir -p test-diagram/multidomain test-diagram/multifabric test-diagram/multifabricmesh test-diagram/multifabricdomain
+  @mkdir -p test-diagram/multifabricunnumbered
   @echo "==============================================="
   @echo "Diagram generation test - various topologies, formats, and styles"
   @if [ -n "{{vlab_workdir}}" ]; then echo "Live diagrams from vlab workdir: {{vlab_workdir}}"; fi
@@ -126,6 +127,23 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format dot --output test-diagram/multifabricdomain/multifabricdomain.dot
   bin/hhfab diagram --format mermaid --output test-diagram/multifabricdomain/multifabricdomain.mermaid
 
+  @echo "=== Generating diagrams for multi-fabric topology with an unnumbered interconnect ==="
+  bin/hhfab vlab gen --extra-fabric --interconnect-fabrics
+  # vlab gen numbers the interconnect, so drop its IPs: both ends then pair by ASN alone
+  @f=include/vlab.generated.yaml; \
+    n=$(grep -cE '^    ip: 100\.64\.0\.[12](/30)?$' "$f" || true); \
+    if [ "$n" != "4" ]; then echo "ERROR: expected 4 interconnect IP lines in $f, found $n"; exit 1; fi; \
+    sed -i -E '/^    ip: 100\.64\.0\.[12](\/30)?$/d' "$f"
+  bin/hhfab validate
+
+  bin/hhfab diagram --format drawio --style default --output test-diagram/multifabricunnumbered/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/multifabricunnumbered/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/multifabricunnumbered/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/multifabricunnumbered/multifabricunnumbered.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/multifabricunnumbered/multifabricunnumbered.mermaid
+  @grep -q '"interconnect"' test-diagram/multifabricunnumbered/multifabricunnumbered.mermaid || \
+    (echo "ERROR: unnumbered interconnect between fabrics not drawn"; exit 1)
+
   # Convert DRAWIO files to SVG
   @echo "=== Converting DRAWIO files to SVG ==="
   @if command -v drawio >/dev/null 2>&1; then \
@@ -177,6 +195,7 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   @echo "- Multi-fabric topology: test-diagram/multifabric/"
   @echo "- Multi-fabric topology with a mesh fabric: test-diagram/multifabricmesh/"
   @echo "- Multi-fabric topology with several domains: test-diagram/multifabricdomain/"
+  @echo "- Multi-fabric topology with an unnumbered interconnect: test-diagram/multifabricunnumbered/"
   @if [ -n "{{vlab_workdir}}" ]; then echo "- Live diagrams (if VLAB in {{vlab_workdir}}): test-diagram/live/"; fi
 
   @just _create-html
