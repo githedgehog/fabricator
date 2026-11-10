@@ -98,6 +98,7 @@ type DiagramFile struct {
 	ErrorMessage string `json:"error,omitempty"`
 	FileExists   bool   `json:"fileExists"`
 	Style        string `json:"style,omitempty"`
+	UnderlayPath string `json:"underlayPath,omitempty"`
 }
 
 type ProcessedDiagrams struct {
@@ -292,6 +293,14 @@ func processFile(work FileWork, outputDirectory string) FileProcessingResult {
 
 		if after, ok := strings.CutPrefix(work.FileType, "drawio-"); ok {
 			diagramFile.Style = after
+		}
+
+		// the default style has a sibling with all layers, ASNs and IPs included
+		if diagramFile.Style == DiagramStyles.Default {
+			underlay := strings.TrimSuffix(work.FilePath, ".svg") + ".underlay.svg"
+			if _, err := os.Stat(underlay); err == nil {
+				diagramFile.UnderlayPath = strings.TrimSuffix(diagramFile.FilePath, ".svg") + ".underlay.svg"
+			}
 		}
 	}
 

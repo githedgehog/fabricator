@@ -151,6 +151,23 @@ function loadDiagram(placeholder) {
     }
 }
 
+// swap a default drawio diagram with its export that has all layers, ASNs and IPs included
+function toggleUnderlay(toggle) {
+    const svgContainer = toggle.closest('.diagram-container').querySelector('.svg-container');
+    const current = svgContainer && svgContainer.querySelector('.lazy-placeholder, .svg-diagram');
+    if (!current) return;
+    if (lazyLoadObserver && current.classList.contains('lazy-placeholder')) {
+        lazyLoadObserver.unobserve(current);
+    }
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'lazy-placeholder';
+    placeholder.setAttribute('data-src', toggle.checked ? toggle.dataset.underlay : toggle.dataset.base);
+    placeholder.setAttribute('data-alt', toggle.dataset.alt);
+    svgContainer.replaceChild(placeholder, current);
+    loadDiagram(placeholder);
+}
+
 function addMermaidZoom(element) {
     if (element.hasAttribute('data-zoom-handler')) return;
 
