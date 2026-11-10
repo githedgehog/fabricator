@@ -161,6 +161,14 @@ test-diagram vlab_workdir="" y="": _check-hhfab
       drawio --export --format svg \
              --output "$SVG_FILE" \
              "$DRAWIO_FILE"; \
+      if [ "$(basename "$DRAWIO_FILE")" = "default.drawio" ]; then \
+        UNDERLAY_FILE="${DRAWIO_FILE}.underlay.svg"; \
+        LAYERS=$(seq -s, 0 $(( $(grep -o 'parent="0"' "$DRAWIO_FILE" | wc -l) - 1 ))); \
+        echo "Converting $DRAWIO_FILE with all layers (ASNs, IPs) to $UNDERLAY_FILE"; \
+        drawio --export --format svg --layers "$LAYERS" \
+               --output "$UNDERLAY_FILE" \
+               "$DRAWIO_FILE"; \
+      fi; \
     done; \
   else \
     echo "WARNING: DrawIO CLI not available, skipping .drawio to SVG conversion"; \

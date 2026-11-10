@@ -88,6 +88,14 @@
                                 {{if .ErrorMessage}}
                                 <div class="no-content">{{.ErrorMessage}}</div>
                                 {{else}}
+                                {{if .UnderlayPath}}
+                                <label class="layer-toggle">
+                                    <span>Default layers</span>
+                                    <input type="checkbox" onchange="toggleUnderlay(this)" data-base="{{.FilePath}}" data-underlay="{{.UnderlayPath}}" data-alt="{{.Title}} Diagram">
+                                    <span class="layer-switch"></span>
+                                    <span>Underlay (ASNs, IPs)</span>
+                                </label>
+                                {{end}}
                                 <div class="svg-container">
                                     {{if $.LazyLoading}}
                                     <div class="lazy-placeholder" data-src="{{.FilePath}}" data-alt="{{.Title}} Diagram">
