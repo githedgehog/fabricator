@@ -473,25 +473,3 @@ func TestAllocatorIndexBounds(t *testing.T) {
 	_, err = a.ASNs(1)
 	require.ErrorContains(t, err, "slot 1 out of range")
 }
-
-// In the default fabric every fabric's leaves share its leaf range, in
-// --fabric order.
-func TestAllocatorDefaultFabric(t *testing.T) {
-	t.Parallel()
-
-	a, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 2))
-	require.NoError(t, err)
-	require.NoError(t, a.CheckDefaultFabric())
-	require.Equal(t, fab.DefaultSpineASN, a.DefaultSpineASN())
-
-	first, err := a.DefaultLeafASN(0, 0)
-	require.NoError(t, err)
-	require.Equal(t, fab.DefaultLeafASNStart, first)
-
-	second, err := a.DefaultLeafASN(1, 0)
-	require.NoError(t, err)
-	require.Equal(t, fab.DefaultLeafASNStart+bench.StrideLeaves, second, "the second fabric continues after the first one's leaves")
-
-	_, err = a.DefaultLeafASN(0, bench.StrideLeaves)
-	require.ErrorContains(t, err, "out of range")
-}

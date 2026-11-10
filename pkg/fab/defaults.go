@@ -8,7 +8,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
-// ASNs of the default fabric VLAB and bench generate, one asdot block: spines from .1, gateways from .501 and leafs .1000-.9999
+// ASNs of the default fabric VLAB generates, one asdot block: spines from .1, gateways from .501 and leafs .1000-.9999
 const (
 	DefaultSpineASN     uint32 = 4200005633 // 64087.1 in asdot
 	DefaultGatewayASN   uint32 = 4200006133 // 64087.501 in asdot

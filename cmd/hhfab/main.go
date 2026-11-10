@@ -103,7 +103,6 @@ const (
 	FlagBenchOut                  = "out"
 	FlagBenchOnly                 = "only"
 	FlagBenchSkipValidate         = "skip-validate"
-	FlagBenchDefaultFabric        = "default-fabric"
 	FlagBenchDuration             = "duration"
 	FlagBenchInterval             = "interval"
 	FlagBenchAPIVia               = "api-via"
@@ -2107,10 +2106,6 @@ one to another.`,
 										Usage: "skip local validation and rely on the admission webhooks, which is faster on a large run",
 									},
 									&cli.BoolFlag{
-										Name:  FlagBenchDefaultFabric,
-										Usage: "put every switch in the default fabric, without Fabric objects or fabric and domain fields and with ASNs from fab.yaml, to create the topology on a release from before them and carry it through the upgrade (requires domains=1)",
-									},
-									&cli.BoolFlag{
 										Name:  FlagNameForce,
 										Usage: "proceed even if the cluster has switches the bench did not create",
 									},
@@ -2118,16 +2113,15 @@ one to another.`,
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									if err := hhfab.DoVLABBenchInit(ctx, workDir, cacheDir, hhfab.BenchInitOpts{
-										Fabrics:       benchFabricList.values,
-										Workers:       c.Int(FlagBenchWorkers),
-										QPS:           float32(c.Float64(FlagBenchQPS)),
-										Burst:         c.Int(FlagBenchBurst),
-										Phase:         c.String(FlagBenchPhase),
-										Force:         c.Bool(FlagNameForce),
-										DryRun:        c.Bool(FlagBenchDryRun),
-										Out:           c.String(FlagBenchOut),
-										SkipValidate:  c.Bool(FlagBenchSkipValidate),
-										DefaultFabric: c.Bool(FlagBenchDefaultFabric),
+										Fabrics:      benchFabricList.values,
+										Workers:      c.Int(FlagBenchWorkers),
+										QPS:          float32(c.Float64(FlagBenchQPS)),
+										Burst:        c.Int(FlagBenchBurst),
+										Phase:        c.String(FlagBenchPhase),
+										Force:        c.Bool(FlagNameForce),
+										DryRun:       c.Bool(FlagBenchDryRun),
+										Out:          c.String(FlagBenchOut),
+										SkipValidate: c.Bool(FlagBenchSkipValidate),
 									}); err != nil {
 										return fmt.Errorf("bench init: %w", err)
 									}

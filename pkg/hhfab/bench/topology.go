@@ -49,8 +49,6 @@ type Generator struct {
 	specs    []FabricSpec
 	alloc    *Allocator
 	profiles map[string]*wiringapi.SwitchProfile
-
-	defaultFabric bool
 }
 
 // NewGenerator validates each spec against its switch profile and returns a
@@ -65,22 +63,6 @@ func NewGenerator(specs []FabricSpec, alloc *Allocator, profiles map[string]*wir
 	}
 
 	return g, nil
-}
-
-// InDefaultFabric makes the generator put every switch in the default fabric,
-// the way a release from before Fabric objects and domains created them: no
-// Fabric objects, no fabric or domain on any object, and the default fabric's
-// ASNs rather than per-fabric blocks. That lets a topology be created on such a
-// release and carried through the upgrade that introduces them. Each bench
-// fabric is still a separate group of switches with its own namespaces.
-func (g *Generator) InDefaultFabric() error {
-	if err := g.alloc.CheckDefaultFabric(); err != nil {
-		return err
-	}
-
-	g.defaultFabric = true
-
-	return nil
 }
 
 // portPlan is the per-switch port assignment for one fabric, derived from the
@@ -319,10 +301,6 @@ type domainGen struct {
 	unit     uint   // which keys its addresses
 	spineASN uint32
 
-	// defaultFabric leaves the fabric and domain off its objects, so they
-	// land in the default fabric, and takes its ASNs.
-	defaultFabric bool
-
 	// VPCs are numbered and addressed across the whole fabric, since they
 	// share its namespaces; this domain's are a contiguous run of them.
 	firstVPC uint
@@ -384,29 +362,21 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 		return err
 	}
 
-	// The topology fields name the fabric an object belongs to; left empty,
-	// the object is in the default fabric.
-	fabricRef := spec.Name
+	domains := make(map[string]wiringapi.FabricDomainSpec, spec.Domains)
+	for idx := range spec.Domains {
+		domains[spec.DomainName(idx)] = wiringapi.FabricDomainSpec{SpineASN: asns.Spines[idx], GatewayASN: asns.Gateways[idx]}
+	}
 
-	if g.defaultFabric {
-		fabricRef = ""
-	} else {
-		domains := make(map[string]wiringapi.FabricDomainSpec, spec.Domains)
-		for idx := range spec.Domains {
-			domains[spec.DomainName(idx)] = wiringapi.FabricDomainSpec{SpineASN: asns.Spines[idx], GatewayASN: asns.Gateways[idx]}
-		}
-
-		if err := l.Add(ctx, &wiringapi.Fabric{
-			Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
-			ObjectMeta: objMeta(spec.Name, labels),
-			Spec: wiringapi.FabricSpec{
-				LeafASNStart: asns.LeafStart,
-				LeafASNEnd:   asns.LeafEnd,
-				Domains:      domains,
-			},
-		}); err != nil {
-			return fmt.Errorf("adding fabric: %w", err)
-		}
+	if err := l.Add(ctx, &wiringapi.Fabric{
+		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
+		ObjectMeta: objMeta(spec.Name, labels),
+		Spec: wiringapi.FabricSpec{
+			LeafASNStart: asns.LeafStart,
+			LeafASNEnd:   asns.LeafEnd,
+			Domains:      domains,
+		},
+	}); err != nil {
+		return fmt.Errorf("adding fabric: %w", err)
 	}
 
 	if err := l.Add(ctx, &wiringapi.VLANNamespace{
@@ -423,7 +393,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 		Kind: vpcapi.KindIPv4Namespace, APIVersion: vpcapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.Name, labels),
 		Spec: vpcapi.IPv4NamespaceSpec{
-			Topology: vpcapi.IPv4NamespaceTopology{Fabric: fabricRef},
+			Topology: vpcapi.IPv4NamespaceTopology{Fabric: spec.Name},
 			Subnets:  []string{IPv4Subnet},
 		},
 	}); err != nil {
@@ -434,7 +404,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 		Kind: wiringapi.KindSwitchGroup, APIVersion: wiringapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.Name, labels),
 		Spec: wiringapi.SwitchGroupSpec{
-			Topology: wiringapi.SwitchGroupTopology{Fabric: fabricRef},
+			Topology: wiringapi.SwitchGroupTopology{Fabric: spec.Name},
 		},
 	}); err != nil {
 		return fmt.Errorf("adding switch group: %w", err)
@@ -463,11 +433,6 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 			unit:     unit,
 			spineASN: asns.Spines[idx],
 			firstVPC: idx * spec.VPCs,
-
-			defaultFabric: g.defaultFabric,
-		}
-		if g.defaultFabric {
-			d.spineASN = g.alloc.DefaultSpineASN()
 		}
 		if spec.VPCs > 0 {
 			d.subnets = subnets[d.firstVPC : d.firstVPC+spec.VPCs]
@@ -501,35 +466,13 @@ func (g *Generator) generateDomain(ctx context.Context, l *apiutil.Loader, d *do
 // switchTopology places a switch in its domain. It is built per switch so that
 // no two objects share the Domains slice, which Default sorts in place.
 func (d *domainGen) switchTopology() wiringapi.SwitchTopology {
-	return wiringapi.SwitchTopology{Fabric: d.fabricRef(), Domains: d.domainRefs()}
-}
-
-// fabricRef is the fabric the domain's objects name, empty in the default
-// fabric so that they carry no fabric at all.
-func (d *domainGen) fabricRef() string {
-	if d.defaultFabric {
-		return ""
-	}
-
-	return d.spec.Name
+	return wiringapi.SwitchTopology{Fabric: d.spec.Name, Domains: d.domainRefs()}
 }
 
 // domainRefs is the domain list for one object, built per call for the same
-// reason as switchTopology, and nil in the default fabric.
+// reason as switchTopology.
 func (d *domainGen) domainRefs() []string {
-	if d.defaultFabric {
-		return nil
-	}
-
 	return []string{d.name}
-}
-
-func (g *Generator) leafASN(d *domainGen, leafIdx uint) (uint32, error) {
-	if d.defaultFabric {
-		return g.alloc.DefaultLeafASN(d.slot, leafIdx)
-	}
-
-	return g.alloc.LeafASN(d.slot, d.idx, leafIdx)
 }
 
 func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *domainGen) error {
@@ -590,7 +533,7 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 		if err != nil {
 			return err
 		}
-		asn, err := g.leafASN(d, idx)
+		asn, err := g.alloc.LeafASN(d.slot, d.idx, idx)
 		if err != nil {
 			return err
 		}
@@ -657,7 +600,7 @@ func (g *Generator) generateFabricConns(ctx context.Context, l *apiutil.Loader, 
 				links = append(links, link)
 			}
 
-			if err := g.addConn(ctx, l, d.fabricRef(), labels, wiringapi.ConnectionSpec{
+			if err := g.addConn(ctx, l, d.spec.Name, labels, wiringapi.ConnectionSpec{
 				Fabric: &wiringapi.ConnFabric{Links: links},
 			}); err != nil {
 				return fmt.Errorf("adding fabric connection spine %d leaf %d: %w", spineIdx+1, leafIdx+1, err)
@@ -697,7 +640,7 @@ func (g *Generator) generateServers(ctx context.Context, l *apiutil.Loader, d *d
 
 				switchPort := fmt.Sprintf("%s/%s", leaf, apiPortName(plan.profile, port, sub))
 
-				if err := g.addConn(ctx, l, d.fabricRef(), labels, wiringapi.ConnectionSpec{
+				if err := g.addConn(ctx, l, d.spec.Name, labels, wiringapi.ConnectionSpec{
 					Unbundled: &wiringapi.ConnUnbundled{
 						Link: wiringapi.ServerToSwitchLink{
 							Server: wiringapi.BasePortName{Port: server + "/enp2s1"},
@@ -731,7 +674,7 @@ func (g *Generator) generateVPCs(ctx context.Context, l *apiutil.Loader, d *doma
 				// is set explicitly rather than derived so a mixed-profile
 				// fabric fails validation loudly instead of silently.
 				Mode:          vpcapi.VPCModeL3VNI,
-				Topology:      vpcapi.VPCTopology{Fabric: d.fabricRef(), Domains: d.domainRefs()},
+				Topology:      vpcapi.VPCTopology{Fabric: d.spec.Name, Domains: d.domainRefs()},
 				IPv4Namespace: spec.Name,
 				VLANNamespace: spec.Name,
 				Subnets: map[string]*vpcapi.VPCSubnet{
@@ -790,7 +733,7 @@ func (g *Generator) generateAttachments(ctx context.Context, l *apiutil.Loader, 
 						Kind: vpcapi.KindVPCAttachment, APIVersion: vpcapi.GroupVersion.String(),
 						ObjectMeta: objMeta(fmt.Sprintf("%s--%s", connName, vpc), labels),
 						Spec: vpcapi.VPCAttachmentSpec{
-							Topology:   vpcapi.VPCAttachmentTopology{Fabric: d.fabricRef()},
+							Topology:   vpcapi.VPCAttachmentTopology{Fabric: d.spec.Name},
 							Connection: connName,
 							Subnet:     vpc + "/default",
 						},
@@ -822,7 +765,7 @@ func (g *Generator) generatePeerings(ctx context.Context, l *apiutil.Loader, d *
 				Kind: vpcapi.KindVPCPeering, APIVersion: vpcapi.GroupVersion.String(),
 				ObjectMeta: objMeta(fmt.Sprintf("%s--%s", vpcA, vpcB), labels),
 				Spec: vpcapi.VPCPeeringSpec{
-					Topology: vpcapi.VPCPeeringTopology{Fabric: d.fabricRef()},
+					Topology: vpcapi.VPCPeeringTopology{Fabric: d.spec.Name},
 					Permit: []map[string]vpcapi.VPCPeer{{
 						vpcA: {},
 						vpcB: {},
