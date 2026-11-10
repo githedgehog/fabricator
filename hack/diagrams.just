@@ -143,6 +143,14 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format mermaid --output test-diagram/multifabricunnumbered/multifabricunnumbered.mermaid
   @grep -q '"interconnect"' test-diagram/multifabricunnumbered/multifabricunnumbered.mermaid || \
     (echo "ERROR: unnumbered interconnect between fabrics not drawn"; exit 1)
+  # links are grouped in maps, so render again and expect the same diagram
+  @tmp=$(mktemp -d); \
+    bin/hhfab diagram --format dot --output "$tmp/again.dot" >/dev/null && \
+    bin/hhfab diagram --format drawio --style default --output "$tmp/again.drawio" >/dev/null && \
+    cmp -s "$tmp/again.dot" test-diagram/multifabricunnumbered/multifabricunnumbered.dot && \
+    cmp -s "$tmp/again.drawio" test-diagram/multifabricunnumbered/default.drawio; \
+    rc=$?; rm -rf "$tmp"; \
+    if [ $rc -ne 0 ]; then echo "ERROR: diagram differs between two runs on the same wiring"; exit 1; fi
 
   # Convert DRAWIO files to SVG
   @echo "=== Converting DRAWIO files to SVG ==="

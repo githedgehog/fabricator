@@ -1062,8 +1062,9 @@ func groupLinks(links []Link) []LinkGroup {
 		}
 	}
 	result := make([]LinkGroup, 0, len(linkMap))
-	for _, group := range linkMap {
-		slices.SortFunc(group.Links, func(a, b Link) int {
+	for _, key := range slices.Sorted(maps.Keys(linkMap)) {
+		group := linkMap[key]
+		slices.SortStableFunc(group.Links, func(a, b Link) int {
 			return strings.Compare(a.Speed, b.Speed)
 		})
 		result = append(result, group)

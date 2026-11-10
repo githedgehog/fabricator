@@ -1134,6 +1134,17 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		topo.Nodes[i] = node
 	}
 
+	// links are collected from maps, so order them for the same diagram on every run
+	slices.SortStableFunc(topo.Links, func(a, b Link) int {
+		return cmp.Or(
+			strings.Compare(a.Source, b.Source),
+			strings.Compare(a.Target, b.Target),
+			strings.Compare(a.Type, b.Type),
+			strings.Compare(a.Properties[PropSourcePort], b.Properties[PropSourcePort]),
+			strings.Compare(a.Properties[PropTargetPort], b.Properties[PropTargetPort]),
+		)
+	})
+
 	return topo, nil
 }
 

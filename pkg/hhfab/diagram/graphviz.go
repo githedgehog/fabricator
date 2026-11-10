@@ -5,8 +5,10 @@ package diagram
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -624,8 +626,10 @@ func generateDOT(topo Topology) string {
 	}
 
 	// Render collapsed spine-leaf connections
-	for spineNode, leafConnections := range spineLeafConnections {
-		for leafNode, portPairs := range leafConnections {
+	for _, spineNode := range slices.Sorted(maps.Keys(spineLeafConnections)) {
+		leafConnections := spineLeafConnections[spineNode]
+		for _, leafNode := range slices.Sorted(maps.Keys(leafConnections)) {
+			portPairs := leafConnections[leafNode]
 			// Only draw one connection per spine-leaf pair
 			if len(portPairs) > 0 {
 				// Combine port labels
@@ -650,8 +654,10 @@ func generateDOT(topo Topology) string {
 	}
 
 	// Render collapsed mesh connections
-	for leaf1, leafConnections := range meshConnections {
-		for leaf2, portPairs := range leafConnections {
+	for _, leaf1 := range slices.Sorted(maps.Keys(meshConnections)) {
+		leafConnections := meshConnections[leaf1]
+		for _, leaf2 := range slices.Sorted(maps.Keys(leafConnections)) {
+			portPairs := leafConnections[leaf2]
 			// Only draw one connection per leaf-leaf pair
 			if len(portPairs) > 0 {
 				// Combine port labels

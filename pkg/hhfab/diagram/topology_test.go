@@ -268,6 +268,13 @@ func TestTopologyBGPState(t *testing.T) {
 		topo, err := GetTopologyFor(ctx, kube)
 		require.NoError(t, err)
 
+		// links are collected from maps, so their order must not change between runs
+		for range 10 {
+			again, err := GetTopologyFor(ctx, kube)
+			require.NoError(t, err)
+			require.Equal(t, topo.Links, again.Links)
+		}
+
 		byPort := map[string]Link{}
 		byExternal := map[string]Link{}
 		interconnects := []string{}
