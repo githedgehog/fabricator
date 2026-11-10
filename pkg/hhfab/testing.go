@@ -2604,6 +2604,8 @@ type TestConnectivityOpts struct {
 	Sources           []string
 	Destinations      []string
 	RequireAllServers bool
+
+	dpdkGateways bool
 }
 
 // The checks of a connectivity test share a budget of slots. An iperf3 run takes all of them, so it never overlaps any
@@ -2665,6 +2667,21 @@ func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *
 			slog.Warn("All switches are Cumulus VX, setting IPerf min speed to 400")
 			// Seems like Cumulus VX shows 700+ Mbps on iPerf quite reliably
 			opts.IPerfsMinSpeed = 400
+		}
+	}
+
+	gws := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gws); err != nil {
+		cacheCancel()
+
+		return nil, nil, nil, fmt.Errorf("listing gateways: %w", err)
+	}
+	opts.dpdkGateways = true
+	for _, gw := range gws.Items {
+		if gw.Spec.Driver != gwapi.GatewayDriverDPDK {
+			opts.dpdkGateways = false
+
+			break
 		}
 	}
 
@@ -3624,9 +3641,9 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
-	// Gateway peering uses kernel-based dataplane; observed sustained throughput on HLAB is
-	// ~5-6.5 Gbps with periodic real packet loss, so cap floor at 5000 to avoid flake.
-	if reachability.Reason == ReachabilityReasonGatewayPeering {
+	// The kernel gateway driver forwards peerings at ~5-6.5 Gbps on HLAB with periodic real packet loss, so cap the
+	// floor at 5000 to avoid flake. The dpdk driver keeps up with the switches.
+	if reachability.Reason == ReachabilityReasonGatewayPeering && !opts.dpdkGateways {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 5000)
 	}
 	var lastErrors []*IperfError
