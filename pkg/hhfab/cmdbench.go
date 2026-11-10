@@ -44,17 +44,13 @@ type BenchInitOpts struct {
 	// webhooks. Worth it on a large run, where validating locally costs more
 	// than the apply.
 	SkipValidate bool
-	// DefaultFabric puts every switch in the default fabric, without Fabric
-	// objects or fabric and domain fields, so the topology can be created on a
-	// release from before them and carried through the upgrade.
-	DefaultFabric bool
 }
 
 // benchLoad loads only fab.yaml: the Fabricator config and the control and
 // gateway nodes, which is everything the bench takes from the work dir. The
 // VLAB's own wiring has nothing the bench uses, and loading it would validate
 // it with the fabric API this binary was built with - which need not match the
-// release the VLAB runs, the very case --default-fabric exists for.
+// release the VLAB runs.
 func benchLoad(ctx context.Context, workDir, cacheDir string) (*Config, error) {
 	return load(ctx, workDir, cacheDir, nil, false, HydrateModeNever, "")
 }
@@ -72,7 +68,7 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 		return err
 	}
 
-	gen, l, err := benchGenerate(ctx, c, specs, opts.SkipValidate, opts.DefaultFabric)
+	gen, l, err := benchGenerate(ctx, c, specs, opts.SkipValidate)
 	if err != nil {
 		return err
 	}
@@ -696,7 +692,7 @@ func DoVLABBenchClean(ctx context.Context, workDir, cacheDir string, opts BenchC
 // benchGenerate builds the topology into an in-memory loader and validates it
 // with exactly the Default() plus Validate() the admission webhooks run, so a
 // bad shape fails before anything reaches the cluster.
-func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, skipValidate, defaultFabric bool) (*bench.Generator, *apiutil.Loader, error) {
+func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, skipValidate bool) (*bench.Generator, *apiutil.Loader, error) {
 	gateways := uint(0)
 	for _, node := range c.Nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
@@ -734,28 +730,12 @@ func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, ski
 		return nil, nil, fmt.Errorf("preparing generator: %w", err)
 	}
 
-	if defaultFabric {
-		if err := gen.InDefaultFabric(); err != nil {
-			return nil, nil, fmt.Errorf("placing switches in the default fabric: %w", err)
-		}
-	}
-
 	if err := gen.Generate(ctx, l); err != nil {
 		return nil, nil, fmt.Errorf("generating: %w", err)
 	}
 
 	if skipValidate {
 		slog.Warn("Skipping local validation, relying on the admission webhooks")
-
-		return gen, l, nil
-	}
-
-	// Local validation runs the fabric API this binary was built with, while a
-	// default fabric topology is meant for a release from before Fabric objects,
-	// with its own rules - and current validation requires the Fabric/default
-	// that only a running controller creates.
-	if defaultFabric {
-		slog.Warn("Skipping local validation for the default fabric, relying on the target release's admission webhooks")
 
 		return gen, l, nil
 	}

@@ -17,11 +17,9 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
-	"go.githedgehog.com/fabricator/pkg/fab"
 	fabriccomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -58,14 +56,6 @@ func switchProfiles(t *testing.T, ctx context.Context, l *apiutil.Loader, cfg *f
 func generate(t *testing.T, values []string) (*apiutil.Loader, *fmeta.FabricConfig) {
 	t.Helper()
 
-	return generateWith(t, values, false)
-}
-
-// generateWith builds the given fabrics into a fresh loader, every switch in
-// the default fabric if defaultFabric is set.
-func generateWith(t *testing.T, values []string, defaultFabric bool) (*apiutil.Loader, *fmeta.FabricConfig) {
-	t.Helper()
-
 	ctx := t.Context()
 	cfg := fabricConfig(t)
 	l := apiutil.NewLoader()
@@ -80,149 +70,9 @@ func generateWith(t *testing.T, values []string, defaultFabric bool) (*apiutil.L
 	g, err := bench.NewGenerator(specs, alloc, profiles)
 	require.NoError(t, err)
 
-	if defaultFabric {
-		require.NoError(t, g.InDefaultFabric())
-	}
-
 	require.NoError(t, g.Generate(ctx, l))
 
 	return l, cfg
-}
-
-// In the default fabric the topology must look like one a release from before
-// Fabric objects created: no Fabric objects, no fabric or domain on anything,
-// spines on the default spine ASN and leaves numbered across every fabric from
-// the default leaf range. The objects have to be valid against a Fabric/default
-// with those ASNs.
-func TestDefaultFabricLeavesFabricsOut(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	l, cfg := generateWith(t, []string{
-		"name=dc1,spines=2,leaves=3,server-ports=1,vpcs=1,attach=1",
-		"name=dc2,spines=2,leaves=2,server-ports=1,vpcs=1,attach=1",
-	}, true)
-
-	fabrics := &wiringapi.FabricList{}
-	require.NoError(t, l.List(ctx, fabrics))
-	require.Empty(t, fabrics.Items, "no Fabric objects")
-
-	groups := &wiringapi.SwitchGroupList{}
-	require.NoError(t, l.List(ctx, groups))
-	require.Len(t, groups.Items, 2)
-	for _, group := range groups.Items {
-		require.Empty(t, group.Spec.Topology.Fabric, "switch group %s", group.Name)
-	}
-
-	ipNSs := &vpcapi.IPv4NamespaceList{}
-	require.NoError(t, l.List(ctx, ipNSs))
-	require.Len(t, ipNSs.Items, 2)
-	for _, ns := range ipNSs.Items {
-		require.Empty(t, ns.Spec.Topology.Fabric, "IPv4 namespace %s", ns.Name)
-	}
-
-	switches := &wiringapi.SwitchList{}
-	require.NoError(t, l.List(ctx, switches))
-	require.Len(t, switches.Items, 9)
-
-	leafASNs := []uint32{}
-	for _, sw := range switches.Items {
-		require.Empty(t, sw.Spec.Topology.Fabric, "switch %s", sw.Name)
-		require.Empty(t, sw.Spec.Topology.Domains, "switch %s", sw.Name)
-
-		if sw.Spec.Role.IsSpine() {
-			require.Equal(t, fab.DefaultSpineASN, sw.Spec.ASN, "spine %s", sw.Name)
-		} else {
-			leafASNs = append(leafASNs, sw.Spec.ASN)
-		}
-	}
-	conns := &wiringapi.ConnectionList{}
-	require.NoError(t, l.List(ctx, conns))
-	require.NotEmpty(t, conns.Items)
-	for _, conn := range conns.Items {
-		require.Empty(t, conn.Spec.Topology.Fabric, "connection %s", conn.Name)
-	}
-
-	vpcs := &vpcapi.VPCList{}
-	require.NoError(t, l.List(ctx, vpcs))
-	require.NotEmpty(t, vpcs.Items)
-	for _, vpc := range vpcs.Items {
-		require.Empty(t, vpc.Spec.Topology.Fabric, "vpc %s", vpc.Name)
-		require.Empty(t, vpc.Spec.Topology.Domains, "vpc %s", vpc.Name)
-	}
-
-	attaches := &vpcapi.VPCAttachmentList{}
-	require.NoError(t, l.List(ctx, attaches))
-	require.NotEmpty(t, attaches.Items)
-	for _, attach := range attaches.Items {
-		require.Empty(t, attach.Spec.Topology.Fabric, "attachment %s", attach.Name)
-	}
-
-	slices.Sort(leafASNs)
-	want := []uint32{} //nolint:prealloc
-	for idx := range uint32(5) {
-		want = append(want, fab.DefaultLeafASNStart+idx)
-	}
-	require.Equal(t, want, leafASNs, "leaves of both fabrics share the default range without overlap")
-
-	// what the controller creates on the release that introduces Fabric objects
-	require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
-		Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
-		Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault,
-		Spec: wiringapi.FabricSpec{
-			LeafASNStart: fab.DefaultLeafASNStart,
-			LeafASNEnd:   fab.DefaultLeafASNEnd,
-			Domains: map[string]wiringapi.FabricDomainSpec{
-				wiringapi.DefaultFabricDomain: {SpineASN: fab.DefaultSpineASN, GatewayASN: fab.DefaultGatewayASN},
-			},
-		},
-	}))
-
-	// Defaulted and stored as the new release's webhooks would on create, since
-	// validation compares each object with the stored ones it refers to. Objects
-	// stored before the upgrade are not defaulted by anything until they are next
-	// written, which is what running the upgrade on a real cluster exercises.
-	for _, list := range []kclient.ObjectList{
-		&wiringapi.SwitchGroupList{}, &vpcapi.IPv4NamespaceList{}, &wiringapi.SwitchList{}, &wiringapi.ServerList{},
-		&wiringapi.ConnectionList{}, &vpcapi.VPCList{}, &vpcapi.VPCAttachmentList{}, &vpcapi.VPCPeeringList{},
-	} {
-		require.NoError(t, l.List(ctx, list))
-		for _, obj := range apiutil.KubeListItems(list) {
-			defaulted, ok := obj.(interface{ Default() })
-			require.True(t, ok, "%T has a Default", obj)
-			defaulted.Default()
-			require.NoError(t, l.GetClient().Update(ctx, obj))
-		}
-	}
-
-	require.NoError(t, l.List(ctx, switches))
-	for _, sw := range switches.Items {
-		require.Equal(t, wiringapi.DefaultFabric, sw.Spec.Topology.Fabric, "switch %s", sw.Name)
-		require.NoError(t, sw.HydrationValidation(ctx, l.GetClient(), cfg), "switch %s", sw.Name)
-	}
-
-	require.NoError(t, apiutil.ValidateFabricGateway(ctx, l, cfg))
-}
-
-// The default fabric has a single domain, so a multi-domain fabric cannot go
-// into it.
-func TestDefaultFabricRefusesDomains(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	cfg := fabricConfig(t)
-	profiles := switchProfiles(t, ctx, apiutil.NewLoader(), cfg)
-
-	specs, err := bench.ParseFabricSpecs([]string{"name=dc1,domains=2,spines=2,leaves=2,server-ports=1"})
-	require.NoError(t, err)
-
-	alloc, err := bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
-	require.NoError(t, err)
-
-	g, err := bench.NewGenerator(specs, alloc, profiles)
-	require.NoError(t, err)
-
-	require.ErrorContains(t, g.InDefaultFabric(), "default fabric has only one")
 }
 
 // The generated wiring has to pass exactly the Default() + Validate() the

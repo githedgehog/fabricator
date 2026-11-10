@@ -12,7 +12,6 @@ import (
 
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab"
 )
 
 // Addresses are handed out per unit: one domain of one fabric, in --fabric
@@ -386,55 +385,6 @@ func (a *Allocator) LeafASN(slot, domain, leafIdx uint) (uint32, error) {
 	}
 
 	return block.LeafStart + uint32(domain*StrideLeaves+leafIdx), nil //nolint:gosec // bounded by Unit and checkIdx
-}
-
-// CheckDefaultFabric verifies that every fabric fits into the default fabric:
-// one domain each, since the default fabric has only the one, and all their
-// leaves within the default fabric's leaf ASN range, which they share.
-func (a *Allocator) CheckDefaultFabric() error {
-	leaves := uint64(0)
-	for _, spec := range a.specs {
-		if spec.Domains != 1 {
-			return fmt.Errorf("fabric %q has %d domains, the default fabric has only one", spec.Name, spec.Domains) //nolint:err113
-		}
-		leaves += uint64(spec.Leaves)
-	}
-
-	if capacity := uint64(fab.DefaultLeafASNEnd) - uint64(fab.DefaultLeafASNStart) + 1; leaves > capacity {
-		return fmt.Errorf("%d leaves need more ASNs than the %d in the default fabric leaf range (%d-%d)", //nolint:err113
-			leaves, capacity, fab.DefaultLeafASNStart, fab.DefaultLeafASNEnd)
-	}
-
-	return nil
-}
-
-// DefaultSpineASN is the ASN every spine has in the default fabric.
-func (a *Allocator) DefaultSpineASN() uint32 {
-	return fab.DefaultSpineASN
-}
-
-// DefaultLeafASN returns the ASN for a leaf in the default fabric, where the
-// leaves of every fabric share its leaf range, numbered in --fabric order.
-// leafIdx is the leaf's index within its fabric.
-func (a *Allocator) DefaultLeafASN(slot, leafIdx uint) (uint32, error) {
-	if slot >= a.Slots() {
-		return 0, fmt.Errorf("slot %d out of range, have %d fabrics", slot, a.Slots()) //nolint:err113
-	}
-	if leafIdx >= a.specs[slot].Leaves {
-		return 0, fmt.Errorf("leaf %d out of range, fabric %q has %d", leafIdx, a.specs[slot].Name, a.specs[slot].Leaves) //nolint:err113
-	}
-
-	offset := uint64(leafIdx)
-	for _, spec := range a.specs[:slot] {
-		offset += uint64(spec.Leaves)
-	}
-
-	asn := uint64(fab.DefaultLeafASNStart) + offset
-	if asn > uint64(fab.DefaultLeafASNEnd) {
-		return 0, fmt.Errorf("leaf ASN %d is past the default fabric leaf range end %d", asn, fab.DefaultLeafASNEnd) //nolint:err113
-	}
-
-	return uint32(asn), nil // bounded by DefaultLeafASNEnd above
 }
 
 // FabricLinkIPs returns the /31 pair for one fabric link: the spine side and
