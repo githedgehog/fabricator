@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -39,8 +38,6 @@ import (
 const (
 	ConnectionTypeUnbundled      = "unbundled"
 	ConnectionTypeBundled        = "bundled"
-	ConnectionTypeMCLAG          = "mclag"
-	ConnectionTypeMCLAGDomain    = "mclag-domain"
 	ConnectionTypeESLAG          = "eslag"
 	ConnectionTypeFabric         = "fabric"
 	ConnectionTypeMesh           = "mesh"
@@ -52,7 +49,6 @@ const (
 var ConnectionTypesServerFacing = []string{
 	ConnectionTypeUnbundled,
 	ConnectionTypeBundled,
-	ConnectionTypeMCLAG,
 	ConnectionTypeESLAG,
 }
 
@@ -99,47 +95,15 @@ type ConnBundled struct {
 	Fallback bool `json:"fallback,omitempty"`
 }
 
-// Deprecated: ConnMCLAG defines the MCLAG connection (port channel, single server to pair of switches with multiple links)
-type ConnMCLAG struct {
-	// +kubebuilder:validation:MinItems=2
-	// Links is the list of server-to-switch links
-	Links []ServerToSwitchLink `json:"links,omitempty"`
-	// ServerFacingConnectionConfig defines any server-facing connection (unbundled, bundled, mclag, etc.) configuration
-	ServerFacingConnectionConfig `json:",inline"`
-	// Fallback is the optional flag that used to indicate one of the links in LACP port channel to be used as a fallback link
-	Fallback bool `json:"fallback,omitempty"`
-}
-
-// ConnESLAG defines the ESLAG connection (port channel, single server to 2-4 switches with multiple links)
+// ConnESLAG defines the ESLAG connection (port channel, single server to 1-4 switches with one or more links)
 type ConnESLAG struct {
-	// +kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MinItems=1
 	// Links is the list of server-to-switch links
 	Links []ServerToSwitchLink `json:"links,omitempty"`
 	// ServerFacingConnectionConfig defines any server-facing connection (unbundled, bundled, eslag, etc.) configuration
 	ServerFacingConnectionConfig `json:",inline"`
 	// Fallback is the optional flag that used to indicate one of the links in LACP port channel to be used as a fallback link
 	Fallback bool `json:"fallback,omitempty"`
-}
-
-// SwitchToSwitchLink defines the switch-to-switch link
-type SwitchToSwitchLink struct {
-	// Switch1 is the first switch side of the connection
-	Switch1 BasePortName `json:"switch1,omitempty"`
-	// Switch2 is the second switch side of the connection
-	Switch2 BasePortName `json:"switch2,omitempty"`
-}
-
-// Deprecated: ConnMCLAGDomain defines the MCLAG domain connection which makes two switches into a single logical switch or
-// redundancy group and allows to use MCLAG connections to connect servers in a multi-homed way.
-type ConnMCLAGDomain struct {
-	// +kubebuilder:validation:MinItems=1
-	// PeerLinks is the list of peer links between the switches, used to pass server traffic between switch
-	PeerLinks []SwitchToSwitchLink `json:"peerLinks,omitempty"`
-
-	// +kubebuilder:validation:MinItems=1
-	// SessionLinks is the list of session links between the switches, used only to pass MCLAG control plane and BGP
-	// traffic between switches
-	SessionLinks []SwitchToSwitchLink `json:"sessionLinks,omitempty"`
 }
 
 // ConnFabricLinkSwitch defines the switch side of the fabric (or gateway) link
@@ -259,12 +223,8 @@ type ConnectionSpec struct {
 	Unbundled *ConnUnbundled `json:"unbundled,omitempty"`
 	// Bundled defines the bundled connection (port channel, single server to a single switch with multiple links)
 	Bundled *ConnBundled `json:"bundled,omitempty"`
-	// Deprecated: MCLAG defines the MCLAG connection (port channel, single server to pair of switches with multiple links)
-	MCLAG *ConnMCLAG `json:"mclag,omitempty"`
-	// ESLAG defines the ESLAG connection (port channel, single server to 2-4 switches with multiple links)
+	// ESLAG defines the ESLAG connection (port channel, single server to 1-4 switches with one or more links)
 	ESLAG *ConnESLAG `json:"eslag,omitempty"`
-	// Deprecated: MCLAGDomain defines the MCLAG domain connection which makes two switches into a single logical switch for server multi-homing
-	MCLAGDomain *ConnMCLAGDomain `json:"mclagDomain,omitempty"`
 	// Fabric defines the fabric connection (single spine to a single leaf with at least one link)
 	Fabric *ConnFabric `json:"fabric,omitempty"`
 	// Mesh defines the mesh connection (direct leaf to leaf connection with at least one link)
@@ -485,10 +445,6 @@ func (connSpec *ConnectionSpec) Endpoints() ([]string, []string, []string, map[s
 
 	nonNills := 0
 
-	// TODO: delete when we fully remove MCLAG
-	if connSpec.MCLAG != nil || connSpec.MCLAGDomain != nil {
-		return []string{}, []string{}, []string{}, links, nil
-	}
 	if connSpec.Unbundled != nil { //nolint:gocritic
 		nonNills++
 
@@ -794,10 +750,6 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 		return nil, errors.Wrapf(err, "failed to validate metadata")
 	}
 
-	if conn.Spec.MCLAG != nil || conn.Spec.MCLAGDomain != nil {
-		return admission.Warnings{"MCLAG is deprecated and no longer supported"}, nil
-	}
-
 	if fabricCfg != nil {
 		if err := conn.Spec.ValidateServerFacingMTU(fabricCfg.FabricMTU, fabricCfg.ServerFacingMTUOffset); err != nil {
 			return nil, err
@@ -812,18 +764,24 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 	if conn.Spec.StaticExternal != nil {
 		se := conn.Spec.StaticExternal.Link.Switch
 
-		_, ipNet, err := net.ParseCIDR(se.IP)
+		ipPrefix, err := netip.ParsePrefix(se.IP)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse cidr %s", se.IP)
 		}
-
-		nextHop := net.ParseIP(se.NextHop)
-		if nextHop == nil {
-			return nil, errors.Errorf("failed to parse next hop %s", se.NextHop)
+		if !ipPrefix.Addr().Is4() {
+			return nil, errors.Errorf("ip %s is not IPv4", se.IP)
 		}
 
-		if !ipNet.Contains(nextHop) {
-			return nil, errors.Errorf("next hop %s is not in cidr %s", nextHop, ipNet)
+		nextHop, err := netip.ParseAddr(se.NextHop)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse next hop %s", se.NextHop)
+		}
+		if !nextHop.Is4() {
+			return nil, errors.Errorf("next hop %s is not IPv4", se.NextHop)
+		}
+
+		if !ipPrefix.Contains(nextHop) {
+			return nil, errors.Errorf("next hop %s is not in cidr %s", nextHop, ipPrefix.Masked())
 		}
 
 		subnets := []netip.Prefix{}
@@ -831,6 +789,9 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			prefix, err := netip.ParsePrefix(subnet)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse cidr %s", subnet)
+			}
+			if !prefix.Addr().Is4() {
+				return nil, errors.Errorf("subnet %s is not IPv4", subnet)
 			}
 
 			if subnet == "0.0.0.0/0" {
@@ -1018,11 +979,6 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			if other.Name == conn.Name {
 				continue
 			}
-			// skip deprecated MCLAG links
-			if other.Spec.MCLAG != nil || other.Spec.MCLAGDomain != nil {
-				continue
-			}
-
 			_, _, ports, _, err := other.Spec.Endpoints()
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to get endpoints for connection %s", other.Name)

@@ -45,7 +45,6 @@ type DHCPSubnetSpec struct {
 	// End IP from the CIDRBlock to allocate IPs, such as 10.10.10.99
 	EndIP string `json:"endIP"`
 	// Lease time in seconds, such as 3600
-	// +kubebuilder:validation:Minimum: 1
 	LeaseTimeSeconds uint32 `json:"leaseTimeSeconds"`
 	// VRF name to identify specific VPC (will be added to DHCP packets by DHCP relay in suboption 151), such as "VrfVvpc-1" as it's named on switch
 	VRF string `json:"vrf"`
@@ -58,8 +57,6 @@ type DHCPSubnetSpec struct {
 	// TimeServers (optional) NTP server addresses to configure for time servers for this particular segment such as: 10.10.10.1, 10.10.10.2
 	TimeServers []string `json:"timeServers"`
 	// InterfaceMTU (optional) is the MTU setting that the dhcp server will send to the clients. It is dependent on the client to honor this option.
-	// +kubebuilder:validation:Minimum: 96
-	// +kubebuilder:validation:Maximum: 9036
 	InterfaceMTU uint16 `json:"interfaceMTU"`
 	// DefaultURL (optional) is the option 114 "default-url" to be sent to the clients
 	DeprecatedDefaultURL string `json:"defaultURL"`
@@ -98,10 +95,6 @@ type DHCPAllocated struct {
 	Expiry kmetav1.Time `json:"expiry"`
 	// Hostname from DHCP request
 	Hostname string `json:"hostname,omitempty"`
-	// Discover is true if the IP was offered to a client but not yet acked, not set anymore as offers are only kept in
-	// memory by the DHCP server
-	// TODO: remove after 26.05 release
-	Discover bool `json:"discover,omitempty"`
 }
 
 // +kubebuilder:object:root=true

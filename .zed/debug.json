@@ -1,0 +1,35 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "adapter": "Delve",
+    "label": "go test ./pkg/fab -v -run InitConfig/",
+    "request": "launch",
+    "mode": "test",
+    "program": ".",
+    "cwd": "$ZED_DIRNAME",
+    "args": [
+      "-test.v",
+      "-test.run",
+      "^$ZED_SYMBOL$/^$ZED_CUSTOM_GO_SUBTEST_NAME$"
+    ],
+    "buildFlags": [],
+    "env": {}
+  },
+  {
+    "adapter": "Delve",
+    "label": "Test config validation",
+    "program": "$ZED_WORKTREE_ROOT/cmd/hhfab", // path to the main package, not a binary
+    "request": "launch",
+    "mode": "debug",
+    "args": [
+      "init",
+      "-c",
+      "$ZED_WORKTREE_ROOT/bin/test.yaml",
+      "-f",
+    ],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]
