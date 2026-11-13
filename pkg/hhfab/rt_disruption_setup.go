@@ -159,7 +159,9 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		}
 	}
 
-	time.Sleep(15 * time.Second)
+	if _, err := waitAgentsSettled(ctx, kube, disruptionSettleQuiet, disruptionSettleMax); err != nil {
+		return err
+	}
 	if err := WaitReady(ctx, kube, testCtx.wrOpts); err != nil {
 		return fmt.Errorf("waiting for ready after creating VPCs: %w", err)
 	}
