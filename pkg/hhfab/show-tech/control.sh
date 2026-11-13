@@ -67,6 +67,12 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== Kubernetes Pods ==="
     $KUBECTL get pods -A -o wide
 
+    echo -e "\n=== Kubernetes Pod Ready Transition Times ==="
+    $KUBECTL get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,STARTED:.status.startTime,READY:.status.conditions[?(@.type=="Ready")].status,READY_SINCE:.status.conditions[?(@.type=="Ready")].lastTransitionTime'
+
+    echo -e "\n=== Kubernetes Services and EndpointSlices ==="
+    $KUBECTL get svc,endpointslices -A -o wide
+
     echo -e "\n=== Kubernetes Events ==="
     $KUBECTL get events -A --sort-by='.metadata.creationTimestamp'
 } >> "$OUTPUT_FILE" 2>&1

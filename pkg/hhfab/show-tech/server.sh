@@ -246,6 +246,15 @@ OUTPUT_FILE="/tmp/show-tech.log"
   echo -e "\n=== iperf3.service journal ==="
   journalctl -u iperf3.service --no-pager -o short-iso 2>&1 || echo "journalctl not available"
 
+  echo -e "\n=== docker and containerd service status ==="
+  systemctl status docker.service containerd.service --no-pager 2>&1 || true
+
+  echo -e "\n=== docker and containerd journal ==="
+  journalctl -u docker.service -u containerd.service --no-pager -o short-iso 2>&1 || echo "journalctl not available"
+
+  echo -e "\n=== Docker Images ==="
+  docker images 2>&1 || echo "docker not available"
+
 } >> "$OUTPUT_FILE" 2>&1
 
 echo "Diagnostics collected to $OUTPUT_FILE"
