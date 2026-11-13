@@ -7,12 +7,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	gwintapi "go.githedgehog.com/fabric/api/gwint/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 )
 
 func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
@@ -69,6 +73,14 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 		{
 			Name: "Gateway Peering",
 			F:    gatewayPeeringTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Counters",
+			F:    gatewayPeeringCountersTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -346,6 +358,222 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix 
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing gateway peering connectivity: %w", err)
+	}
+
+	return false, nil, nil
+}
+
+// Test that the gateway counts the traffic of a peering. A known number of pings of a known
+// size must show up exactly in the peering and VPC counters of the GatewayAgent status,
+// summed over all gateways since requests and replies may cross different ones. Pings that
+// expire on the gateway must be counted as drops and not as forwarded traffic.
+func gatewayPeeringCountersTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	const (
+		pings       = 50
+		pingPayload = 1000
+		// the dataplane counts the inner frame: payload, ICMP 8, IPv4 20 and Ethernet 14 octets
+		pingFrame = pingPayload + 42
+		// TTL 2 is used up by the source leaf and the gateway, so the gateway drops the pings
+		expiring     = 20
+		settle       = 20 * time.Second // longer than the 15 s status refresh
+		quietReads   = 3                // 60 s without change, counts were seen arriving 50 s late
+		pollInterval = 5 * time.Second
+		waitTimeout  = 2 * time.Minute
+		// covers the iperf traffic of the connectivity check settling, plus the quiet reads
+		baselineTimeout = 4 * time.Minute
+	)
+
+	skipped, reverts, err := testCtx.runNATTest(ctx, matrix, natTestSpec{
+		Name:      "gateway peering counters",
+		BuildSpec: gatewayPeeringSpec,
+	})
+	if skipped || err != nil {
+		return skipped, reverts, err
+	}
+
+	vpc1, vpc2, err := firstTwoVPCs(ctx, testCtx.kube)
+	if err != nil {
+		return false, nil, fmt.Errorf("gateway peering counters: %w", err)
+	}
+
+	var src, dst *ServerEndpoint
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil || ep.Server.HostBGP {
+			continue
+		}
+		if src == nil && ep.Server.VPC == vpc1.Name {
+			src = ep.Server
+		}
+		if dst == nil && ep.Server.VPC == vpc2.Name {
+			dst = ep.Server
+		}
+	}
+	if src == nil || dst == nil {
+		return true, nil, fmt.Errorf("no server to ping from %s to %s", vpc1.Name, vpc2.Name) //nolint:err113
+	}
+	srcSSH, err := testCtx.getSSH(ctx, src.Name)
+	if err != nil {
+		return false, nil, fmt.Errorf("getting ssh config for %s: %w", src.Name, err)
+	}
+
+	// counters summed over all gateways, keyed by "peering <src>-><dst>" and "vpc <name>"
+	type pbd struct{ P, B, D uint64 }
+	fwd, rev := vpc1.Name+"->"+vpc2.Name, vpc2.Name+"->"+vpc1.Name
+	// also returns when each gateway last collected its counters from the dataplane
+	read := func() (map[string]pbd, map[string]time.Time, error) {
+		gwags := &gwintapi.GatewayAgentList{}
+		if err := testCtx.kube.List(ctx, gwags); err != nil {
+			return nil, nil, fmt.Errorf("listing gateway agents: %w", err)
+		}
+		sum, collected := map[string]pbd{}, map[string]time.Time{}
+		for _, ag := range gwags.Items {
+			collected[ag.Name] = ag.Status.State.LastCollectedTime.Time
+			// the peerings map is absent until the first traffic, a missing entry reads as zero
+			for _, key := range []string{fwd, rev} {
+				s, v := ag.Status.State.Peerings[key], sum["peering "+key]
+				sum["peering "+key] = pbd{v.P + s.Packets, v.B + s.Bytes, v.D + s.Drops}
+			}
+			for _, key := range []string{vpc1.Name, vpc2.Name} {
+				s, v := ag.Status.State.VPCs[key], sum["vpc "+key]
+				sum["vpc "+key] = pbd{v.P + s.Packets, v.B + s.Bytes, v.D + s.Drops}
+			}
+		}
+		slog.Debug("Gateway counters", "counters", sum, "collected", collected)
+
+		return sum, collected, nil
+	}
+	sleep := func(d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for gateway counters: %w", ctx.Err())
+		case <-time.After(d):
+			return nil
+		}
+	}
+	// Waits until the counters grew by exactly want since base, on a collection from every
+	// gateway made after the traffic ended, and still on the next collection from every
+	// gateway, so a gateway yet to report cannot hide extra counts. They only grow, so
+	// overshooting fails right away. Called right after the traffic ends, and compares
+	// collection times with each other only, as they come from the gateway clocks.
+	waitFor := func(step string, base, want map[string]pbd) error {
+		_, ended, err := read()
+		if err != nil {
+			return err
+		}
+		var got map[string]pbd
+		// when every gateway collected the first matching read
+		var matched map[string]time.Time
+		for deadline := time.Now().Add(waitTimeout); time.Now().Before(deadline); {
+			if err := sleep(pollInterval); err != nil {
+				return err
+			}
+			now, collected, err := read()
+			if err != nil {
+				return err
+			}
+			got = map[string]pbd{}
+			over := false
+			for key, b := range base {
+				n, w := now[key], want[key]
+				got[key] = pbd{n.P - b.P, n.B - b.B, n.D - b.D}
+				over = over || got[key].P > w.P || got[key].B > w.B || got[key].D > w.D
+			}
+			if over {
+				break
+			}
+			fresh, again := true, matched != nil
+			for gw, at := range collected {
+				fresh = fresh && at.After(ended[gw])
+				again = again && at.After(matched[gw])
+			}
+			switch {
+			case !fresh || !maps.Equal(got, want):
+				matched = nil
+			case matched == nil:
+				matched = collected
+			case again:
+				slog.Info("Gateway counters match", "step", step, "delta", got)
+
+				return nil
+			}
+		}
+
+		return fmt.Errorf("%s: gateway counters grew by %v, expected %v", step, got, want) //nolint:err113
+	}
+
+	// The dataplane keeps adding the traffic of the connectivity check above to the counters
+	// for tens of seconds after it stops. Take the baseline once the counters stayed the same
+	// over enough reads, each from a new collection on every gateway, since two reads of the
+	// same collection are equal whether the counters settled or not.
+	base, collected, err := read()
+	if err != nil {
+		return false, nil, err
+	}
+	for quiet, deadline := 0, time.Now().Add(baselineTimeout); quiet < quietReads; {
+		if time.Now().After(deadline) {
+			return false, nil, fmt.Errorf("gateway counters not settled after %s: %v", baselineTimeout, base) //nolint:err113
+		}
+		if err := sleep(settle); err != nil {
+			return false, nil, err
+		}
+		next, nextCollected, err := read()
+		if err != nil {
+			return false, nil, err
+		}
+		fresh := true
+		for gw, at := range nextCollected {
+			fresh = fresh && at.After(collected[gw])
+		}
+		switch {
+		case !maps.Equal(base, next):
+			quiet = 0
+		case fresh:
+			quiet++
+		}
+		base, collected = next, nextCollected
+	}
+
+	// no retries: rerunning a ping that was cut short would send more packets than expected
+	cmd := fmt.Sprintf("ping -c %d -s %d -i 0.2 -W 1 %s", pings, pingPayload, dst.IP)
+	slog.Info("Sending pings through the gateway peering", "from", src.Name, "to", dst.Name, "cmd", cmd)
+	out, stderr, err := srcSSH.Run(ctx, cmd)
+	if err != nil {
+		return false, nil, fmt.Errorf("pinging %s from %s, all pings must get a reply: %w: %s %s", dst.Name, src.Name, err, out, stderr)
+	}
+	if !strings.Contains(out, fmt.Sprintf("%d packets transmitted, %d received,", pings, pings)) {
+		return false, nil, fmt.Errorf("pinging %s from %s, all pings must get a reply: %s", dst.Name, src.Name, out) //nolint:err113
+	}
+	want := map[string]pbd{
+		"peering " + fwd:   {P: pings, B: pings * pingFrame},
+		"peering " + rev:   {P: pings, B: pings * pingFrame},
+		"vpc " + vpc1.Name: {P: pings, B: pings * pingFrame},
+		"vpc " + vpc2.Name: {P: pings, B: pings * pingFrame},
+	}
+	if err := waitFor("forwarded pings", base, want); err != nil {
+		return false, nil, err
+	}
+
+	if base, _, err = read(); err != nil {
+		return false, nil, err
+	}
+	cmd = fmt.Sprintf("ping -c %d -t 2 -i 0.2 -W 1 %s", expiring, dst.IP)
+	slog.Info("Sending pings that expire on the gateway", "from", src.Name, "to", dst.Name, "cmd", cmd)
+	out, stderr, err = srcSSH.Run(ctx, cmd)
+	// ping exits with 1 when no reply comes back
+	if status, ok := sshutil.ExitStatus(err); err != nil && (!ok || status != 1) {
+		return false, nil, fmt.Errorf("pinging %s from %s with TTL 2: %w: %s %s", dst.Name, src.Name, err, out, stderr)
+	}
+	if err == nil || !strings.Contains(out, fmt.Sprintf("%d packets transmitted, 0 received", expiring)) {
+		return false, nil, fmt.Errorf("pinging %s from %s with TTL 2, no ping must get a reply: %s", dst.Name, src.Name, out) //nolint:err113
+	}
+	want = map[string]pbd{
+		"peering " + fwd:   {D: expiring},
+		"peering " + rev:   {},
+		"vpc " + vpc1.Name: {D: expiring},
+		"vpc " + vpc2.Name: {},
+	}
+	if err := waitFor("expired pings", base, want); err != nil {
+		return false, nil, err
 	}
 
 	return false, nil, nil
