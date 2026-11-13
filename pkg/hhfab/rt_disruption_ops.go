@@ -22,6 +22,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	appsapi "k8s.io/api/apps/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -371,26 +372,30 @@ func (env *disruptionEnv) opRestartController(ctx context.Context) error {
 }
 
 func waitRollout(ctx context.Context, kc kclient.Client, key kclient.ObjectKey) error {
-	ctx, cancel := context.WithTimeout(ctx, disruptionRolloutMax)
-	defer cancel()
-
-	for {
+	var getErr error
+	err := wait.PollUntilContextTimeout(ctx, disruptionPollInterval, disruptionRolloutMax, true, func(ctx context.Context) (bool, error) {
 		dep := &appsapi.Deployment{}
 		if err := kc.Get(ctx, key, dep); err != nil {
-			return fmt.Errorf("getting deployment %s: %w", key, err)
+			getErr = fmt.Errorf("getting deployment %s: %w", key, err)
+
+			return false, getErr
 		}
 		want := int32(1)
 		if dep.Spec.Replicas != nil {
 			want = *dep.Spec.Replicas
 		}
 		st := dep.Status
-		if st.ObservedGeneration >= dep.Generation && st.UpdatedReplicas == want && st.Replicas == want && st.AvailableReplicas == want {
-			return nil
-		}
-		if err := sleepCtx(ctx, disruptionPollInterval); err != nil {
-			return fmt.Errorf("waiting for rollout of %s: %w", key, err)
-		}
+
+		return st.ObservedGeneration >= dep.Generation && st.UpdatedReplicas == want && st.Replicas == want && st.AvailableReplicas == want, nil
+	})
+	if getErr != nil {
+		return getErr
 	}
+	if err != nil {
+		return fmt.Errorf("waiting for rollout of %s: %w", key, err)
+	}
+
+	return nil
 }
 
 // leafCycle is an operation that takes the second leaf of the pair away through its Agent and
@@ -615,21 +620,30 @@ func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, 
 
 // waitAgentBack waits for the Agent of the switch to come back from the cycle and returns when it saw that.
 func (env *disruptionEnv) waitAgentBack(ctx context.Context, name string, cycle leafCycle, before *agentapi.Agent) (time.Time, error) {
-	ctx, cancel := context.WithTimeout(ctx, cycle.max)
-	defer cancel()
-
-	for {
+	var backAt time.Time
+	var getErr error
+	err := wait.PollUntilContextTimeout(ctx, disruptionPollInterval, cycle.max, true, func(ctx context.Context) (bool, error) {
 		ag := &agentapi.Agent{}
 		if err := env.kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, ag); err != nil {
-			return time.Time{}, fmt.Errorf("getting agent %s during its %s: %w", name, cycle.name, err)
+			getErr = fmt.Errorf("getting agent %s during its %s: %w", name, cycle.name, err)
+
+			return false, getErr
 		}
-		if cycle.back(before, ag) {
-			return time.Now(), nil
+		if !cycle.back(before, ag) {
+			return false, nil
 		}
-		if err := sleepCtx(ctx, disruptionPollInterval); err != nil {
-			return time.Time{}, fmt.Errorf("waiting for %s to be back from the %s (took more than %s): %w", name, cycle.name, cycle.max, err)
-		}
+		backAt = time.Now()
+
+		return true, nil
+	})
+	if getErr != nil {
+		return time.Time{}, getErr
 	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("waiting for %s to be back from the %s (took more than %s): %w", name, cycle.name, cycle.max, err)
+	}
+
+	return backAt, nil
 }
 
 // longLossWindows returns the loss windows of the lost pings that are longer than disruptionESLAGMaxLoss.

@@ -12,6 +12,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	appsapi "k8s.io/api/apps/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // lostRun is n consecutive lost echoes of the probe, one interval apart, the first at start
@@ -231,4 +237,38 @@ func TestJUnitReportOmitsEmptyAttributes(t *testing.T) {
 	require.Contains(t, string(out), `<testcase classname="Own" name="c"`)
 	require.NotContains(t, string(out), `classname=""`)
 	require.NotContains(t, string(out), `type=""`)
+}
+
+func TestDisruptionWaits(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, agentapi.AddToScheme(scheme))
+	require.NoError(t, appsapi.AddToScheme(scheme))
+	one := int32(1)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&agentapi.Agent{Name: "leaf-01", Namespace: kmetav1.NamespaceDefault},
+		&appsapi.Deployment{
+			Name:      "ctrl",
+			Namespace: "fab",
+			Spec:      appsapi.DeploymentSpec{Replicas: &one},
+			Status:    appsapi.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1},
+		},
+	).Build()
+	env := &disruptionEnv{kube: kube}
+	cycle := func(back bool) leafCycle {
+		return leafCycle{name: "reboot", max: 50 * time.Millisecond, back: func(_, _ *agentapi.Agent) bool { return back }}
+	}
+
+	start := time.Now()
+	at, err := env.waitAgentBack(t.Context(), "leaf-01", cycle(true), nil)
+	require.NoError(t, err)
+	require.False(t, at.Before(start))
+
+	_, err = env.waitAgentBack(t.Context(), "leaf-01", cycle(false), nil)
+	require.EqualError(t, err, "waiting for leaf-01 to be back from the reboot (took more than 50ms): context deadline exceeded")
+
+	_, err = env.waitAgentBack(t.Context(), "leaf-02", cycle(true), nil)
+	require.ErrorContains(t, err, "getting agent leaf-02 during its reboot: ")
+
+	require.NoError(t, waitRollout(t.Context(), kube, kclient.ObjectKey{Name: "ctrl", Namespace: "fab"}))
+	require.ErrorContains(t, waitRollout(t.Context(), kube, kclient.ObjectKey{Name: "other", Namespace: "fab"}), "getting deployment fab/other: ")
 }
