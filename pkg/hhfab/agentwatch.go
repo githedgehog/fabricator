@@ -20,6 +20,9 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// agentPollInterval is how often the Agents are read while waiting for them or watching them
+const agentPollInterval = time.Second
+
 // agentSpecs holds the decoded .spec of every Agent, by Agent name.
 type agentSpecs map[string]map[string]any
 
@@ -200,7 +203,7 @@ func waitAgentsSettled(ctx context.Context, kube kclient.Reader, quiet, timeout 
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("agents did not settle in %s (%d pending): %w", timeout, pending, ctx.Err())
-		case <-time.After(time.Second):
+		case <-time.After(agentPollInterval):
 		}
 	}
 }
@@ -269,7 +272,7 @@ func (w *agentWatch) Start(ctx context.Context) {
 	go func() {
 		defer close(w.done)
 		w.poll(ctx)
-		t := time.NewTicker(time.Second)
+		t := time.NewTicker(agentPollInterval)
 		defer t.Stop()
 		for {
 			select {

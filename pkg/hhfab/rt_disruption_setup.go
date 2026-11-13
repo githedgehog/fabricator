@@ -266,7 +266,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		if !short {
 			break
 		}
-		if pass == 3 {
+		if pass == disruptionFillerPasses {
 			return fmt.Errorf("leaves of the pair hold too few VPC IRB VLAN entries alone, need at least %d each for a renumbering to show: %v", //nolint:err113
 				disruptionMinEntries, entries)
 		}

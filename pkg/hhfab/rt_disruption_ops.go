@@ -371,7 +371,7 @@ func (env *disruptionEnv) opRestartController(ctx context.Context) error {
 }
 
 func waitRollout(ctx context.Context, kc kclient.Client, key kclient.ObjectKey) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, disruptionRolloutMax)
 	defer cancel()
 
 	for {
@@ -387,7 +387,7 @@ func waitRollout(ctx context.Context, kc kclient.Client, key kclient.ObjectKey) 
 		if st.ObservedGeneration >= dep.Generation && st.UpdatedReplicas == want && st.Replicas == want && st.AvailableReplicas == want {
 			return nil
 		}
-		if err := sleepCtx(ctx, 2*time.Second); err != nil {
+		if err := sleepCtx(ctx, disruptionPollInterval); err != nil {
 			return fmt.Errorf("waiting for rollout of %s: %w", key, err)
 		}
 	}
@@ -626,7 +626,7 @@ func (env *disruptionEnv) waitAgentBack(ctx context.Context, name string, cycle 
 		if cycle.back(before, ag) {
 			return time.Now(), nil
 		}
-		if err := sleepCtx(ctx, 2*time.Second); err != nil {
+		if err := sleepCtx(ctx, disruptionPollInterval); err != nil {
 			return time.Time{}, fmt.Errorf("waiting for %s to be back from the %s (took more than %s): %w", name, cycle.name, cycle.max, err)
 		}
 	}

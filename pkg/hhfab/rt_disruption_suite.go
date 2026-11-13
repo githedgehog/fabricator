@@ -26,6 +26,15 @@ const (
 	// ESLAG servers, get a VPC
 	disruptionMaxServersPerLeaf = 2
 
+	// disruptionFillerPasses is how many times setup adds VPCs before a leaf still short of
+	// disruptionMinEntries fails it
+	disruptionFillerPasses = 3
+
+	disruptionRolloutMax   = 5 * time.Minute
+	disruptionPollInterval = 2 * time.Second
+	// disruptionEvidenceMax bounds reading the traffic for the evidence of a test that ended
+	disruptionEvidenceMax = time.Minute
+
 	// disruptionMinEntries is how many VPC IRB VLAN entries each leaf of the pair must hold alone:
 	// with fewer the allocator hands the lone entry the lowest free id every time and a
 	// renumbering never shows.
@@ -236,7 +245,7 @@ func disruptionOpTest(name string, run func(*disruptionEnv, context.Context) err
 
 		// whatever ended the test, keep the raw traffic and the Agent timeline: the teardown removes
 		// the ping logs from the servers. The test's context may be done by now.
-		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), disruptionEvidenceMax)
 		defer cancel()
 		files := map[string]string{"agent-timeline.txt": formatAgentRows(env.aw.Rows(started, time.Now()))}
 		if tl, snapErr := env.tw.Snapshot(saveCtx); snapErr != nil {
