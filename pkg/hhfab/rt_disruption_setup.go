@@ -115,7 +115,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	var lone []string
 	for i, leaf := range sc.Leaves {
 		var mine []disruptionVPC
-		for j, srv := range sc.SingleLeaf[leaf][:min(2, len(sc.SingleLeaf[leaf]))] {
+		for j, srv := range sc.SingleLeaf[leaf][:min(disruptionMaxServersPerLeaf, len(sc.SingleLeaf[leaf]))] {
 			vpc, err := env.newVPC(fmt.Sprintf("dt-%d%c", i+1, 'a'+j))
 			if err != nil {
 				return err
@@ -417,11 +417,11 @@ func (env *disruptionEnv) cleanup(ctx context.Context) error {
 	}
 
 	servers := map[string]bool{}
-	for _, s := range env.sc.ESLAG[:min(2, len(env.sc.ESLAG))] {
+	for _, s := range env.sc.ESLAG[:min(disruptionMaxServersPerLeaf, len(env.sc.ESLAG))] {
 		servers[s.Name] = true
 	}
 	for _, list := range env.sc.SingleLeaf {
-		for _, s := range list[:min(2, len(list))] {
+		for _, s := range list[:min(disruptionMaxServersPerLeaf, len(list))] {
 			servers[s.Name] = true
 		}
 	}

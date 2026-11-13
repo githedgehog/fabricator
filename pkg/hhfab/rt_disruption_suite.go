@@ -21,6 +21,11 @@ const (
 	disruptionTouchRounds  = 12
 	disruptionVPCCycles    = 5
 	disruptionCtrlRestarts = 3
+
+	// disruptionMaxServersPerLeaf is how many of the servers on a leaf of the pair, and of the
+	// ESLAG servers, get a VPC
+	disruptionMaxServersPerLeaf = 2
+
 	// disruptionMinEntries is how many VPC IRB VLAN entries each leaf of the pair must hold alone:
 	// with fewer the allocator hands the lone entry the lowest free id every time and a
 	// renumbering never shows.
