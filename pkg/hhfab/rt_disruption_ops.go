@@ -28,7 +28,7 @@ import (
 
 // summarizeProbeLoss says per probe how many pings were lost and between when, one line each, in
 // the order the probes first lost one. It is empty without loss.
-func summarizeProbeLoss(lost []lostPing, class map[string]string) string {
+func summarizeProbeLoss(lost []lostPing, class map[string]probeClass) string {
 	type span struct {
 		count       int
 		first, last time.Time
@@ -521,7 +521,10 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 		return fmt.Errorf("%w: %s: probes stopped recording, the traffic can't be judged: %s", errInconclusive, cycle.name, strings.Join(stale, ", "))
 	}
 
-	v := judgeLeafCycle(tl, env.probeClass, target, leafCycleTimes{from: env.cursor, requested: res.started, settled: settled, end: end})
+	v, err := judgeLeafCycle(tl, env.probeClasses, target, leafCycleTimes{from: env.cursor, requested: res.started, settled: settled, end: end})
+	if err != nil {
+		return fmt.Errorf("%s: %w", cycle.name, err)
+	}
 	env.cursor = end
 	res.failures = v.failures
 	slog.Info("Loss while the leaf was away", "operation", cycle.name, "switch", target, "pings", len(v.away), "windows", summarizeLoss(v.away), "applied-at", settled.Format("15:04:05"))
@@ -544,7 +547,7 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 
 	// line by line only what the checks judged; the rest is the loss expected while the leaf is away
 	res.files["lost-pings.txt"] = formatLostPings(v.judged)
-	res.files["expected-loss.txt"] = summarizeProbeLoss(v.expected, env.probeClass)
+	res.files["expected-loss.txt"] = summarizeProbeLoss(v.expected, env.probeClasses)
 
 	return env.fail(res)
 }
@@ -572,7 +575,7 @@ type leafCycleVerdict struct {
 //     disruptionRecovery to converge, and nothing after that
 //   - soft pairs have the other leaf to go through, so from the request on none of their loss
 //     windows may last more than disruptionESLAGMaxLoss
-func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, at leafCycleTimes) leafCycleVerdict {
+func judgeLeafCycle(tl []probeTimeline, class map[string]probeClass, target string, at leafCycleTimes) (leafCycleVerdict, error) {
 	var strict, away, soft []probeTimeline
 	for _, p := range tl {
 		switch class[p.Probe] {
@@ -581,8 +584,10 @@ func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, 
 		case probeSoft:
 			soft = append(soft, p)
 			away = append(away, p)
-		default:
+		case probeHard:
 			away = append(away, p)
+		default:
+			return leafCycleVerdict{}, fmt.Errorf("%w %q of probe %s", errUnknownProbeClass, class[p.Probe], p.Probe)
 		}
 	}
 	lostStrict := lostPings(strict, at.from, at.end)
@@ -615,7 +620,7 @@ func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, 
 		}
 	}
 
-	return v
+	return v, nil
 }
 
 // waitAgentBack waits for the Agent of the switch to come back from the cycle and returns when it saw that.

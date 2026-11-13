@@ -97,12 +97,17 @@ func makeDisruptionTestSuite() *JUnitTestSuite {
 	return suite
 }
 
-// Probe classes: how much loss a probe may show while the second leaf of the pair is away.
+// probeClass is how much loss a probe may show while the second leaf of the pair is away.
+type probeClass string
+
 const (
-	probeStrict = "strict" // doesn't cross the leaf: no loss allowed at any time
-	probeHard   = "hard"   // an endpoint is attached to that leaf only: down while the leaf is away
-	probeSoft   = "soft"   // fails over to the other leaf, or its path isn't known: short loss only
+	probeStrict probeClass = "strict" // doesn't cross the leaf: no loss allowed at any time
+	probeHard   probeClass = "hard"   // an endpoint is attached to that leaf only: down while the leaf is away
+	probeSoft   probeClass = "soft"   // fails over to the other leaf, or its path isn't known: short loss only
 )
+
+// errUnknownProbeClass means a probe has no class, so its loss can't be judged.
+var errUnknownProbeClass = errors.New("unknown probe class")
 
 type disruptionEnv struct {
 	testCtx *VPCPeeringTestCtx
@@ -111,8 +116,8 @@ type disruptionEnv struct {
 	alloc   *vpcSubnetAllocator
 	tw      *trafficWatch
 	aw      *agentWatch
-	// probeClass maps a probe name to its class (probeStrict, probeHard, probeSoft)
-	probeClass map[string]string
+	// probeClasses maps a probe name to its class
+	probeClasses map[string]probeClass
 	// cursor is where the next traffic check starts, so no moment is checked twice
 	cursor      time.Time
 	evidenceDir string
@@ -172,12 +177,12 @@ func (testCtx *VPCPeeringTestCtx) setupDisruption(ctx context.Context) *disrupti
 	slog.Info("Disruption scenario", "scenario", sc.describe())
 
 	env := &disruptionEnv{
-		testCtx:    testCtx,
-		kube:       kube,
-		sc:         sc,
-		probeClass: map[string]string{},
-		touched:    map[string]bool{},
-		noted:      map[string]bool{},
+		testCtx:      testCtx,
+		kube:         kube,
+		sc:           sc,
+		probeClasses: map[string]probeClass{},
+		touched:      map[string]bool{},
+		noted:        map[string]bool{},
 	}
 	st.env = env
 

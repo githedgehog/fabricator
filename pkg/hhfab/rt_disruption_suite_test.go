@@ -73,7 +73,7 @@ func TestLongLossWindowsBoundsEachProbe(t *testing.T) {
 func TestJudgeLeafCycle(t *testing.T) {
 	base := time.Unix(1782458000, 0)
 	at := leafCycleTimes{from: base, requested: base.Add(time.Second), settled: base.Add(time.Minute), end: base.Add(2 * time.Minute)}
-	class := map[string]string{"strict": probeStrict, "hard": probeHard, "soft": probeSoft}
+	class := map[string]probeClass{"strict": probeStrict, "hard": probeHard, "soft": probeSoft}
 
 	for _, tc := range []struct {
 		name       string
@@ -89,7 +89,8 @@ func TestJudgeLeafCycle(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			probe := tc.lost[0].Probe
-			v := judgeLeafCycle([]probeTimeline{{Probe: probe, Samples: lostSamples(tc.lost)}}, class, "leaf-02", at)
+			v, err := judgeLeafCycle([]probeTimeline{{Probe: probe, Samples: lostSamples(tc.lost)}}, class, "leaf-02", at)
+			require.NoError(t, err)
 			if tc.fail == "" {
 				require.Empty(t, v.failures)
 			} else {
@@ -100,6 +101,9 @@ func TestJudgeLeafCycle(t *testing.T) {
 			require.Len(t, v.expected, len(tc.lost)-tc.wantJudged)
 		})
 	}
+
+	_, err := judgeLeafCycle([]probeTimeline{{Probe: "unclassified"}}, class, "leaf-02", at)
+	require.ErrorIs(t, err, errUnknownProbeClass)
 }
 
 func lostSamples(lost []lostPing) []pingSample {
@@ -213,7 +217,7 @@ func TestSummarizeSpecDiffsCountsPerAgent(t *testing.T) {
 func TestSummarizeProbeLossPerProbe(t *testing.T) {
 	base := time.Unix(1782458000, 0)
 	lost := append(lostRun("a -> b", base, 3), lostRun("c -> d", base.Add(time.Second), 2)...)
-	class := map[string]string{"a -> b": probeHard, "c -> d": probeHard}
+	class := map[string]probeClass{"a -> b": probeHard, "c -> d": probeHard}
 
 	got := summarizeProbeLoss(lost, class)
 

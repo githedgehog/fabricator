@@ -326,7 +326,7 @@ func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityM
 	for _, s := range sc.ESLAG {
 		onESLAG[s.Name] = true
 	}
-	classify := func(servers ...string) string {
+	classify := func(servers ...string) probeClass {
 		class := probeStrict
 		for _, s := range servers {
 			switch {
@@ -358,7 +358,7 @@ func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityM
 			}
 			name := fmt.Sprintf("%s -> %s", src.Server.Name, dst.Server.Name)
 			probes = append(probes, trafficProbe{Name: name, From: src.Server.Name, FromSSH: ssh, To: dst.Server.IP})
-			env.probeClass[name] = classify(src.Server.Name, dst.Server.Name)
+			env.probeClasses[name] = classify(src.Server.Name, dst.Server.Name)
 		}
 	}
 
@@ -387,9 +387,9 @@ func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityM
 		}
 		name := fmt.Sprintf("%s -> external", d.server.Name)
 		probes = append(probes, trafficProbe{Name: name, From: d.server.Name, FromSSH: ssh, To: netip.MustParseAddr(disruptionExternalTarget)})
-		env.probeClass[name] = probeSoft
+		env.probeClasses[name] = probeSoft
 		if onTarget[d.server.Name] {
-			env.probeClass[name] = probeHard
+			env.probeClasses[name] = probeHard
 		}
 	}
 
