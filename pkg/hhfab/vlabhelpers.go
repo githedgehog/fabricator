@@ -1097,6 +1097,22 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 		return fmt.Errorf("uploading script to %s: %w", entryName, err)
 	}
 
+	// Dedicated clock sample, taken after the upload so an unreachable node fails there as before.
+	// The runner's own time right before and after the remote reading brackets the whole SSH call,
+	// connection setup included, so the offset is not mixed up with how long collection waited.
+	// The deadline bounds the remote command, not the SSH connect (that is SSHTimeout).
+	sampleCtx, sampleCancel := context.WithTimeout(ctx, 10*time.Second)
+	sampleStart := time.Now()
+	sampleOut, _, sampleErr := ssh.Run(sampleCtx, "date -u +%s.%N")
+	sampleEnd := time.Now()
+	sampleCancel()
+	if sampleErr != nil {
+		slog.Warn("Clock sample failed", "entry", entryName, "err", sampleErr)
+	} else {
+		slog.Info("Clock sample", "entry", entryName, "runnerBefore", sampleStart.UTC().Format(time.RFC3339Nano),
+			"remoteEpoch", strings.TrimSpace(sampleOut), "runnerAfter", sampleEnd.UTC().Format(time.RFC3339Nano))
+	}
+
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
 	_, stderr, err := ssh.Run(ctx, chmodCmd)
 	if err != nil {
