@@ -111,6 +111,60 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	}
 	env.alloc = alloc
 
+	plan, err := env.planVPCs()
+	if err != nil {
+		return err
+	}
+	if err := env.createVPCs(ctx, plan.all); err != nil {
+		return err
+	}
+	if err := env.configureServers(ctx, plan.all); err != nil {
+		return err
+	}
+	if err := env.peerVPCs(ctx, plan); err != nil {
+		return err
+	}
+
+	matrix, err := BuildConnectivityMatrixFromCluster(ctx, kube, func(server string) (*sshutil.Config, error) {
+		return testCtx.getSSH(ctx, server)
+	})
+	if err != nil {
+		return fmt.Errorf("building connectivity matrix: %w", err)
+	}
+
+	if err := env.addFillers(ctx, plan.leafOnly); err != nil {
+		return err
+	}
+
+	probes, err := env.buildProbes(ctx, matrix, []disruptionVPC{{vpc: plan.eslag, server: sc.ESLAG[0]}})
+	if err != nil {
+		return err
+	}
+	if len(probes) == 0 {
+		return fmt.Errorf("no traffic pair expected to be reachable, nothing to watch") //nolint:err113
+	}
+	env.tw = newTrafficWatch(probes)
+
+	return nil
+}
+
+// disruptionPlan is the VPCs the setup builds for the servers, and how they are peered.
+type disruptionPlan struct {
+	all []disruptionVPC
+	// intra are the pairs of single-leaf VPCs on the same leaf, lone the single-leaf VPC of a
+	// leaf that has only one
+	intra [][2]string
+	lone  []string
+	// leafOnly is, per leaf, how many entries the single-leaf VPCs give it alone
+	leafOnly map[string]int
+	// eslag2 is nil without a second ESLAG server
+	eslag, eslag2 *vpcapi.VPC
+}
+
+// planVPCs makes, without creating them, a VPC per single-leaf server and per ESLAG server.
+func (env *disruptionEnv) planVPCs() (*disruptionPlan, error) {
+	sc := env.sc
+
 	singles := make([]disruptionVPC, 0, 2*len(sc.Leaves))
 	leafOnly := map[string]int{}
 	var intra [][2]string
@@ -120,7 +174,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		for j, srv := range sc.SingleLeaf[leaf][:min(disruptionMaxServersPerLeaf, len(sc.SingleLeaf[leaf]))] {
 			vpc, err := env.newVPC(fmt.Sprintf("dt-%d%c", i+1, 'a'+j))
 			if err != nil {
-				return err
+				return nil, err
 			}
 			mine = append(mine, disruptionVPC{vpc: vpc, server: srv})
 		}
@@ -135,7 +189,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	}
 	eslagVPC, err := env.newVPC("dt-e")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	all := append(slices.Clone(singles), disruptionVPC{vpc: eslagVPC, server: sc.ESLAG[0]})
 
@@ -145,10 +199,17 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	if len(sc.ESLAG) > 1 {
 		eslagVPC2, err = env.newVPC("dt-e2")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		all = append(all, disruptionVPC{vpc: eslagVPC2, server: sc.ESLAG[1]})
 	}
+
+	return &disruptionPlan{all: all, intra: intra, lone: lone, leafOnly: leafOnly, eslag: eslagVPC, eslag2: eslagVPC2}, nil
+}
+
+// createVPCs creates the VPCs, attaches each to its server and waits for the fabric to apply them.
+func (env *disruptionEnv) createVPCs(ctx context.Context, all []disruptionVPC) error {
+	testCtx, kube := env.testCtx, env.kube
 
 	for _, d := range all {
 		if _, err := CreateOrUpdateVpc(ctx, kube, d.vpc); err != nil {
@@ -167,6 +228,13 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	if err := WaitReady(ctx, kube, testCtx.wrOpts); err != nil {
 		return fmt.Errorf("waiting for ready after creating VPCs: %w", err)
 	}
+
+	return nil
+}
+
+// configureServers sets up the networking of each server for its VPC.
+func (env *disruptionEnv) configureServers(ctx context.Context, all []disruptionVPC) error {
+	testCtx := env.testCtx
 
 	g := &errgroup.Group{}
 	for _, d := range all {
@@ -195,6 +263,14 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		return fmt.Errorf("configuring server networking: %w", err)
 	}
 
+	return nil
+}
+
+// peerVPCs peers the VPCs of the plan, and the ESLAG VPC with the external.
+func (env *disruptionEnv) peerVPCs(ctx context.Context, plan *disruptionPlan) error {
+	testCtx, kube := env.testCtx, env.kube
+	intra, lone, eslagVPC, eslagVPC2 := plan.intra, plan.lone, plan.eslag, plan.eslag2
+
 	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	extPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
 	for _, pair := range intra {
@@ -211,12 +287,12 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		return fmt.Errorf("setting up peerings: %w", err)
 	}
 
-	matrix, err := BuildConnectivityMatrixFromCluster(ctx, kube, func(server string) (*sshutil.Config, error) {
-		return testCtx.getSSH(ctx, server)
-	})
-	if err != nil {
-		return fmt.Errorf("building connectivity matrix: %w", err)
-	}
+	return nil
+}
+
+// addFillers adds VPCs until each leaf of the pair holds disruptionMinEntries entries alone.
+func (env *disruptionEnv) addFillers(ctx context.Context, leafOnly map[string]int) error {
+	testCtx, kube, sc := env.testCtx, env.kube, env.sc
 
 	// entries on a single leaf: more VPCs attached to the connection of a server on that leaf
 	// alone. No server is configured for them, the controller allocates for them all the same.
@@ -272,15 +348,6 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		}
 	}
 	slog.Info("Entries held by a single leaf of the pair", "entries", entries)
-
-	probes, err := env.buildProbes(ctx, matrix, []disruptionVPC{{vpc: eslagVPC, server: sc.ESLAG[0]}})
-	if err != nil {
-		return err
-	}
-	if len(probes) == 0 {
-		return fmt.Errorf("no traffic pair expected to be reachable, nothing to watch") //nolint:err113
-	}
-	env.tw = newTrafficWatch(probes)
 
 	return nil
 }
