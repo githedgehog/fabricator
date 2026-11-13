@@ -1094,8 +1094,20 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		if err := orasUploadAndInstall(ctx, d, ssh, ftp, "toolbox", flatcar.ToolboxVersion(c.Fab), toolboxPath, flatcar.ToolboxArchiveRef, flatcar.ToolboxArchiveBin); err != nil {
 			return fmt.Errorf("installing toolbox: %w", err)
 		}
-		if _, _, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
-			return fmt.Errorf("trying toolbox: %w", err)
+		rootfsScript, err := ftp.Create("/tmp/toolbox-rootfs.sh")
+		if err != nil {
+			return fmt.Errorf("creating toolbox rootfs script: %w", err)
+		}
+		_, err = rootfsScript.Write([]byte(flatcar.ToolboxRootfsScript))
+		_ = rootfsScript.Close()
+		if err != nil {
+			return fmt.Errorf("writing toolbox rootfs script: %w", err)
+		}
+		if out, stderr, err := ssh.Run(ctx, "sudo bash /tmp/toolbox-rootfs.sh; rc=$?; rm -f /tmp/toolbox-rootfs.sh; exit $rc"); err != nil {
+			return fmt.Errorf("preparing toolbox rootfs: %w (stdout: %s, stderr: %s)", err, out, stderr)
+		}
+		if sshOut, sshErr, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
+			return fmt.Errorf("trying 'toolbox hostname': %w (stdout: %s, stderr: %s)", err, sshOut, sshErr)
 		}
 
 		hostBGPPath := filepath.Join(flatcar.Home, "hostbgp")
