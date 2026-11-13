@@ -6,6 +6,7 @@ package hhfab
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -57,6 +58,8 @@ func pickDisruptionScenario(switches []wiringapi.Switch, conns []wiringapi.Conne
 	for _, c := range sorted {
 		_, servers, _, _, err := c.Spec.Endpoints()
 		if err != nil {
+			slog.Warn("Skipping connection with unreadable endpoints", "conn", c.Name, "err", err)
+
 			continue
 		}
 		for _, s := range servers {

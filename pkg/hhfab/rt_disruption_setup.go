@@ -50,6 +50,8 @@ func discoverDisruptionScenario(ctx context.Context, kube kclient.Client) (*disr
 		}
 		sws, _, _, _, err := c.Spec.Endpoints()
 		if err != nil {
+			slog.Warn("Skipping connection with unreadable endpoints", "conn", c.Name, "err", err)
+
 			continue
 		}
 		for _, sw := range sws {
@@ -432,8 +434,8 @@ func (env *disruptionEnv) cleanup(ctx context.Context) error {
 
 			continue
 		}
-		if _, _, err := ssh.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
-			errs = append(errs, fmt.Errorf("hhnet cleanup on %s: %w", name, err))
+		if _, stderr, err := ssh.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+			errs = append(errs, fmt.Errorf("hhnet cleanup on %s: %w: %s", name, err, stderr))
 		}
 	}
 
