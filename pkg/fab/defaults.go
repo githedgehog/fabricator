@@ -48,7 +48,7 @@ var DefaultConfig = fabapi.FabConfig{
 		ESLAGESIPrefix:     "00:f2:00:00:",      // TODO make sure it's really used
 		DefaultSwitchUsers: map[string]fabapi.SwitchUser{},
 		TH5WorkaroundVLANs: []fmeta.VLANRange{
-			{From: 3900, To: 3999},
+			{From: 3900, To: 3966}, // the 3967-4094 range is reserved in BCM SONiC
 		},
 	},
 }
