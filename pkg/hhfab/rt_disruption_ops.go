@@ -187,12 +187,11 @@ func (env *disruptionEnv) finish(rep *roundReport, err error) error {
 	return fmt.Errorf("%s (evidence in %s)", rep.summary(), env.evidenceDir) //nolint:err113
 }
 
-// summarizeSpecDiffs counts the changes per Agent: "leaf-01 3, leaf-02 3". Each change reads "<agent>: <path>: <old> -> <new>".
-func summarizeSpecDiffs(diffs []string) string {
+// summarizeSpecDiffs counts the changes per Agent: "leaf-01 3, leaf-02 3".
+func summarizeSpecDiffs(diffs []specDiff) string {
 	counts := map[string]int{}
 	for _, d := range diffs {
-		agent, _, _ := strings.Cut(d, ": ")
-		counts[agent]++
+		counts[d.agent]++
 	}
 	parts := make([]string, 0, len(counts))
 	for _, agent := range slices.Sorted(maps.Keys(counts)) {
@@ -239,9 +238,9 @@ func (env *disruptionEnv) runUnrelated(ctx context.Context, rep *roundReport, op
 	if diffs := diffAgentSpecs(before, after, ignoreBenchTouch); len(diffs) > 0 {
 		rep.specs = append(rep.specs, fmt.Sprintf("%s: %s", op, summarizeSpecDiffs(diffs)))
 		if rep.first == "" {
-			rep.first = fmt.Sprintf("%s: %s", op, strings.Join(diffs, ", "))
+			rep.first = fmt.Sprintf("%s: %s", op, formatSpecDiffs(diffs, ", "))
 		}
-		files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
+		files["spec-diff.txt"] = formatSpecDiffs(diffs, "\n") + "\n"
 	}
 	if len(lost) > 0 {
 		rep.losses = append(rep.losses, fmt.Sprintf("%s: %d pings lost: %s", op, len(lost), summarizeLoss(lost)))
@@ -533,8 +532,8 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 		return ignoreBenchTouch(agent, path) || (agent == target && path == cycle.specField)
 	}
 	if diffs := diffAgentSpecs(before, after, ignore); len(diffs) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", strings.Join(diffs, ", ")))
-		res.files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
+		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", formatSpecDiffs(diffs, ", ")))
+		res.files["spec-diff.txt"] = formatSpecDiffs(diffs, "\n") + "\n"
 	}
 	pending, notes := agentsNotApplied(agents, agentGenerations(beforeAgents))
 	env.noteOnce(notes)

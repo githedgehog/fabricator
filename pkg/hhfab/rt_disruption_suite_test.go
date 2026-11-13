@@ -205,10 +205,10 @@ func TestRoundReportCleanRunHasNoFinding(t *testing.T) {
 }
 
 func TestSummarizeSpecDiffsCountsPerAgent(t *testing.T) {
-	got := summarizeSpecDiffs([]string{
-		"leaf-02: spec.catalog.irbVLANs.dt-f2-1: 3003 -> 3004",
-		"leaf-01: spec.catalog.irbVLANs.dt-1a: 3004 -> 3003",
-		"leaf-02: spec.catalog.irbVLANs.dt-f2-2: 3004 -> 3005",
+	got := summarizeSpecDiffs([]specDiff{
+		{kind: specChanged, agent: "leaf-02", path: "catalog.irbVLANs.dt-f2-1", old: "3003", new: "3004"},
+		{kind: specChanged, agent: "leaf-01", path: "catalog.irbVLANs.dt-1a", old: "3004", new: "3003"},
+		{kind: specChanged, agent: "leaf-02", path: "catalog.irbVLANs.dt-f2-2", old: "3004", new: "3005"},
 	})
 
 	require.Equal(t, "leaf-01 1, leaf-02 2", got)

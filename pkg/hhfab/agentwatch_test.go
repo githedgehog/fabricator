@@ -27,10 +27,12 @@ func TestDiffAgentSpecs(t *testing.T) {
 		"leaf-02": {"benchTouch": 2, "role": "server-leaf"},
 	}
 
-	require.Equal(t, []string{
-		"leaf-01: spec.catalog.irbVLANs.ext@x: 3005 -> 3004",
-		"leaf-01: spec.catalog.irbVLANs.vpc-03: 3004 -> 3005",
-	}, diffAgentSpecs(before, after, ignoreBenchTouch))
+	diffs := diffAgentSpecs(before, after, ignoreBenchTouch)
+	require.Equal(t, []specDiff{
+		{kind: specChanged, agent: "leaf-01", path: "catalog.irbVLANs.ext@x", old: "3005", new: "3004"},
+		{kind: specChanged, agent: "leaf-01", path: "catalog.irbVLANs.vpc-03", old: "3004", new: "3005"},
+	}, diffs)
+	require.Equal(t, "leaf-01: spec.catalog.irbVLANs.ext@x: 3005 -> 3004\nleaf-01: spec.catalog.irbVLANs.vpc-03: 3004 -> 3005", formatSpecDiffs(diffs, "\n"))
 
 	require.Empty(t, diffAgentSpecs(before, before, nil))
 
@@ -40,7 +42,8 @@ func TestDiffAgentSpecs(t *testing.T) {
 		return ignoreBenchTouch(agent, path) || (agent == "leaf-02" && path == "reinstall")
 	})
 	require.Len(t, got, 2)
-	require.Equal(t, []string{"leaf-02: agent disappeared"}, diffAgentSpecs(before, agentSpecs{"leaf-01": before["leaf-01"]}, nil))
+	require.Equal(t, "leaf-02: agent disappeared", formatSpecDiffs(diffAgentSpecs(before, agentSpecs{"leaf-01": before["leaf-01"]}, nil), ", "))
+	require.Equal(t, "leaf-02: agent appeared", formatSpecDiffs(diffAgentSpecs(agentSpecs{"leaf-01": before["leaf-01"]}, before, nil), ", "))
 }
 
 func TestAgentsNotApplied(t *testing.T) {

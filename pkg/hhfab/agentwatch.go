@@ -59,9 +59,46 @@ func ignoreBenchTouch(_, path string) bool {
 	return path == "benchTouch"
 }
 
-// diffAgentSpecs lists the differences between two snapshots, one line per changed leaf, sorted.
-func diffAgentSpecs(before, after agentSpecs, ignore specIgnore) []string {
-	var diffs []string
+// specDiffKind says whether a spec value changed, or a whole Agent was added or removed.
+type specDiffKind string
+
+const (
+	specChanged specDiffKind = "changed"
+	specAdded   specDiffKind = "added"
+	specRemoved specDiffKind = "removed"
+)
+
+// specDiff is one difference between two snapshots. Only a changed one has a path and values.
+type specDiff struct {
+	kind                  specDiffKind
+	agent, path, old, new string
+}
+
+func (d specDiff) String() string {
+	switch d.kind {
+	case specAdded:
+		return d.agent + ": agent appeared"
+	case specRemoved:
+		return d.agent + ": agent disappeared"
+	case specChanged:
+		return fmt.Sprintf("%s: spec.%s: %s -> %s", d.agent, d.path, d.old, d.new)
+	}
+
+	return fmt.Sprintf("%s: %s", d.agent, d.kind)
+}
+
+func formatSpecDiffs(diffs []specDiff, sep string) string {
+	lines := make([]string, 0, len(diffs))
+	for _, d := range diffs {
+		lines = append(lines, d.String())
+	}
+
+	return strings.Join(lines, sep)
+}
+
+// diffAgentSpecs lists the differences between two snapshots, one per changed leaf value, sorted.
+func diffAgentSpecs(before, after agentSpecs, ignore specIgnore) []specDiff {
+	var diffs []specDiff
 	names := map[string]bool{}
 	for n := range before {
 		names[n] = true
@@ -75,9 +112,9 @@ func diffAgentSpecs(before, after agentSpecs, ignore specIgnore) []string {
 		a, aok := after[name]
 		switch {
 		case !bok:
-			diffs = append(diffs, fmt.Sprintf("%s: agent appeared", name))
+			diffs = append(diffs, specDiff{kind: specAdded, agent: name})
 		case !aok:
-			diffs = append(diffs, fmt.Sprintf("%s: agent disappeared", name))
+			diffs = append(diffs, specDiff{kind: specRemoved, agent: name})
 		default:
 			diffValues(name, "", b, a, ignore, &diffs)
 		}
@@ -86,7 +123,7 @@ func diffAgentSpecs(before, after agentSpecs, ignore specIgnore) []string {
 	return diffs
 }
 
-func diffValues(agent, path string, before, after any, ignore specIgnore, out *[]string) {
+func diffValues(agent, path string, before, after any, ignore specIgnore, out *[]specDiff) {
 	if path != "" && ignore != nil && ignore(agent, path) {
 		return
 	}
@@ -115,7 +152,7 @@ func diffValues(agent, path string, before, after any, ignore specIgnore, out *[
 	if reflect.DeepEqual(before, after) {
 		return
 	}
-	*out = append(*out, fmt.Sprintf("%s: spec.%s: %s -> %s", agent, path, renderSpecValue(before), renderSpecValue(after)))
+	*out = append(*out, specDiff{kind: specChanged, agent: agent, path: path, old: renderSpecValue(before), new: renderSpecValue(after)})
 }
 
 func renderSpecValue(v any) string {
