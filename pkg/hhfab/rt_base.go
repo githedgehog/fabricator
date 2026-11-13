@@ -596,7 +596,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		// - if skip is true, we mark the test as skipped, use the error as the skip message, and nullify it
 		// - if err is not nil, we mark the test as failed, use the error message as the failure message, and pause if configured to do so
 		// - we then apply reverts in reverse order, and if any of them fails, we mark the test as failed, and pause (potentially a second time) if configured to do so.
-		//   we also stop applying reverts at the first failure
+		//   a failed revert doesn't stop the ones after it: all of them run, and each failure is added to the message
 		// - finally, if we get to the end without any errors, we log the test as passed
 		if skip {
 			var skipMsg string
