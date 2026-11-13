@@ -516,9 +516,14 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	suiteStart := time.Now()
 	ranSomeTests := false
 	defer runSuiteTeardown(ctx, testCtx, ts)
-	// a test an early return keeps from running is reported as skipped, not as passed
+	// a test an early return keeps from running is reported as skipped, not as passed. After a
+	// failed initial setup they are left alone: selectAndRunSuite fails them all.
 	reached := 0
+	initialSetupFailed := false
 	defer func() {
+		if initialSetupFailed {
+			return
+		}
 		for j := reached; j < len(ts.TestCases); j++ {
 			if tc := &ts.TestCases[j]; tc.Skipped == nil && tc.Failure == nil && tc.Error == nil {
 				tc.Skipped = &Skipped{Message: "not run: the suite stopped before it"}
@@ -541,6 +546,8 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
 			}
 		}
+
+		initialSetupFailed = true
 
 		return ts, fmt.Errorf("%w: %w", errInitialSetup, err)
 	}
@@ -606,8 +613,9 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
 		}
-		inconclusive := err != nil && errors.Is(err, errInconclusive)
-		if inconclusive {
+		var inconclusiveErr error
+		if errors.Is(err, errInconclusive) {
+			inconclusiveErr = err
 			ts.TestCases[i].Error = &Error{
 				Message: err.Error(),
 			}
@@ -641,11 +649,12 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				if err == nil {
 					// the test had passed, but now we must mark it as failed
 					err = revertErr
-					if inconclusive {
-						// one outcome per test: the failed revert replaces the inconclusive result
+					if inconclusiveErr != nil {
+						// one outcome per test: the failed revert replaces the inconclusive result, its message keeps it
 						ts.TestCases[i].Error = nil
 						ts.Errors--
-						inconclusive = false
+						err = fmt.Errorf("%w; before that: %s", revertErr, inconclusiveErr.Error())
+						inconclusiveErr = nil
 					}
 					ts.Failures++
 					collectDiagnostics = true
