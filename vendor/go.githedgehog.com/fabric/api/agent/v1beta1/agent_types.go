@@ -91,20 +91,25 @@ type AgentSpecConfig struct {
 	DefaultMaxPathsEBGP   uint32                    `json:"defaultMaxPathsEBGP,omitempty"`
 	// Deprecated: ignored, Domains has it. TODO: remove after 26.06 release
 	// +kubebuilder:validation:Format=int64
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
 	GatewayASN uint32 `json:"gatewayASN,omitempty"`
 	// Deprecated: ignored, Domains has it. TODO: remove after 26.06 release
 	// +kubebuilder:validation:Format=int64
-	SpineASN            uint32            `json:"spineASN,omitempty"`
-	ProtocolSubnet      string            `json:"protocolSubnet,omitempty"`
-	VTEPSubnet          string            `json:"vtepSubnet,omitempty"`
-	FabricSubnet        string            `json:"fabricSubnet,omitempty"`
-	ProxyExternalSubnet string            `json:"proxyExternalSubnet,omitempty"`
-	DisableBFD          bool              `json:"disableBFD,omitempty"`
-	GatewayBFD          bool              `json:"gatewayBFD,omitempty"`
-	Alloy               alloy.Config      `json:"alloy,omitempty"`
-	GatewayCommunities  map[string]string `json:"gatewayCommunities,omitempty"`
-	HeartbeatInterval   uint32            `json:"heartbeatInterval,omitempty"` // seconds, default and minimum 15
-	EnforceInterval     uint32            `json:"enforceInterval,omitempty"`   // seconds, default and minimum 120
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
+	SpineASN            uint32 `json:"spineASN,omitempty"`
+	ProtocolSubnet      string `json:"protocolSubnet,omitempty"`
+	VTEPSubnet          string `json:"vtepSubnet,omitempty"`
+	FabricSubnet        string `json:"fabricSubnet,omitempty"`
+	ProxyExternalSubnet string `json:"proxyExternalSubnet,omitempty"`
+	DisableBFD          bool   `json:"disableBFD,omitempty"`
+	// Deprecated: ignored, DisableBFD covers it. TODO: remove after 26.07 release, as 26.06 agents still have it saved
+	GatewayBFD         bool              `json:"gatewayBFD,omitempty"`
+	Alloy              alloy.Config      `json:"alloy,omitempty"`
+	GatewayCommunities map[string]string `json:"gatewayCommunities,omitempty"`
+	HeartbeatInterval  uint32            `json:"heartbeatInterval,omitempty"` // seconds, default and minimum 15
+	EnforceInterval    uint32            `json:"enforceInterval,omitempty"`   // seconds, default and minimum 120
 	// Domains holds every domain of the switch's fabric
 	Domains map[string]wiringapi.FabricDomainSpec `json:"domains,omitempty"`
 }
@@ -386,9 +391,13 @@ type SwitchStateBGPNeighbor struct {
 	LastResetTime          kmetav1.Time `json:"lastReset,omitempty"`
 	LastWrite              kmetav1.Time `json:"lastWrite,omitempty"`
 	// +kubebuilder:validation:Format=int64
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
 	LocalAS  uint32      `json:"localAS,omitempty"`
 	Messages BGPMessages `json:"msgs,omitempty"`
 	// +kubebuilder:validation:Format=int64
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
 	PeerAS          uint32                                    `json:"peerAS,omitempty"`
 	PeerGroup       string                                    `json:"peerGroup,omitempty"`
 	PeerPort        uint16                                    `json:"peerPort,omitempty"`

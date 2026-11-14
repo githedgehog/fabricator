@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"net"
 	"net/netip"
 	"slices"
 	"strings"
@@ -96,9 +95,9 @@ type ConnBundled struct {
 	Fallback bool `json:"fallback,omitempty"`
 }
 
-// ConnESLAG defines the ESLAG connection (port channel, single server to 2-4 switches with multiple links)
+// ConnESLAG defines the ESLAG connection (port channel, single server to 1-4 switches with one or more links)
 type ConnESLAG struct {
-	// +kubebuilder:validation:MinItems=2
+	// +kubebuilder:validation:MinItems=1
 	// Links is the list of server-to-switch links
 	Links []ServerToSwitchLink `json:"links,omitempty"`
 	// ServerFacingConnectionConfig defines any server-facing connection (unbundled, bundled, eslag, etc.) configuration
@@ -224,7 +223,7 @@ type ConnectionSpec struct {
 	Unbundled *ConnUnbundled `json:"unbundled,omitempty"`
 	// Bundled defines the bundled connection (port channel, single server to a single switch with multiple links)
 	Bundled *ConnBundled `json:"bundled,omitempty"`
-	// ESLAG defines the ESLAG connection (port channel, single server to 2-4 switches with multiple links)
+	// ESLAG defines the ESLAG connection (port channel, single server to 1-4 switches with one or more links)
 	ESLAG *ConnESLAG `json:"eslag,omitempty"`
 	// Fabric defines the fabric connection (single spine to a single leaf with at least one link)
 	Fabric *ConnFabric `json:"fabric,omitempty"`
@@ -765,18 +764,24 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 	if conn.Spec.StaticExternal != nil {
 		se := conn.Spec.StaticExternal.Link.Switch
 
-		_, ipNet, err := net.ParseCIDR(se.IP)
+		ipPrefix, err := netip.ParsePrefix(se.IP)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse cidr %s", se.IP)
 		}
-
-		nextHop := net.ParseIP(se.NextHop)
-		if nextHop == nil {
-			return nil, errors.Errorf("failed to parse next hop %s", se.NextHop)
+		if !ipPrefix.Addr().Is4() {
+			return nil, errors.Errorf("ip %s is not IPv4", se.IP)
 		}
 
-		if !ipNet.Contains(nextHop) {
-			return nil, errors.Errorf("next hop %s is not in cidr %s", nextHop, ipNet)
+		nextHop, err := netip.ParseAddr(se.NextHop)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse next hop %s", se.NextHop)
+		}
+		if !nextHop.Is4() {
+			return nil, errors.Errorf("next hop %s is not IPv4", se.NextHop)
+		}
+
+		if !ipPrefix.Contains(nextHop) {
+			return nil, errors.Errorf("next hop %s is not in cidr %s", nextHop, ipPrefix.Masked())
 		}
 
 		subnets := []netip.Prefix{}
@@ -784,6 +789,9 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 			prefix, err := netip.ParsePrefix(subnet)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse cidr %s", subnet)
+			}
+			if !prefix.Addr().Is4() {
+				return nil, errors.Errorf("subnet %s is not IPv4", subnet)
 			}
 
 			if subnet == "0.0.0.0/0" {
