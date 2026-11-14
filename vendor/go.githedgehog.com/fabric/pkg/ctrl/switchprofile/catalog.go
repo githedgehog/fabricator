@@ -44,6 +44,7 @@ var defaultSwitchProfiles = []wiringapi.SwitchProfile{
 	EdgecoreEPS202,
 	EdgecoreEPS203,
 	SupermicroSSEC4632SB,
+	UfiSpaceS9300,
 	VS,
 }
 
@@ -57,6 +58,13 @@ var sonicCLSPlusSwitchProfiles = []wiringapi.SwitchProfile{
 }
 
 var cumulusSwitchProfiles = []wiringapi.SwitchProfile{
+	CumulusNvidiaSN2201,
+	CumulusNvidiaSN2700,
+	CumulusNvidiaSN3700c,
+	CumulusNvidiaSN4600,
+	CumulusNvidiaSN4700,
+	CumulusNvidiaSN5600,
+	CumulusNvidiaSN5610,
 	CumulusVX,
 }
 

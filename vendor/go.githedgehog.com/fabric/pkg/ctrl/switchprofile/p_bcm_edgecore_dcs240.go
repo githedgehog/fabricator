@@ -13,7 +13,7 @@ var EdgecoreDCS240 = wiringapi.SwitchProfile{
 	Spec: wiringapi.SwitchProfileSpec{
 		DisplayName:   "Edgecore DCS240",
 		OtherNames:    []string{"Edgecore AS9726"},
-		SwitchSilicon: SiliconBroadcomTD4,
+		SwitchSilicon: SiliconBroadcomTD4_X11,
 		Features: wiringapi.SwitchProfileFeatures{
 			Subinterfaces: true,
 			ACLs:          true,
@@ -24,7 +24,7 @@ var EdgecoreDCS240 = wiringapi.SwitchProfile{
 			ECMPRoCEQPN:   true,
 			PortLocator:   true,
 		},
-		Notes:    "Upper 16 ports supply maximum of 24W, lower 16 ports supply maximum of 14W",
+		Notes:    "Upper 16 ports supply maximum of 24W, lower 16 ports supply maximum of 14W.",
 		NOSType:  meta.NOSTypeSONiCBCMBase,
 		Platform: "x86_64-accton_as9726_32d-r0",
 		Config:   wiringapi.SwitchProfileConfig{},
