@@ -28,7 +28,7 @@ func exposeNotFixture(ips []gwapi.PeeringEntryIP) (*gwapi.PeeringEntry, gwapi.VP
 
 // Exclusions land in expose.IPs as standalone Not entries, after the includes.
 func TestBuildExposesAppendsNotEntries(t *testing.T) {
-	exposes, err := buildExposes([]string{"10.0.1.0/24"}, nil, []string{"10.0.1.5/32"}, NATModeStatic, nil)
+	exposes, err := buildExposes([]string{"10.0.1.0/24"}, nil, []string{"10.0.1.5/32"}, NATModeStatic, nil, 0)
 	if err != nil {
 		t.Fatalf("buildExposes: %v", err)
 	}
