@@ -55,7 +55,7 @@ const (
 	PortLocatorAllPorts = "*"
 )
 
-// +kubebuilder:validation:Enum=spine;server-leaf;border-leaf;mixed-leaf;virtual-edge
+// +kubebuilder:validation:Enum=spine;server-leaf;border-leaf;mixed-leaf
 // SwitchRole is the role of the switch, could be spine, server-leaf or border-leaf or mixed-leaf
 type SwitchRole string
 
@@ -91,6 +91,13 @@ const (
 	PortFECModeAuto     PortFECMode = "auto"
 	PortFECModeDisabled PortFECMode = "disabled"
 )
+
+var PortFECModes = []PortFECMode{
+	PortFECModeRS,
+	PortFECModeFC,
+	PortFECModeAuto,
+	PortFECModeDisabled,
+}
 
 // SwitchRedundancy is the switch redundancy configuration which includes name of the redundancy group switch belongs
 // to and its type, used for ESLAG connections. It defines how redundancy will be configured and handled
@@ -168,6 +175,8 @@ type SwitchSpec struct {
 	VLANNamespaces []string `json:"vlanNamespaces,omitempty"`
 	// ASN is the ASN of the switch
 	// +kubebuilder:validation:Format=int64
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=4294967295
 	ASN uint32 `json:"asn,omitempty"`
 	// IP is the IP of the switch that could be used to access it from other switches and control nodes in the Fabric
 	IP string `json:"ip,omitempty"`
@@ -625,6 +634,10 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 		return nil, err
 	}
 
+	if !slices.Contains(SwitchRoles, sw.Spec.Role) {
+		return nil, errors.Errorf("invalid role %q, must be one of %v", sw.Spec.Role, SwitchRoles)
+	}
+
 	if len(sw.Spec.VLANNamespaces) == 0 {
 		return nil, errors.Errorf("at least one VLAN namespace required")
 	}
@@ -688,6 +701,21 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 		}
 		if sw.Spec.LinkFlapErrDisable.RecoveryInterval == nil {
 			return nil, errors.Errorf("link-flap error-disable is enabled but no recovery interval provided")
+		}
+		if threshold := *sw.Spec.LinkFlapErrDisable.FlapThreshold; threshold < 1 || threshold > 50 {
+			return nil, errors.Errorf("link-flap error-disable flap threshold %d is not in 1-50", threshold)
+		}
+		if interval := *sw.Spec.LinkFlapErrDisable.SamplingInterval; interval < 1 || interval > 65535 {
+			return nil, errors.Errorf("link-flap error-disable sampling interval %d is not in 1-65535", interval)
+		}
+		if interval := *sw.Spec.LinkFlapErrDisable.RecoveryInterval; interval > 65534 {
+			return nil, errors.Errorf("link-flap error-disable recovery interval %d is above 65534", interval)
+		}
+	}
+
+	for port, fec := range sw.Spec.PortFECs {
+		if !slices.Contains(PortFECModes, fec) {
+			return nil, errors.Errorf("invalid FEC mode %q for port %s, must be one of %v", fec, port, PortFECModes)
 		}
 	}
 
@@ -842,6 +870,52 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 			}
 		}
 
+		disabledPorts, err := sp.Spec.GetDisabledAPIPorts(&sw.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("getting disabled ports: %w", err)
+		}
+
+		for name := range sw.Spec.PortBreakouts {
+			if by, ok := disabledPorts[name]; ok {
+				return nil, fmt.Errorf("port %s is disabled by the breakout of port %s and can't have a breakout", name, by) //nolint:err113
+			}
+		}
+
+		for name := range sw.Spec.PortSpeeds {
+			if by, ok := disabledPorts[name]; ok {
+				return nil, fmt.Errorf("port %s is disabled by the breakout of port %s and can't have a speed", name, by) //nolint:err113
+			}
+		}
+
+		// breakouts could remove or disable ports used by the existing connections
+		api2nos, err := sp.Spec.GetAPI2NOSPortsFor(&sw.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("getting NOS port mapping: %w", err)
+		}
+
+		conns := &ConnectionList{}
+		if err := kube.List(ctx, conns, kclient.InNamespace(sw.Namespace), MatchingLabelsForListLabelSwitch(sw.Name)); err != nil {
+			return nil, fmt.Errorf("listing connections: %w", err)
+		}
+
+		for _, conn := range conns.Items {
+			_, _, ports, _, err := conn.Spec.Endpoints()
+			if err != nil {
+				return nil, fmt.Errorf("getting connection %s endpoints: %w", conn.Name, err)
+			}
+
+			for _, port := range ports {
+				portName, ok := strings.CutPrefix(port, sw.Name+"/")
+				if !ok {
+					continue
+				}
+
+				if _, ok := api2nos[portName]; !ok {
+					return nil, fmt.Errorf("port %s used by connection %s isn't available with the switch port breakouts", portName, conn.Name) //nolint:err113
+				}
+			}
+		}
+
 		autoNegAllowed, _, err := sp.Spec.GetAutoNegsDefaultsFor(&sw.Spec)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get auto negotiation defaults")
@@ -909,6 +983,10 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 				continue
 			}
 
+			if _, ok := disabledPorts[name]; ok {
+				continue
+			}
+
 			ports := uint16(1)
 			if port.Group == "" {
 				if port.Profile == "" {
@@ -935,7 +1013,9 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 				}
 			}
 
-			totalPorts += ports
+			if !port.Bonus {
+				totalPorts += ports
+			}
 			if port.Pipeline != "" {
 				pipelinePorts[port.Pipeline] += ports
 				pipelinePortNames[port.Pipeline] = append(pipelinePortNames[port.Pipeline], name)
