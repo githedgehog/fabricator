@@ -25,7 +25,8 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-const gatewayDataplaneContainer = "dataplane"
+// GatewayDataplaneContainer is the name of the dataplane container of the gateway pods
+const GatewayDataplaneContainer = "dataplane"
 
 func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error {
 	insights := map[string]map[string]ExecOutputs{}
@@ -129,7 +130,7 @@ func gatewayExecSkipReason(pod corev1.Pod) string {
 	}
 
 	for _, status := range pod.Status.ContainerStatuses {
-		if reason := stuckContainerReason(status); status.Name == gatewayDataplaneContainer && reason != "" {
+		if reason := stuckContainerReason(status); status.Name == GatewayDataplaneContainer && reason != "" {
 			return "dataplane container " + reason
 		}
 	}
@@ -162,7 +163,7 @@ func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cf
 		slog.Debug("Executing in gateway dataplane", "pod", pod.Name, "cmd", command)
 	}
 
-	stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg, pod.Namespace, pod.Name, gatewayDataplaneContainer, command)
+	stdout, stderr, err := execPodContainerCommand(ctx, clientset, cfg, pod.Namespace, pod.Name, GatewayDataplaneContainer, command)
 	errStr := ""
 	if err != nil {
 		slog.Error("Failed to exec in gateway dataplane", "pod", pod.Name, "cmd", command, "err", err)
@@ -173,41 +174,48 @@ func execGatewayCommand(ctx context.Context, clientset *kubernetes.Clientset, cf
 }
 
 func execPodContainerCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, ns, pod, container string, command []string) (string, string, error) {
-	var outBuf, errBuf bytes.Buffer
+	var stdout, stderr string
 
 	if err := retry.OnError(longBackoff, retriable(ctx), func() error {
-		outBuf.Reset()
-		errBuf.Reset()
+		var err error
+		stdout, stderr, err = ExecPodContainerCommandOnce(ctx, clientset, cfg, ns, pod, container, command)
 
-		req := clientset.CoreV1().RESTClient().Post().
-			Resource("pods").
-			Namespace(ns).
-			Name(pod).
-			SubResource("exec").
-			VersionedParams(&corev1.PodExecOptions{
-				Container: container,
-				Command:   command,
-				Stdout:    true,
-				Stderr:    true,
-				TTY:       false,
-			}, scheme.ParameterCodec)
-
-		exec, err := remotecommand.NewWebSocketExecutor(cfg, http.MethodGet, req.URL().String())
-		if err != nil {
-			return fmt.Errorf("creating executor: %w", err)
-		}
-
-		if err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-			Stdout: &outBuf,
-			Stderr: &errBuf,
-			Tty:    false,
-		}); err != nil {
-			return fmt.Errorf("executing %q command in pod: %w", strings.Join(command, " "), err)
-		}
-
-		return nil
+		return err
 	}); err != nil {
-		return outBuf.String(), errBuf.String(), fmt.Errorf("retrying: %w", err)
+		return stdout, stderr, fmt.Errorf("retrying: %w", err)
+	}
+
+	return stdout, stderr, nil
+}
+
+// ExecPodContainerCommandOnce runs the command in the container of the pod once and returns its stdout and stderr.
+func ExecPodContainerCommandOnce(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, ns, pod, container string, command []string) (string, string, error) {
+	var outBuf, errBuf bytes.Buffer
+
+	req := clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Namespace(ns).
+		Name(pod).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: container,
+			Command:   command,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewWebSocketExecutor(cfg, http.MethodGet, req.URL().String())
+	if err != nil {
+		return "", "", fmt.Errorf("creating executor: %w", err)
+	}
+
+	if err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &outBuf,
+		Stderr: &errBuf,
+		Tty:    false,
+	}); err != nil {
+		return outBuf.String(), errBuf.String(), fmt.Errorf("executing %q command in pod: %w", strings.Join(command, " "), err)
 	}
 
 	return outBuf.String(), errBuf.String(), nil

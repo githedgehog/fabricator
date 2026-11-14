@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"testing"
 
@@ -156,23 +157,28 @@ func TestPickUnusedHostAddress(t *testing.T) {
 	for _, tc := range []struct {
 		prefix  string
 		used    []string
+		fromTop bool
 		want    string
 		wantErr bool
 	}{
 		{prefix: "10.0.1.0/24", want: "10.0.1.1"},
 		{prefix: "10.0.1.0/24", used: []string{"10.0.1.1", "10.0.1.2"}, want: "10.0.1.3"},
+		{prefix: "10.0.1.0/24", fromTop: true, want: "10.0.1.254"},
+		{prefix: "10.0.1.0/24", used: []string{"10.0.1.254", "10.0.1.253"}, fromTop: true, want: "10.0.1.252"},
+		{prefix: "10.0.1.0/30", used: []string{"10.0.1.1", "10.0.1.2"}, fromTop: true, wantErr: true},
+		{prefix: "0.0.0.0/0", fromTop: true, want: "255.255.255.254"},
 		// A /0 must stay bounded: the host count does not fit in a uint32.
 		{prefix: "0.0.0.0/0", want: "0.0.0.1"},
 		{prefix: "10.0.1.0/31", wantErr: true},
 		{prefix: "2001:db8::/64", wantErr: true},
 	} {
-		t.Run(tc.prefix, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s used %v from top %t", tc.prefix, tc.used, tc.fromTop), func(t *testing.T) {
 			used := map[netip.Addr]bool{}
 			for _, addr := range tc.used {
 				used[netip.MustParseAddr(addr)] = true
 			}
 
-			got, err := pickUnusedHostAddress(netip.MustParsePrefix(tc.prefix), used)
+			got, err := pickUnusedHostAddress(netip.MustParsePrefix(tc.prefix), used, tc.fromTop)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected an error, got %s", got)

@@ -17,6 +17,7 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/support"
 	corev1 "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -25,7 +26,6 @@ import (
 )
 
 const (
-	gwDataplaneContainer = "dataplane"
 	// the dataplane logs this line with both drivers, with the kernel one it initializes the EAL for the packet
 	// classifier only, and without PCI devices
 	gwEALLogMarker = "Initializing DPDK EAL with:"
@@ -43,7 +43,7 @@ const (
 // dataplaneDriver returns the value of the --driver argument of the dataplane container, or an empty string.
 func dataplaneDriver(pod *corev1.Pod) string {
 	for _, container := range pod.Spec.Containers {
-		if container.Name != gwDataplaneContainer {
+		if container.Name != support.GatewayDataplaneContainer {
 			continue
 		}
 
@@ -152,7 +152,7 @@ func checkGatewayLogs(ctx context.Context, clientset *kubernetes.Clientset, gw *
 
 		deadline := time.Now().Add(gwEALLogTimeout)
 		for {
-			stream, err := clientset.CoreV1().Pods(comp.FabNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: gwDataplaneContainer}).Stream(ctx)
+			stream, err := clientset.CoreV1().Pods(comp.FabNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: support.GatewayDataplaneContainer}).Stream(ctx)
 			if err != nil {
 				return fmt.Errorf("getting dataplane logs of pod %s: %w", pod.Name, err)
 			}

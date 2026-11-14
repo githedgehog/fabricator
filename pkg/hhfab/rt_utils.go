@@ -936,8 +936,9 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 }
 
 // pickUnusedHostAddress returns the first host address inside prefix that is not present
-// in used, skipping the network and broadcast addresses. IPv4 only.
-func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip.Addr, error) {
+// in used, skipping the network and broadcast addresses, from the bottom of the prefix or
+// from its top. IPv4 only.
+func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool, fromTop bool) (netip.Addr, error) {
 	if !prefix.Addr().Is4() {
 		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:err113
 	}
@@ -952,9 +953,13 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 	// the count would wrap to 0 and the bound would underflow to the whole space.
 	lastOffset := uint64(1)<<(32-bits) - 2
 
-	for offset := uint32(1); uint64(offset) <= lastOffset; offset++ {
+	for i := uint64(1); i <= lastOffset; i++ {
+		offset := i
+		if fromTop {
+			offset = lastOffset + 1 - i
+		}
 		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], baseVal+offset)
+		binary.BigEndian.PutUint32(b[:], baseVal+uint32(offset))
 		candidate := netip.AddrFrom4(b)
 		if !used[candidate] {
 			return candidate, nil
