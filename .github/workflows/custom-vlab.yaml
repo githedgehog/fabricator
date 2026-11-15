@@ -1,5 +1,5 @@
 name: Custom VLAB
-run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}"
+run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}${{ inputs.natscaletest && '-nst' || '' }}"
 
 on:
   workflow_dispatch:
@@ -60,6 +60,11 @@ on:
         type: boolean
         required: false
         default: false
+      natscaletest:
+        description: "Run only the NAT scale suite (gateway NAT port exhaustion and release), not the release tests"
+        type: boolean
+        required: false
+        default: false
       pause_on_failure:
         description: "Pause on failure (enables debug)"
         type: boolean
@@ -76,7 +81,7 @@ permissions:
 
 jobs:
   vlab:
-    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}"
+    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}${{ inputs.natscaletest && '-nst' || '' }}"
     uses: ./.github/workflows/run-vlab.yaml
     with:
       fabricatorref: ${{ github.ref }}
@@ -92,12 +97,13 @@ jobs:
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
       disruptiontest: ${{ inputs.disruptiontest }}
+      natscaletest: ${{ inputs.natscaletest }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
       collect_show_tech: ${{ inputs.collect_show_tech }}
 
   publish-test-results:
-    if: ${{ (inputs.releasetest || inputs.disruptiontest) && !cancelled() }}
+    if: ${{ (inputs.releasetest || inputs.disruptiontest || inputs.natscaletest) && !cancelled() }}
     runs-on: lab
     needs:
       - vlab
