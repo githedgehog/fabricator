@@ -4413,6 +4413,8 @@ type ReleaseTestOpts struct {
 	OnReadyTest    bool
 	// DisruptionTest runs only the disruption suite: common changes under background traffic
 	DisruptionTest bool
+	// NATScaleTest runs only the NAT scale suite: fill and release of the masquerade port pool
+	NATScaleTest bool
 }
 
 func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpts) error {

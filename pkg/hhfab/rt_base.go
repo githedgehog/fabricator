@@ -810,6 +810,11 @@ func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts) error {
 	return nil
 }
 
+var (
+	errSuitesOneAtATime = errors.New("the on-ready, disruption and NAT scale suites are selected one at a time")
+	errSomeTestsFailed  = errors.New("some tests failed")
+)
+
 func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOpts ReleaseTestOpts) error {
 	testStart := time.Now()
 
@@ -821,9 +826,16 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
 	disruptionSuite, disruptionCleanup := makeDisruptionTestSuite()
+	natScaleSuite := makeNATScaleSuite()
 
-	if rtOpts.OnReadyTest && rtOpts.DisruptionTest {
-		return fmt.Errorf("the on-ready and the disruption suites are selected one at a time") //nolint:err113
+	selected := 0
+	for _, on := range []bool{rtOpts.OnReadyTest, rtOpts.DisruptionTest, rtOpts.NATScaleTest} {
+		if on {
+			selected++
+		}
+	}
+	if selected > 1 {
+		return fmt.Errorf("%w: %d selected", errSuitesOneAtATime, selected)
 	}
 
 	switch {
@@ -831,6 +843,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		suites = []*JUnitTestSuite{ortSuite}
 	case rtOpts.DisruptionTest:
 		suites = []*JUnitTestSuite{disruptionSuite}
+	case rtOpts.NATScaleTest:
+		suites = []*JUnitTestSuite{natScaleSuite}
 	default:
 		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite}
 	}
@@ -1079,6 +1093,30 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		slog.Info("Disruption Test Suite completed", "duration", time.Since(testStart).String())
 		if disruptionResults.Failures > 0 {
 			return fmt.Errorf("some tests failed: disruption=%d", disruptionResults.Failures) //nolint:err113
+		}
+
+		return nil
+	}
+
+	if rtOpts.NATScaleTest {
+		// the VPCs of the gateway NAT and ACL suite
+		testCtx.noSetup = false
+		testCtx.setupOpts.ServersPerSubnet = 1
+		testCtx.setupOpts.SubnetsPerVPC = 1
+
+		natScaleResults, runErr := selectAndRunSuite(ctx, testCtx, natScaleSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		// the report is written even when fail-fast ends the run: the suite may be expected to fail
+		// and its evidence is the report
+		results = append(results, *natScaleResults)
+		if err := recapAndReport(results, rtOpts); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		if runErr != nil && rtOpts.FailFast {
+			return fmt.Errorf("running NAT scale test suite: %w", runErr)
+		}
+		slog.Info("NAT Scale Test Suite completed", "duration", time.Since(testStart).String())
+		if natScaleResults.Failures > 0 {
+			return fmt.Errorf("%w: NAT scale=%d", errSomeTestsFailed, natScaleResults.Failures)
 		}
 
 		return nil

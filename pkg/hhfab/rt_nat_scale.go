@@ -805,6 +805,16 @@ func (r *natScaleRun) checkAfterRelease(ctx context.Context, matrix *Connectivit
 	return r.checkGateways(ctx)
 }
 
+func makeNATScaleSuite() *JUnitTestSuite {
+	suite := &JUnitTestSuite{Name: "NAT Scale Suite"}
+	suite.TestCases = []JUnitTestCase{
+		{Name: "Gateway NAT Port Exhaustion", F: gatewayNATPortExhaustionTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
+	}
+	suite.Tests = len(suite.TestCases)
+
+	return suite
+}
+
 // gatewayNATPortExhaustionTest fills the TCP port pool of a masquerade peering on one public IP with short connections
 // from one source IP after another, waits for the ports to be released and checks that a source IP never used before
 // and the usual traffic get through the gateway again. Only a fill faster than the release fills the pool, which the
