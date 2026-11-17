@@ -6,7 +6,6 @@ package hhfab
 import (
 	"cmp"
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -1448,7 +1447,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
 
-				return ensureIperf3Daemon(ctx, sshCfg, server.Name)
+				return nil
 			}(); err != nil {
 				return fmt.Errorf("configuring server %q: %w", server.Name, err)
 			}
@@ -3629,47 +3628,6 @@ func checkPing(ctx context.Context, pingCount int, sem *semaphore.Weighted, from
 		pe.Msg = "should not be reachable but ping succeeded"
 
 		return pe
-	}
-
-	return nil
-}
-
-// iperf3DaemonUnit is also planted by vlab_server_butane.tmpl.yaml on server
-// VMs; ensureIperf3Daemon below covers hardware servers of hybrid VLABs.
-const iperf3DaemonUnit = `[Unit]
-Description=iperf3 server for VLAB connectivity tests
-After=docker.service network-online.target
-Wants=network-online.target
-Requires=docker.service
-
-[Service]
-Type=simple
-TimeoutStartSec=600
-ExecStartPre=/bin/bash -c 'until /usr/bin/docker info >/dev/null 2>&1; do sleep 2; done'
-ExecStartPre=/bin/bash -c 'until /usr/bin/docker image inspect ghcr.io/githedgehog/toolbox:latest >/dev/null 2>&1; do sleep 2; done'
-ExecStartPre=-/usr/bin/docker rm -f iperf3
-ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ghcr.io/githedgehog/toolbox:latest iperf3 -s
-ExecStop=-/usr/bin/docker stop iperf3
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-`
-
-// ensureIperf3Daemon installs iperf3.service on servers without the butane
-// entry, i.e. hardware ones. Idempotent.
-func ensureIperf3Daemon(ctx context.Context, sshCfg *sshutil.Config, server string) error {
-	encoded := base64.StdEncoding.EncodeToString([]byte(iperf3DaemonUnit))
-	cmd := fmt.Sprintf(
-		"echo %s | base64 -d | sudo tee /etc/systemd/system/iperf3.service > /dev/null && "+
-			"sudo systemctl daemon-reload && "+
-			"sudo systemctl enable iperf3.service && "+
-			"sudo systemctl start iperf3.service",
-		encoded,
-	)
-	if _, stderr, err := sshCfg.Run(ctx, cmd); err != nil {
-		return fmt.Errorf("installing iperf3.service on %s: %w: %s", server, err, stderr)
 	}
 
 	return nil
