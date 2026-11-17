@@ -4,6 +4,8 @@
 package flatcar
 
 import (
+	_ "embed"
+	"fmt"
 	"strings"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -99,8 +101,36 @@ echo "$digest" > "$root.digest"
 `
 )
 
+//go:embed hhtoolbox.sh
+var HHToolbox []byte
+
+const (
+	HHToolboxPath  = "/opt/bin/hhtoolbox"
+	ToolboxEnvPath = "/etc/hedgehog/toolbox.env"
+
+	// ToolboxHandoffPath is sourced by Flatcar's toolbox before it does anything else
+	ToolboxHandoffPath = "/etc/default/toolbox"
+	ToolboxHandoff     = `# Managed by Hedgehog Fabricator, hands Flatcar's toolbox over to the Hedgehog one
+exec ` + HHToolboxPath + ` "$@"
+`
+)
+
 func ToolboxVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Platform.Toolbox
+}
+
+// ToolboxImageURL is always the control node registry one, so any node can pull it if it's not loaded yet
+func ToolboxImageURL(f fabapi.Fabricator) (string, error) {
+	regURL, err := comp.RegistryURL(f)
+	if err != nil {
+		return "", fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	return comp.JoinURLParts(regURL, comp.RegistryPrefix, ToolboxRef) + ":" + string(ToolboxVersion(f)), nil
+}
+
+func ToolboxEnv(image string) string {
+	return "# Managed by Hedgehog Fabricator\nTOOLBOX_IMAGE=" + image + "\n"
 }
 
 func HostBGPContainerVersion(f fabapi.Fabricator) meta.Version {
