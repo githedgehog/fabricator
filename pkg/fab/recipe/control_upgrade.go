@@ -35,6 +35,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	fabnode "go.githedgehog.com/fabricator/pkg/fab/node"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -157,6 +158,17 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	if err := installToolbox(ctx, c.Fab); err != nil {
 		return fmt.Errorf("installing toolbox: %w", err)
+	}
+
+	dockerSecret := coreapi.Secret{}
+	if err := kube.Get(ctx, kclient.ObjectKey{
+		Namespace: comp.FabNamespace,
+		Name:      comp.RegistryUserReaderSecret + comp.RegistryUserSecretDockerSuffix,
+	}, &dockerSecret); err != nil {
+		return fmt.Errorf("getting registry reader docker secret: %w", err)
+	}
+	if err := fabnode.EnforceDockerConfig(dockerSecret.Data[comp.DockerConfigJSONKey]); err != nil {
+		return fmt.Errorf("enforcing docker config: %w", err)
 	}
 
 	if err := c.installK9s(); err != nil {

@@ -29,6 +29,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	fabnode "go.githedgehog.com/fabricator/pkg/fab/node"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
@@ -186,6 +187,18 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 	}
 	if err := os.WriteFile(k3s.KubeRegistriesPath, []byte(regCfg), 0o600); err != nil {
 		return nil, fmt.Errorf("writing file %q: %w", k3s.KubeRegistriesPath, err)
+	}
+
+	regURL, err := comp.RegistryURL(c.Fab)
+	if err != nil {
+		return nil, fmt.Errorf("getting registry URL: %w", err)
+	}
+	dockerCfg, err := zot.DockerConfig(regURL, comp.RegistryUserReader, c.RegUsers[comp.RegistryUserReader])
+	if err != nil {
+		return nil, fmt.Errorf("docker config: %w", err)
+	}
+	if err := fabnode.EnforceDockerConfig(dockerCfg); err != nil {
+		return nil, fmt.Errorf("enforcing docker config: %w", err)
 	}
 
 	k3sInstall := "./" + k3s.InstallName
