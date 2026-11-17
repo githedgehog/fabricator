@@ -66,7 +66,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = true
 	c.Fab.Status.IsInstall = true
 
-	if err := installToolbox(ctx); err != nil {
+	if err := installToolbox(ctx, c.Fab); err != nil {
 		return fmt.Errorf("installing toolbox: %w", err)
 	}
 
