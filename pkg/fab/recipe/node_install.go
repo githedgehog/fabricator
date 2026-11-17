@@ -345,6 +345,26 @@ func installToolbox(ctx context.Context, f fabapi.Fabricator) error {
 		}
 	}
 
+	repo := strings.TrimSuffix(image, ":"+string(flatcar.ToolboxVersion(f)))
+	out, err := exec.CommandContext(ctx, "docker", "images", repo, "--format", "{{.Repository}}:{{.Tag}}").Output()
+	if err != nil {
+		return fmt.Errorf("listing toolbox images: %w", err)
+	}
+	for old := range strings.Lines(string(out)) {
+		old = strings.TrimSpace(old)
+		if old == "" || old == image {
+			continue
+		}
+
+		// not fatal: it may be in use by a running toolbox
+		cmd := exec.CommandContext(ctx, "docker", "rmi", old)
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "docker-rmi: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "docker-rmi: ")
+		if err := cmd.Run(); err != nil {
+			slog.Warn("Failed to remove old toolbox image", "image", old, "err", err)
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(flatcar.ToolboxEnvPath), 0o755); err != nil {
 		return fmt.Errorf("creating toolbox env dir: %w", err)
 	}
