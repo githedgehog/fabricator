@@ -967,10 +967,16 @@ func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, [
 }
 
 func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
+	toolboxImage, err := flatcar.ToolboxImageURL(fab)
+	if err != nil {
+		return "", nil, fmt.Errorf("getting toolbox image URL: %w", err)
+	}
+
 	but, err := tmplutil.FromTemplate("butane-server", serverButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"ToolboxImage":   toolboxImage,
 
 		"VLABVirtioNamesLinkPath": flatcar.VLABVirtioNamesLinkPath,
 		"VLABVirtioNamesLink":     flatcar.VLABVirtioNamesLink,
@@ -1109,11 +1115,12 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				return fmt.Errorf("writing %s: %w", path, err)
 			}
 		}
-		// servers can't reach the control node registry, so the toolbox only uses the image loaded here
-		if out, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo docker tag %s:%s %s && "+
-			"sudo install -D -m 0755 /tmp/hhtoolbox %s && sudo install -D -m 0644 /tmp/toolbox.env %s && "+
-			"sudo install -D -m 0644 /tmp/toolbox-handoff %s && rm -f /tmp/hhtoolbox /tmp/toolbox.env /tmp/toolbox-handoff",
-			flatcar.ToolboxImage, flatcar.ToolboxTag, toolboxImage,
+		// servers can't reach the control node registry, so the toolbox only uses the image loaded here; latest is
+		// kept for the iperf3 unit of servers provisioned by older releases
+		if out, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo docker tag %[1]s %[2]s && "+
+			"sudo install -D -m 0755 /tmp/hhtoolbox %[3]s && sudo install -D -m 0644 /tmp/toolbox.env %[4]s && "+
+			"sudo install -D -m 0644 /tmp/toolbox-handoff %[5]s && rm -f /tmp/hhtoolbox /tmp/toolbox.env /tmp/toolbox-handoff",
+			flatcar.ToolboxImage+":"+flatcar.ToolboxTag, toolboxImage,
 			flatcar.HHToolboxPath, flatcar.ToolboxEnvPath, flatcar.ToolboxHandoffPath)); err != nil {
 			return fmt.Errorf("installing toolbox script: %w (stdout: %s, stderr: %s)", err, out, stderr)
 		}
