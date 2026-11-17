@@ -61,14 +61,17 @@ systemd:
         After=docker.service network-online.target
         Wants=network-online.target
         Requires=docker.service
+        # started by hhfab once the toolbox is installed, restarted when it changes
+        ConditionPathExists={{ .ToolboxEnvPath }}
 
         [Service]
         Type=simple
         TimeoutStartSec=600
+        EnvironmentFile={{ .ToolboxEnvPath }}
         ExecStartPre=/bin/bash -c 'until /usr/bin/docker info >/dev/null 2>&1; do sleep 2; done'
-        ExecStartPre=/bin/bash -c 'until /usr/bin/docker image inspect {{ .ToolboxImage }} >/dev/null 2>&1; do sleep 2; done'
+        ExecStartPre=/bin/bash -c 'until /usr/bin/docker image inspect "$$TOOLBOX_IMAGE" >/dev/null 2>&1; do sleep 2; done'
         ExecStartPre=-/usr/bin/docker rm -f iperf3
-        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host {{ .ToolboxImage }} iperf3 -s
+        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ${TOOLBOX_IMAGE} iperf3 -s
         ExecStop=-/usr/bin/docker stop iperf3
         Restart=on-failure
         RestartSec=5

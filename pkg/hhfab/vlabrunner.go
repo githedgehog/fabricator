@@ -969,16 +969,11 @@ func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, [
 }
 
 func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
-	toolboxImage, err := flatcar.ToolboxImageURL(fab)
-	if err != nil {
-		return "", nil, fmt.Errorf("getting toolbox image URL: %w", err)
-	}
-
 	but, err := tmplutil.FromTemplate("butane-server", serverButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
-		"ToolboxImage":   toolboxImage,
+		"ToolboxEnvPath": flatcar.ToolboxEnvPath,
 
 		"VLABVirtioNamesLinkPath": flatcar.VLABVirtioNamesLinkPath,
 		"VLABVirtioNamesLink":     flatcar.VLABVirtioNamesLink,
@@ -1125,6 +1120,10 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			flatcar.ToolboxImage+":"+flatcar.ToolboxTag, toolboxImage,
 			flatcar.HHToolboxPath, flatcar.ToolboxEnvPath, flatcar.ToolboxHandoffPath)); err != nil {
 			return fmt.Errorf("installing toolbox script: %w (stdout: %s, stderr: %s)", err, out, stderr)
+		}
+		// iperf3 runs the image from the toolbox env, which isn't there on the first boot and may have just changed
+		if out, stderr, err := ssh.Run(ctx, "sudo systemctl restart iperf3"); err != nil {
+			return fmt.Errorf("restarting iperf3: %w (stdout: %s, stderr: %s)", err, out, stderr)
 		}
 		if sshOut, sshErr, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying 'toolbox hostname': %w (stdout: %s, stderr: %s)", err, sshOut, sshErr)
