@@ -173,6 +173,24 @@ func NewUsers() (map[string]string, error) {
 	return users, nil
 }
 
+func DockerConfig(regURL, user, passwd string) ([]byte, error) {
+	dockerCfg := map[string]any{
+		"auths": map[string]any{
+			regURL: map[string]string{
+				"username": user,
+				"password": passwd,
+			},
+		},
+	}
+
+	dockerCfgBytes, err := json.Marshal(dockerCfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling Docker config: %w", err)
+	}
+
+	return dockerCfgBytes, nil
+}
+
 func InstallUsers(users map[string]string) comp.KubeInstall {
 	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		objs := []kclient.Object{}
@@ -191,18 +209,9 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 			htpasswd.WriteString(fmt.Sprintf("%s:%s\n", user, hash))
 
 			dockerSecret := comp.RegistryUserSecretPrefix + user + comp.RegistryUserSecretDockerSuffix
-			dockerCfg := map[string]any{
-				"auths": map[string]any{
-					regURL: map[string]string{
-						"username": user,
-						"password": passwd,
-					},
-				},
-			}
-
-			dockerCfgBytes, err := json.Marshal(dockerCfg)
+			dockerCfgBytes, err := DockerConfig(regURL, user, passwd)
 			if err != nil {
-				return nil, fmt.Errorf("marshaling Docker config: %w", err)
+				return nil, err
 			}
 
 			objs = append(objs,
