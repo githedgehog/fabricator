@@ -115,7 +115,7 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		return fmt.Errorf("joining k8s cluster: %w", err)
 	}
 
-	if err := installToolbox(ctx); err != nil {
+	if err := installToolbox(ctx, c.Fab); err != nil {
 		return fmt.Errorf("installing toolbox: %w", err)
 	}
 
@@ -315,7 +315,7 @@ EmitLLDP=yes
 	return nil
 }
 
-func installToolbox(ctx context.Context) error {
+func installToolbox(ctx context.Context, f fabapi.Fabricator) error {
 	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
 		// TODO do something on ubuntu
 		slog.Warn("Skipping toolbox on ubuntu")
@@ -326,38 +326,41 @@ func installToolbox(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	slog.Info("Installing toolbox")
+	image, err := flatcar.ToolboxImageURL(f)
+	if err != nil {
+		return fmt.Errorf("getting toolbox image URL: %w", err)
+	}
 
-	var lastErr error
-	for attempt := range 24 {
-		if attempt > 0 {
-			time.Sleep(5 * time.Second)
+	slog.Info("Installing toolbox", "image", image)
+
+	// docker is socket activated, so it doesn't need retries until it's up; the archive is tagged as latest, tag it
+	// as the versioned registry image so it can be pulled if missing
+	archiveImage := flatcar.ToolboxImage + ":" + flatcar.ToolboxTag
+	for _, args := range [][]string{{"load", "-i", flatcar.ToolboxArchiveBin}, {"tag", archiveImage, image}, {"rmi", archiveImage}} {
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "docker-"+args[0]+": ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "docker-"+args[0]+": ")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("docker %s: %w", args[0], err)
 		}
-		// using system ctr as we need to load it for the toolbox, not for k8s
-		cmd := exec.CommandContext(ctx, "ctr", "image", "import", flatcar.ToolboxArchiveBin) //nolint:gosec
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
-		lastErr = cmd.Run()
-		if lastErr == nil {
-			break
-		}
-
-		slog.Debug("Failed to install toolbox", "attempt", attempt, "err", lastErr)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("ctr image import: %w", lastErr)
 	}
 
-	if err := os.WriteFile("/etc/default/toolbox", []byte(flatcar.ToolboxConfig), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing toolbox config: %w", err)
+	if err := os.MkdirAll(filepath.Dir(flatcar.ToolboxEnvPath), 0o755); err != nil {
+		return fmt.Errorf("creating toolbox env dir: %w", err)
+	}
+	if err := os.WriteFile(flatcar.ToolboxEnvPath, []byte(flatcar.ToolboxEnv(image)), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing toolbox env: %w", err)
 	}
 
-	// not fatal: the toolbox script can still set itself up
-	cmd := exec.CommandContext(ctx, "bash", "-c", flatcar.ToolboxRootfsScript) //nolint:gosec
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "toolbox-rootfs: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "toolbox-rootfs: ")
-	if err := cmd.Run(); err != nil {
-		slog.Warn("Failed to prepare toolbox rootfs, toolbox may fail after a reboot", "err", err)
+	if err := os.MkdirAll(filepath.Dir(flatcar.HHToolboxPath), 0o755); err != nil {
+		return fmt.Errorf("creating toolbox script dir: %w", err)
+	}
+	if err := os.WriteFile(flatcar.HHToolboxPath, flatcar.HHToolbox, 0o755); err != nil { //nolint:gosec // executable script
+		return fmt.Errorf("writing toolbox script: %w", err)
+	}
+
+	if err := os.WriteFile(flatcar.ToolboxHandoffPath, []byte(flatcar.ToolboxHandoff), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing toolbox handoff: %w", err)
 	}
 
 	return nil
