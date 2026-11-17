@@ -125,6 +125,15 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 									},
 								},
 								{
+									Name: node.EnvDockerConfig,
+									ValueFrom: &coreapi.EnvVarSource{
+										SecretKeyRef: &coreapi.SecretKeySelector{
+											Name: comp.RegistryUserReaderSecret + comp.RegistryUserSecretDockerSuffix,
+											Key:  comp.DockerConfigJSONKey,
+										},
+									},
+								},
+								{
 									Name:  node.EnvImage,
 									Value: image,
 								},

@@ -21,11 +21,12 @@ import (
 )
 
 const (
-	EnvPrefix     = "FAB_"
-	EnvNodeName   = EnvPrefix + "NODE_NAME"
-	EnvCA         = EnvPrefix + "CA"
-	EnvRegistries = EnvPrefix + "REGISTRIES"
-	EnvImage      = EnvPrefix + "IMAGE"
+	EnvPrefix       = "FAB_"
+	EnvNodeName     = EnvPrefix + "NODE_NAME"
+	EnvCA           = EnvPrefix + "CA"
+	EnvRegistries   = EnvPrefix + "REGISTRIES"
+	EnvDockerConfig = EnvPrefix + "DOCKER_CONFIG"
+	EnvImage        = EnvPrefix + "IMAGE"
 )
 
 func DoConfig(ctx context.Context) error {
@@ -47,6 +48,15 @@ func DoConfig(ctx context.Context) error {
 
 	if err := enforceK3sConfigs(ctx); err != nil {
 		return fmt.Errorf("enforcing k3s configs: %w", err)
+	}
+
+	dockerCfg := os.Getenv(EnvDockerConfig)
+	if dockerCfg == "" {
+		return fmt.Errorf(EnvDockerConfig + " not set") //nolint:err113
+	}
+
+	if err := EnforceDockerConfig([]byte(dockerCfg)); err != nil {
+		return fmt.Errorf("enforcing docker config: %w", err)
 	}
 
 	return nil
