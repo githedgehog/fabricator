@@ -176,11 +176,3 @@ storage:
 
           [Link]
           Unmanaged=true
-
-    - path: /etc/default/toolbox
-      mode: 0644
-      contents:
-        inline: |
-          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
-          TOOLBOX_DOCKER_TAG=latest
-          TOOLBOX_USER=root
