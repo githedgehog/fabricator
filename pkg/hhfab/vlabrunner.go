@@ -998,10 +998,6 @@ func orasUploadAndInstall(ctx context.Context, d *artificer.Downloader, ssh *ssh
 		return fmt.Errorf("uploading %s image: %w", name, err)
 	}
 
-	if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo ctr image import %s'", path)); err != nil {
-		return fmt.Errorf("loading %s into containerd: %w", name, err)
-	}
-
 	if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo docker load -i %s'", path)); err != nil {
 		return fmt.Errorf("loading %s into docker: %w", name, err)
 	}
@@ -1094,17 +1090,32 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		if err := orasUploadAndInstall(ctx, d, ssh, ftp, "toolbox", flatcar.ToolboxVersion(c.Fab), toolboxPath, flatcar.ToolboxArchiveRef, flatcar.ToolboxArchiveBin); err != nil {
 			return fmt.Errorf("installing toolbox: %w", err)
 		}
-		rootfsScript, err := ftp.Create("/tmp/toolbox-rootfs.sh")
+		toolboxImage, err := flatcar.ToolboxImageURL(c.Fab)
 		if err != nil {
-			return fmt.Errorf("creating toolbox rootfs script: %w", err)
+			return fmt.Errorf("getting toolbox image URL: %w", err)
 		}
-		_, err = rootfsScript.Write([]byte(flatcar.ToolboxRootfsScript))
-		_ = rootfsScript.Close()
-		if err != nil {
-			return fmt.Errorf("writing toolbox rootfs script: %w", err)
+		for path, content := range map[string][]byte{
+			"/tmp/hhtoolbox":       flatcar.HHToolbox,
+			"/tmp/toolbox.env":     []byte(flatcar.ToolboxEnv(toolboxImage)),
+			"/tmp/toolbox-handoff": []byte(flatcar.ToolboxHandoff),
+		} {
+			f, err := ftp.Create(path)
+			if err != nil {
+				return fmt.Errorf("creating %s: %w", path, err)
+			}
+			_, err = f.Write(content)
+			_ = f.Close()
+			if err != nil {
+				return fmt.Errorf("writing %s: %w", path, err)
+			}
 		}
-		if out, stderr, err := ssh.Run(ctx, "sudo bash /tmp/toolbox-rootfs.sh; rc=$?; rm -f /tmp/toolbox-rootfs.sh; exit $rc"); err != nil {
-			return fmt.Errorf("preparing toolbox rootfs: %w (stdout: %s, stderr: %s)", err, out, stderr)
+		// servers can't reach the control node registry, so the toolbox only uses the image loaded here
+		if out, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo docker tag %s:%s %s && "+
+			"sudo install -D -m 0755 /tmp/hhtoolbox %s && sudo install -D -m 0644 /tmp/toolbox.env %s && "+
+			"sudo install -D -m 0644 /tmp/toolbox-handoff %s && rm -f /tmp/hhtoolbox /tmp/toolbox.env /tmp/toolbox-handoff",
+			flatcar.ToolboxImage, flatcar.ToolboxTag, toolboxImage,
+			flatcar.HHToolboxPath, flatcar.ToolboxEnvPath, flatcar.ToolboxHandoffPath)); err != nil {
+			return fmt.Errorf("installing toolbox script: %w (stdout: %s, stderr: %s)", err, out, stderr)
 		}
 		if sshOut, sshErr, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying 'toolbox hostname': %w (stdout: %s, stderr: %s)", err, sshOut, sshErr)

@@ -104,14 +104,6 @@ storage:
         inline: |
           Hedgehog VLAB Server
 
-    - path: /etc/default/toolbox
-      mode: 0644
-      contents:
-        inline: |
-          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
-          TOOLBOX_DOCKER_TAG=latest
-          TOOLBOX_USER=root
-
     - path: /etc/systemd/network/99-lldp.network
       mode: 0644
       contents:
