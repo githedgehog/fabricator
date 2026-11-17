@@ -953,6 +953,8 @@ func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, [
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
 		"ExternalVRFs":   ext.VRFs,
 		"ExternalNICs":   ext.NICs,
+		// virtual externals don't get the toolbox loaded, so it's pulled from upstream
+		"ToolboxImage": flatcar.ToolboxImage + ":" + string(flatcar.ToolboxVersion(fab)),
 	})
 	if err != nil {
 		return but, nil, fmt.Errorf("butane: %w", err)

@@ -310,7 +310,7 @@ systemd:
 
         [Service]
         Type=simple
-        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ghcr.io/githedgehog/toolbox:latest iperf3 -s
+        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host {{ .ToolboxImage }} iperf3 -s
         ExecStop=/usr/bin/docker stop iperf3
         Restart=on-failure
         RestartSec=5
