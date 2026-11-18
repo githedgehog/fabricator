@@ -321,6 +321,7 @@ jobs:
           - { vpcmode: l2vni,             gateway: kernel }
           - { vpcmode: l3vni,             gateway: dpdk, includeonie: true }
           - { vpcmode: l2vni, mesh: true, gateway: dpdk }
+          - { vpcmode: l2vni, mesh: true, gateway: kernel }
           # TODO: consider enabling it again after removing limitation on ESLAG conns
           # - { vpcmode: l3vni, mesh: true, gateway: dpdk }
 
