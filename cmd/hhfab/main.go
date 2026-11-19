@@ -1690,6 +1690,11 @@ Examples:
 								Aliases: []string{"hostbgp"},
 								Usage:   "Configure the first subnet of each VPC as a host-bgp subnet",
 							},
+							&cli.BoolFlag{
+								Name:   "p2p",
+								Hidden: !preview,
+								Usage:  "[PREVIEW] use point-to-point VPCAttachments (Cumulus only)",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1712,6 +1717,7 @@ Examples:
 								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								KeepPeerings:      c.Bool("keep-peerings"),
 								HostBGPSubnet:     c.Bool("host-bgp"),
+								P2P:               c.Bool("p2p"),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}

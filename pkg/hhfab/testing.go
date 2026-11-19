@@ -1088,8 +1088,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			hostBGPDoneForVPC = true
 		}
 		// hostBGP and P2P are mutually exclusive per server: a hostBGP host uses
-		// its real subnet and a /32 VIP, so the P2P /31 semantics must not apply
-		// (relevant when P2P is force-enabled on an all-Cumulus fabric).
+		// its real subnet and a /32 VIP, so the P2P /31 semantics must not apply.
 		useP2P := opts.P2P && !hostBGP
 
 		var vpc *vpcapi.VPC
