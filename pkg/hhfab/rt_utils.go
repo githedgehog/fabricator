@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -341,15 +342,68 @@ func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string)
 	return switches, nil
 }
 
-// check that a route is present in a switch (by checking in the sonic-cli)
+// switchVRFName returns the VRF a switch uses for vpcName, or its default VRF if vpcName is empty.
+func switchVRFName(cumulus bool, vpcName string) string {
+	switch {
+	case vpcName == "":
+		return defaultVRFName
+	case cumulus:
+		return "vpc-" + vpcName
+	default:
+		return "VrfV" + vpcName
+	}
+}
+
+// checkRouteInSwitch reports whether FRR on the switch has route installed in vrfName. A CIDR
+// matches only a route with exactly that prefix: a /25 or a /16 doesn't satisfy a /24. An address
+// matches the longest prefix covering it, so a connected subnet satisfies it as soon as the
+// interface has its IP. Routes whose next hops are all unreachable don't count: the unreachable
+// default in every Cumulus VPC VRF, and blackhole or reject routes.
+// SONiC's vtysh on the host runs it in the bgp container.
 func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
-	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
+	cmd := fmt.Sprintf("sudo -n vtysh -c 'show ip route vrf %s %s json'", vrfName, route)
 	stdout, stderr, err := ssh.Run(ctx, cmd)
 	if err != nil {
 		return false, fmt.Errorf("executing '%s' on switch %s: %w: %s", cmd, switchName, err, stderr)
 	}
 
-	return stdout != "", nil
+	// a VRF that doesn't exist yet gives "% VRF <name> not found" or {"warning": "..."}
+	out := strings.TrimSpace(stdout)
+	if !strings.HasPrefix(out, "{") {
+		slog.Debug("No routes from switch yet", "switch", switchName, "vrf", vrfName, "output", out)
+
+		return false, nil
+	}
+	prefixes := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(out), &prefixes); err != nil {
+		return false, fmt.Errorf("parsing routes from switch %s: %w: %s", switchName, err, out)
+	}
+	for prefix, raw := range prefixes {
+		if prefix == "warning" {
+			continue
+		}
+		entries := []struct {
+			Installed bool `json:"installed"`
+			Nexthops  []struct {
+				Unreachable bool `json:"unreachable"`
+			} `json:"nexthops"`
+		}{}
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return false, fmt.Errorf("parsing route %s from switch %s: %w", prefix, switchName, err)
+		}
+		for _, e := range entries {
+			if !e.Installed {
+				continue
+			}
+			for _, nh := range e.Nexthops {
+				if !nh.Unreachable {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
 
 // waitForNATPoolInLeaves waits until the gateway-originated NAT pool CIDR appears in the FIB of
@@ -365,19 +419,20 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 	if len(leaves) == 0 {
 		return nil
 	}
-	vrfName := "VrfV" + vpc.Name
+	vrfVPC := vpc.Name
 	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-		vrfName = defaultVRFName
+		vrfVPC = ""
 	}
-	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
+	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrfVPC", vrfVPC)
 
-	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
+	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfVPC)
 }
 
-// wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
+// wait until all switches in a set have a bunch of routes installed in the VRF of vpcName (the
+// default VRF if empty), or error out after 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vpcName string) error {
 	const timeout = 3 * time.Minute
-	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vpc", vpcName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
@@ -388,6 +443,7 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 		}
 		sshs[sw] = ssh
 	}
+	vrfName := switchVRFName(testCtx.cumulus, vpcName)
 
 	for {
 		allFound := true

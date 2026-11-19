@@ -67,6 +67,7 @@ type VPCPeeringTestCtx struct {
 	noSetup          bool
 	showTechDump     bool
 	skipFlags        SkipFlags
+	cumulus          bool // the switches run Cumulus, not SONiC
 }
 
 // Test function types
@@ -932,7 +933,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	}
 	profileMap := make(map[string]wiringapi.SwitchProfile, 0)
 	roceLeaves := make([]string, 0)
-	for _, sw := range swList.Items {
+	for i, sw := range swList.Items {
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
 			if sw.Spec.Profile == meta.SwitchProfileVS {
@@ -940,12 +941,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 				skipFlags.VirtualSwitch = true
 			}
 		}
-		// check for leaf switches supporting subinterfaces and/or RoCE
-		if !sw.Spec.Role.IsLeaf() {
-			continue
-		}
 		profile := &wiringapi.SwitchProfile{}
-		// did we already check this profile for another leaf?
+		// did we already check this profile for another switch?
 		if p, ok := profileMap[sw.Spec.Profile]; ok {
 			profile = &p
 		} else {
@@ -953,6 +950,17 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
 			profileMap[sw.Spec.Profile] = *profile
+		}
+		// the tests pick their switch commands once for the whole fabric
+		cumulus := slices.Contains(meta.NOSTypesCumulus, profile.Spec.NOSType)
+		if i == 0 {
+			testCtx.cumulus = cumulus
+		} else if cumulus != testCtx.cumulus {
+			return fmt.Errorf("switches %s and %s run different NOSes, release tests need one NOS for all switches", swList.Items[0].Name, sw.Name) //nolint:err113
+		}
+		// check for leaf switches supporting subinterfaces and/or RoCE
+		if !sw.Spec.Role.IsLeaf() {
+			continue
 		}
 		if !profile.Spec.Features.Subinterfaces && !skipFlags.SubInterfaces {
 			slog.Warn("Subinterfaces not supported on leaf switch, some tests will be skipped", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
