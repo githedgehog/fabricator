@@ -2646,8 +2646,13 @@ type TestConnectivityOpts struct {
 	Destinations      []string
 	RequireAllServers bool
 
-	dpdkGateways bool
+	dpdkGateways         bool
+	serverIPerfsMinSpeed map[string]float64
 }
+
+// IPerfMinSpeedAnnotation on a Server caps the iperf3 min speed (Mbps) for tests it's part of, e.g. for servers on
+// links slower than the rest of the fabric
+const IPerfMinSpeedAnnotation = "hhfab.githedgehog.com/test-iperf-min-speed"
 
 // The checks of a connectivity test share a budget of slots. An iperf3 run takes all of them, so it never overlaps any
 // other check: virtual switches forward in userspace and its traffic makes the pings running alongside it lose packets.
@@ -2709,6 +2714,27 @@ func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *
 			// Seems like Cumulus VX shows 700+ Mbps on iPerf quite reliably
 			opts.IPerfsMinSpeed = 400
 		}
+	}
+
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		cacheCancel()
+
+		return nil, nil, nil, fmt.Errorf("listing servers: %w", err)
+	}
+	opts.serverIPerfsMinSpeed = map[string]float64{}
+	for _, server := range servers.Items {
+		val, ok := server.Annotations[IPerfMinSpeedAnnotation]
+		if !ok {
+			continue
+		}
+		speed, err := strconv.ParseFloat(val, 64)
+		if err != nil || speed < 0 {
+			cacheCancel()
+
+			return nil, nil, nil, fmt.Errorf("server %q annotation %s: invalid speed %q", server.Name, IPerfMinSpeedAnnotation, val) //nolint:err113
+		}
+		opts.serverIPerfsMinSpeed[server.Name] = speed
 	}
 
 	gws := &gwapi.GatewayList{}
@@ -3645,6 +3671,11 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	// floor at 5000 to avoid flake. The dpdk driver keeps up with the switches.
 	if reachability.Reason == ReachabilityReasonGatewayPeering && !opts.dpdkGateways {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 5000)
+	}
+	for _, name := range []string{from, to} {
+		if speed, ok := opts.serverIPerfsMinSpeed[name]; ok {
+			iPerfsMinSpeed = min(iPerfsMinSpeed, speed)
+		}
 	}
 	var lastErrors []*IperfError
 	for attempt := 0; attempt <= iperf3SpeedRetries; attempt++ {
