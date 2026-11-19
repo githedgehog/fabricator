@@ -836,8 +836,7 @@ func Run(ctx context.Context) error {
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagIncludeCumulus,
-						Hidden:   !preview,
-						Usage:    "[PREVIEW] include Cumulus support",
+						Usage:    "include NVIDIA Cumulus support",
 						EnvVars:  []string{"HHFAB_INCLUDE_CUMULUS"},
 					},
 					&cli.BoolFlag{
