@@ -78,6 +78,31 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
   RSS/thread count, KVM/QEMU kernel messages from `dmesg`
 - **Devices**: `/dev/kvm`, `/dev/net/tun` presence and permissions
 
+### switch.sh - Cumulus switch
+
+When `nv` is present and `sonic-cli` is not, `switch.sh` collects from Cumulus
+instead of running the SONiC sections below. NVUE state comes from `nv`, FRR
+state from `vtysh` through passwordless sudo. All `nv` and `vtysh` commands
+share a 6-minute budget so the switch stays inside hhfab's 10-minute limit;
+commands past it print "Skipped".
+
+- **System and config**: `nv show system` and health, OS version, uptime,
+  applied NVUE config, revision history, pending diff, the agent's
+  `/etc/hedgehog/last-diff.yaml` and `last-diff-applied.yaml`, FRR running
+  config
+- **Interfaces and L2**: status, LLDP neighbors, counters, bridge VLANs, VXLAN
+  devices, MAC table, bond state from `/proc/net/bonding`
+- **BGP, EVPN, BFD and routes**: the FRR views SONiC collects, for all VRFs
+- **Platform**: `nv show platform`, environment, transceivers, optic DOM
+  readings
+- **Kernel**: bridge FDB, neighbors, interface, qdisc, softnet and socket
+  statistics, `nstat`, `ethtool -S` per port, top processes
+- **Logs and agent**: FRR, nvued and switchd journals, syslog tail,
+  hedgehog-agent status and `/var/log/agent.log`
+
+Not collected on Cumulus: QoS/PFC counters, the err-disable timeline and
+Broadcom SDK tables, which have no Cumulus counterpart yet.
+
 ### switch.sh - SONiC switch
 
 Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
