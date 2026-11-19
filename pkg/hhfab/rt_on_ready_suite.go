@@ -759,7 +759,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		}
 		pfNAT, err := buildNATConfig(NATModePortForward, []gwapi.PeeringNATPortForwardEntry{
 			{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: strconv.Itoa(ortPortForwardPort)},
-		})
+		}, 0)
 		if err != nil {
 			return false, reverts, fmt.Errorf("building port-forward NAT config: %w", err)
 		}

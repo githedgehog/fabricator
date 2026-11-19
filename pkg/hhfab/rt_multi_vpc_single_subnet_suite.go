@@ -460,7 +460,7 @@ func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringT
 		usedIPs[addr] = true
 	}
 
-	unused, err := pickUnusedHostAddress(prefix, usedIPs)
+	unused, err := pickUnusedHostAddress(prefix, usedIPs, false)
 	if err != nil {
 		return false, nil, fmt.Errorf("picking an unused address in subnet %s of VPC %s: %w", prefix, vpc2.Name, err)
 	}

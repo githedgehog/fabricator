@@ -96,6 +96,8 @@ const (
 	FlagOnReadyOnly               = "on-ready-only"
 	FlagReleaseTestDisruptionOnly = "release-test-disruption-only"
 	FlagDisruptionOnly            = "disruption-only"
+	FlagReleaseTestNATScaleOnly   = "release-test-nat-scale-only"
+	FlagNATScaleOnly              = "nat-scale-only"
 	FlagBenchFabric               = "fabric"
 	FlagBenchWorkers              = "workers"
 	FlagBenchQPS                  = "qps"
@@ -1401,6 +1403,10 @@ func Run(ctx context.Context) error {
 								Name:  FlagReleaseTestDisruptionOnly,
 								Usage: "run only the disruption suite: common changes under background traffic (used when --ready=release-test)",
 							},
+							&cli.BoolFlag{
+								Name:  FlagReleaseTestNATScaleOnly,
+								Usage: "run only the NAT scale suite: fill and release the masquerade port pool, hardware only (used when --ready=release-test)",
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1513,6 +1519,7 @@ func Run(ctx context.Context) error {
 									ReleaseTestRegexesInvert:  c.Bool(FlagReleaseTestRegexesInvert),
 									ReleaseTestOnReadyOnly:    c.Bool(FlagReleaseTestOnReadyOnly),
 									ReleaseTestDisruptionOnly: c.Bool(FlagReleaseTestDisruptionOnly),
+									ReleaseTestNATScaleOnly:   c.Bool(FlagReleaseTestNATScaleOnly),
 									InterfaceMTU:              ifMTU,
 									InspectPodsStrict:         c.Bool("inspect-pods-strict"),
 								},
@@ -2021,6 +2028,10 @@ Examples:
 								Name:  FlagDisruptionOnly,
 								Usage: "Run only the disruption suite: common changes under background traffic, failing on unexpected disruption",
 							},
+							&cli.BoolFlag{
+								Name:  FlagNATScaleOnly,
+								Usage: "Run only the NAT scale suite: fill the masquerade port pool and check its release, hardware only",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -2042,6 +2053,7 @@ Examples:
 								IPerfsMinSpeed: iperfsSpeed,
 								OnReadyTest:    c.Bool(FlagOnReadyOnly),
 								DisruptionTest: c.Bool(FlagDisruptionOnly),
+								NATScaleTest:   c.Bool(FlagNATScaleOnly),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

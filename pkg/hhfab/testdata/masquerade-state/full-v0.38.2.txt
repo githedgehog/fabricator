@@ -1,0 +1,31 @@
+dataplane(✔)# show masquerading state
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Masquerade NAT allocator table ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+randomize: true
+source pools (IPv4):
+  ICMP | source VPC: VNI(300), dest VPC: VNI(400), for IPs: [ 10.10.1.0 .. 10.10.1.255 ]
+    idle timeout: 1800s
+    region [ 100.100.1.1 .. 100.100.1.1 ]:
+      IP ranges in pool:
+        [100.100.1.1 .. 100.100.1.1]
+      allocated IPs:
+        (empty)
+  TCP | source VPC: VNI(300), dest VPC: VNI(400), for IPs: [ 10.10.1.0 .. 10.10.1.255 ]
+    idle timeout: 1800s
+    region [ 100.100.1.1 .. 100.100.1.1 ]:
+      IP ranges in pool:
+      allocated IPs:
+        100.100.1.1:
+          allocated ports:
+            [all ports allocated]
+  UDP | source VPC: VNI(300), dest VPC: VNI(400), for IPs: [ 10.10.1.0 .. 10.10.1.255 ]
+    idle timeout: 1800s
+    region [ 100.100.1.1 .. 100.100.1.1 ]:
+      IP ranges in pool:
+        [100.100.1.1 .. 100.100.1.1]
+      allocated IPs:
+        (empty)
+
+source pools (IPv6):
+  (empty)
+
+

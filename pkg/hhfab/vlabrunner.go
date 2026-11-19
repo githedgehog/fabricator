@@ -115,6 +115,7 @@ type VLABRunOpts struct {
 	ReleaseTestRegexesInvert  bool
 	ReleaseTestOnReadyOnly    bool
 	ReleaseTestDisruptionOnly bool
+	ReleaseTestNATScaleOnly   bool
 	InterfaceMTU              uint16
 	InspectPodsStrict         bool
 }
@@ -825,6 +826,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						IPerfsMinSpeed: 8200,
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 						DisruptionTest: opts.ReleaseTestDisruptionOnly,
+						NATScaleTest:   opts.ReleaseTestNATScaleOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {

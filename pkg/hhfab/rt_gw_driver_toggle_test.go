@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	"go.githedgehog.com/fabricator/pkg/support"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -29,7 +30,7 @@ func gwTestPod(name, uid, driver string, ready bool, terminating bool) corev1.Po
 		ObjectMeta: meta,
 		Spec: corev1.PodSpec{Containers: []corev1.Container{
 			{Name: "frr-exporter", Args: []string{"--driver", "ignored"}},
-			{Name: gwDataplaneContainer, Args: []string{"--driver", driver}},
+			{Name: support.GatewayDataplaneContainer, Args: []string{"--driver", driver}},
 		}},
 		Status: corev1.PodStatus{
 			Phase:      corev1.PodRunning,
@@ -85,7 +86,7 @@ func TestGatewayPodCrash(t *testing.T) {
 		pod.Status.ContainerStatuses = []corev1.ContainerStatus{
 			{Name: "frr-exporter"},
 			{
-				Name:                 gwDataplaneContainer,
+				Name:                 support.GatewayDataplaneContainer,
 				RestartCount:         restarts,
 				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 1}},
 			},

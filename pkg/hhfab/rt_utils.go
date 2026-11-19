@@ -882,6 +882,8 @@ type GwPeeringOptions struct {
 	VPC1NotCIDRs []string
 	// VPC2NotCIDRs specifies CIDRs to exclude from VPC2's exposed prefixes
 	VPC2NotCIDRs []string
+	// NATIdleTimeout is the idle timeout of the masquerade and port-forward NAT of both VPCs (default: natDefaultIdleTimeout)
+	NATIdleTimeout time.Duration
 }
 
 // GwExtPeeringOptions contains optional parameters for gateway external peering configuration
@@ -896,24 +898,30 @@ type GwExtPeeringOptions struct {
 	VPCPortForwardRules []gwapi.PeeringNATPortForwardEntry
 }
 
+const natDefaultIdleTimeout = 5 * time.Minute
+
 // buildNATConfig creates a NAT configuration based on the specified mode and optional port-forward rules.
+// A zero idleTimeout means natDefaultIdleTimeout, it only applies to the masquerade and port-forward modes.
 // Returns an error for invalid inputs (e.g. NATModePortForward with no rules, or an unknown mode).
-func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) (*gwapi.PeeringNAT, error) {
+func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry, idleTimeout time.Duration) (*gwapi.PeeringNAT, error) {
 	nat := &gwapi.PeeringNAT{}
+	if idleTimeout == 0 {
+		idleTimeout = natDefaultIdleTimeout
+	}
 
 	switch mode {
 	case NATModeStatic:
 		nat.Static = &gwapi.PeeringNATStatic{}
 	case NATModeMasquerade:
 		nat.Masquerade = &gwapi.PeeringNATMasquerade{
-			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+			IdleTimeout: kmetav1.Duration{Duration: idleTimeout},
 		}
 	case NATModePortForward:
 		if len(portForwardRules) == 0 {
 			return nil, fmt.Errorf("NATModePortForward requires at least one port-forward rule") //nolint:err113
 		}
 		nat.PortForward = &gwapi.PeeringNATPortForward{
-			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+			IdleTimeout: kmetav1.Duration{Duration: idleTimeout},
 			Ports:       portForwardRules,
 		}
 	case NATModeMasqueradePortForward:
@@ -928,8 +936,9 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 }
 
 // pickUnusedHostAddress returns the first host address inside prefix that is not present
-// in used, skipping the network and broadcast addresses. IPv4 only.
-func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip.Addr, error) {
+// in used, skipping the network and broadcast addresses, from the bottom of the prefix or
+// from its top. IPv4 only.
+func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool, fromTop bool) (netip.Addr, error) {
 	if !prefix.Addr().Is4() {
 		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:err113
 	}
@@ -944,9 +953,13 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 	// the count would wrap to 0 and the bound would underflow to the whole space.
 	lastOffset := uint64(1)<<(32-bits) - 2
 
-	for offset := uint32(1); uint64(offset) <= lastOffset; offset++ {
+	for i := uint64(1); i <= lastOffset; i++ {
+		offset := i
+		if fromTop {
+			offset = lastOffset + 1 - i
+		}
 		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], baseVal+offset)
+		binary.BigEndian.PutUint32(b[:], baseVal+uint32(offset))
 		candidate := netip.AddrFrom4(b)
 		if !used[candidate] {
 			return candidate, nil
@@ -963,7 +976,7 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 // natCIDRs must be non-empty whenever NAT is configured (gateway API requires expose.As
 // and expose.NAT together). portForwardRules is only used for port-forward modes.
 // notCIDRs each become a standalone expose.IPs entry with only Not set.
-func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) ([]gwapi.PeeringEntryExpose, error) {
+func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry, idleTimeout time.Duration) ([]gwapi.PeeringEntryExpose, error) {
 	makeBase := func() gwapi.PeeringEntryExpose {
 		e := gwapi.PeeringEntryExpose{}
 		for _, subnet := range subnets {
@@ -984,13 +997,13 @@ func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwar
 			return nil, fmt.Errorf("NATModeMasqueradePortForward requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:err113
 		}
 		masq := makeBase()
-		masqNAT, err := buildNATConfig(NATModeMasquerade, nil)
+		masqNAT, err := buildNATConfig(NATModeMasquerade, nil, idleTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("building masquerade NAT config: %w", err)
 		}
 		masq.NAT = masqNAT
 		pf := makeBase()
-		pfNAT, err := buildNATConfig(NATModePortForward, portForwardRules)
+		pfNAT, err := buildNATConfig(NATModePortForward, portForwardRules, idleTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("building port-forward NAT config: %w", err)
 		}
@@ -1004,7 +1017,7 @@ func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwar
 		if len(natCIDRs) == 0 {
 			return nil, fmt.Errorf("NAT configuration requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:err113
 		}
-		natCfg, err := buildNATConfig(mode, portForwardRules)
+		natCfg, err := buildNATConfig(mode, portForwardRules, idleTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("building NAT config: %w", err)
 		}
@@ -1042,11 +1055,11 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
-	vpc1Exposes, err := buildExposes(vpc1Subnets, opts.VPC1NATCIDR, opts.VPC1NotCIDRs, opts.VPC1NATMode, opts.VPC1PortForwardRules)
+	vpc1Exposes, err := buildExposes(vpc1Subnets, opts.VPC1NATCIDR, opts.VPC1NotCIDRs, opts.VPC1NATMode, opts.VPC1PortForwardRules, opts.NATIdleTimeout)
 	if err != nil {
 		return fmt.Errorf("building VPC1 exposes for %s: %w", vpc1.Name, err)
 	}
-	vpc2Exposes, err := buildExposes(vpc2Subnets, opts.VPC2NATCIDR, opts.VPC2NotCIDRs, opts.VPC2NATMode, opts.VPC2PortForwardRules)
+	vpc2Exposes, err := buildExposes(vpc2Subnets, opts.VPC2NATCIDR, opts.VPC2NotCIDRs, opts.VPC2NATMode, opts.VPC2PortForwardRules, opts.NATIdleTimeout)
 	if err != nil {
 		return fmt.Errorf("building VPC2 exposes for %s: %w", vpc2.Name, err)
 	}
@@ -1087,7 +1100,7 @@ func appendGwExtPeeringSpecWithNAT(gwPeerings map[string]*gwapi.PeeringSpec, vpc
 		DefaultDestination: true,
 	}
 
-	vpcExposes, err := buildExposes(vpcSubnets, opts.VPCNATCIDR, nil, opts.VPCNATMode, opts.VPCPortForwardRules)
+	vpcExposes, err := buildExposes(vpcSubnets, opts.VPCNATCIDR, nil, opts.VPCNATMode, opts.VPCPortForwardRules, 0)
 	if err != nil {
 		return fmt.Errorf("building VPC exposes for %s: %w", vpc.Name, err)
 	}
