@@ -806,10 +806,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if opts.P2P && !allCumulus {
 		return nil, nil, fmt.Errorf("P2P mode requires all switches to be cumulus") //nolint:err113
 	}
-	if !opts.P2P && allCumulus {
-		opts.P2P = true
-		slog.Warn("Forcing P2P mode since all switches are cumulus")
-	}
 
 	if err := ResolveDefaultServerMTU(ctx, kube, &opts); err != nil {
 		return nil, nil, fmt.Errorf("resolving default server MTU: %w", err)
