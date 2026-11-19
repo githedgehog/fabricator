@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -19,6 +20,7 @@ import (
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -341,15 +343,51 @@ func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string)
 	return switches, nil
 }
 
-// check that a route is present in a switch (by checking in the sonic-cli)
-func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
+// switchVRFName returns the VRF a switch uses for vpcName, or its default VRF if vpcName is empty.
+func switchVRFName(cumulus bool, vpcName string) string {
+	switch {
+	case vpcName == "":
+		return defaultVRFName
+	case cumulus:
+		return "vpc-" + vpcName
+	default:
+		return "VrfV" + vpcName
+	}
+}
+
+// check that a route is present in a switch: through the SONiC show command, or through the
+// kernel table on Cumulus, where admin can't run vtysh and every VRF has an unreachable default.
+func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string, cumulus bool) (bool, error) {
 	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
+	if cumulus {
+		cmd = "ip -j route show match " + route
+		if vrfName != defaultVRFName {
+			cmd = fmt.Sprintf("ip -j route show vrf %s match %s", vrfName, route)
+		}
+	}
 	stdout, stderr, err := ssh.Run(ctx, cmd)
 	if err != nil {
 		return false, fmt.Errorf("executing '%s' on switch %s: %w: %s", cmd, switchName, err, stderr)
 	}
+	if !cumulus {
+		return stdout != "", nil
+	}
 
-	return stdout != "", nil
+	routes := []struct {
+		Dst  string `json:"dst"`
+		Type string `json:"type"`
+	}{}
+	if err := json.Unmarshal([]byte(stdout), &routes); err != nil {
+		return false, fmt.Errorf("parsing routes from switch %s: %w", switchName, err)
+	}
+
+	for _, r := range routes {
+		if r.Dst != "default" && r.Type == "" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // waitForNATPoolInLeaves waits until the gateway-originated NAT pool CIDR appears in the FIB of
@@ -365,35 +403,48 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 	if len(leaves) == 0 {
 		return nil
 	}
-	vrfName := "VrfV" + vpc.Name
+	vrfVPC := vpc.Name
 	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-		vrfName = defaultVRFName
+		vrfVPC = ""
 	}
-	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
+	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrfVPC", vrfVPC)
 
-	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
+	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfVPC)
 }
 
-// wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
+// wait until all switches in a set have a bunch of routes installed in the VRF of vpcName (the
+// default VRF if empty), or error out after 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vpcName string) error {
 	const timeout = 3 * time.Minute
-	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vpc", vpcName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
+	cumulus := make(map[string]bool, len(switches))
 	for sw := range switches {
 		ssh, err := testCtx.getSSH(ctx, sw)
 		if err != nil {
 			return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
 		}
 		sshs[sw] = ssh
+
+		swObj := &wiringapi.Switch{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw}, swObj); err != nil {
+			return fmt.Errorf("getting switch %s: %w", sw, err)
+		}
+		profile := &wiringapi.SwitchProfile{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swObj.Spec.Profile}, profile); err != nil {
+			return fmt.Errorf("getting switch profile %s: %w", swObj.Spec.Profile, err)
+		}
+		cumulus[sw] = slices.Contains(meta.NOSTypesCumulus, profile.Spec.NOSType)
 	}
 
 	for {
 		allFound := true
 		for sw := range switches {
+			vrfName := switchVRFName(cumulus[sw], vpcName)
 			for _, route := range routes {
-				if found, err := checkRouteInSwitch(toCtx, sshs[sw], sw, route, vrfName); err != nil {
+				if found, err := checkRouteInSwitch(toCtx, sshs[sw], sw, route, vrfName, cumulus[sw]); err != nil {
 					return fmt.Errorf("checking for route %s in switch %s vrf %s: %w", route, sw, vrfName, err)
 				} else if !found {
 					slog.Debug("Route not found yet", "switch", sw, "route", route, "vrf", vrfName)
