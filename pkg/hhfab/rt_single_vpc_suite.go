@@ -527,11 +527,10 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 				continue
 			}
 
-			vrfName := "VrfV" + vpc.Name
 			slog.Info("Waiting for gateway routes on leaves after spine recovery",
-				"vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
+				"vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes)
 			if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
-				vrfName); err != nil {
+				vpc.Name); err != nil {
 				return fmt.Errorf("waiting for gateway routes after spine recovery in vpc %s: %w", vpc.Name, err)
 			}
 		}
