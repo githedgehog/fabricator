@@ -820,10 +820,18 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	gwNATACLSuite := makeGatewayNATACLSuite()
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
+	disruptionSuite, disruptionCleanup := makeDisruptionTestSuite()
 
-	if rtOpts.OnReadyTest {
+	if rtOpts.OnReadyTest && rtOpts.DisruptionTest {
+		return fmt.Errorf("the on-ready and the disruption suites are selected one at a time") //nolint:err113
+	}
+
+	switch {
+	case rtOpts.OnReadyTest:
 		suites = []*JUnitTestSuite{ortSuite}
-	} else {
+	case rtOpts.DisruptionTest:
+		suites = []*JUnitTestSuite{disruptionSuite}
+	default:
 		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite}
 	}
 
@@ -1050,6 +1058,27 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
 		if ortResults.Failures > 0 {
 			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:err113
+		}
+
+		return nil
+	}
+
+	if rtOpts.DisruptionTest {
+		disruptionResults, runErr := selectAndRunSuite(ctx, testCtx, disruptionSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		// the traffic and the VPCs the tests shared are removed however the suite ended
+		disruptionCleanup(ctx, disruptionResults)
+		// the report is written even when fail-fast ends the run: the suite is expected to fail
+		// and its evidence is the report
+		results = append(results, *disruptionResults)
+		if err := recapAndReport(results, rtOpts); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		if runErr != nil && rtOpts.FailFast {
+			return fmt.Errorf("running disruption test suite: %w", runErr)
+		}
+		slog.Info("Disruption Test Suite completed", "duration", time.Since(testStart).String())
+		if disruptionResults.Failures > 0 {
+			return fmt.Errorf("some tests failed: disruption=%d", disruptionResults.Failures) //nolint:err113
 		}
 
 		return nil
