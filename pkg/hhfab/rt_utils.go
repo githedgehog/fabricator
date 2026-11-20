@@ -223,9 +223,31 @@ func changeAgentStatus(ctx context.Context, ssh *sshutil.Config, swName string, 
 	return nil
 }
 
-// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
-func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, up bool) error {
+// Change the admin status of a switch port: (no) shutdown in the sonic-cli, or the link state in
+// NVUE on Cumulus. The agent brings a port that is down this way back up when it starts, as its
+// config then differs from the applied one, the same as it does on SONiC.
+//
+// On Cumulus, NVUE keeps one pending revision for every nv command on the switch. If the agent was
+// stopped in the middle of its config replace, that revision is partial, and applying it on top of
+// the port change removes the rest of the switch config, management included. Detaching first
+// starts the port change from the applied revision instead.
+func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, cumulus, up bool) error {
 	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
+	if cumulus {
+		state := "down"
+		if up {
+			state = "up" // as the agent sets it, so its next apply finds nothing to change
+		}
+		cmd := fmt.Sprintf("sudo -n nv config detach && sudo -n nv set interface %s link state %s && sudo -n nv config apply -y", nosPortName, state)
+		// an apply that cuts the switch off would otherwise leave the command waiting forever
+		runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if _, stderr, err := ssh.Run(runCtx, cmd); err != nil {
+			return fmt.Errorf("changing port %s status on switch %s: %w: %s", nosPortName, deviceName, err, stderr)
+		}
+
+		return nil
+	}
 	if up {
 		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "no shutdown"); err != nil {
 			return err
@@ -291,11 +313,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}()
 
 	// set port down
-	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, false); err != nil {
+	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, testCtx.cumulus, false); err != nil {
 		return fmt.Errorf("setting switch port down: %w", err)
 	}
 	defer func() {
-		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, true); err != nil {
+		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, testCtx.cumulus, true); err != nil {
 			portErr := fmt.Errorf("setting port up on %s: %w", deviceName, err)
 			if returnErr != nil {
 				returnErr = errors.Join(returnErr, portErr)
