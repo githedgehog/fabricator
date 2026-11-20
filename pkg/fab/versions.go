@@ -35,7 +35,7 @@ const (
 	CumulusVXVersion = meta.Version("v5.16.5")
 
 	// NVIDIA Cumulus MLX version
-	CumulusMLXVersion = meta.Version("v5.18.1")
+	CumulusMLXVersion = meta.Version("v5.18.3")
 )
 
 // Fabricator version is set at build time via ldflags

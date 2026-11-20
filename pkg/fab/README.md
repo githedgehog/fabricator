@@ -249,15 +249,15 @@ skopeo copy --all docker://ghcr.io/stakater/reloader:${RELOADER_VERSION} docker:
 
 ```bash
 export CUMULUS_VX_VERSION="v5.16.5"
-export CUMULUS_MLX_VERSION="v5.18.1"
-
 export CUMULUS_VX_VERSION_UPSTREAM="${CUMULUS_VX_VERSION:1}"
 
 cp cumulus-linux-${CUMULUS_VX_VERSION_UPSTREAM}-vx-amd64.qcow2 cumulus-linux-vx-amd64.qcow2
 oras push ghcr.io/githedgehog/cumulus-private/cumulus-vx-img:${CUMULUS_VX_VERSION} cumulus-linux-vx-amd64.qcow2
 
+export CUMULUS_MLX_VERSION="v5.18.3"
 export CUMULUS_MLX_VERSION_UPSTREAM="${CUMULUS_MLX_VERSION:1}"
 
+echo "$(cut -d' ' -f1 cumulus-linux-${CUMULUS_MLX_VERSION_UPSTREAM}-mlx-amd64.bin.sha256)  cumulus-linux-${CUMULUS_MLX_VERSION_UPSTREAM}-mlx-amd64.bin" | shasum -a 256 -c
 cp cumulus-linux-${CUMULUS_MLX_VERSION_UPSTREAM}-mlx-amd64.bin cumulus-linux-mlx-amd64.bin
 oras push ghcr.io/githedgehog/cumulus-private/cumulus-mlx:${CUMULUS_MLX_VERSION} cumulus-linux-mlx-amd64.bin
 ```
