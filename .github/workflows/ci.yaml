@@ -282,13 +282,14 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.numbered && 'num-' || '' }}${{ matrix.gateway == 'dpdk' && 'gwd-' || matrix.gateway == 'kernel' && 'gwk-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode || 'iso' }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
+    name: "${{ matrix.nos && format('{0}-', matrix.nos) || '' }}${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.numbered && 'num-' || '' }}${{ matrix.gateway == 'dpdk' && 'gwd-' || matrix.gateway == 'kernel' && 'gwk-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode || 'iso' }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab, skip vlab if ci:-vlab, skip upgrade if ci:-upgrade
       # if workflow_dispatch: skip hlab if hlab input is false
+      # cumulus only runs on pull_request with ci:+cmls for now
       skip: >-
         ${{
           github.event_name == 'pull_request'
@@ -299,6 +300,7 @@ jobs:
           )
           || github.event_name == 'workflow_dispatch'
           && !!matrix.hybrid && inputs.hlab != true
+          || matrix.nos == 'cmls' && !contains(github.event.pull_request.labels.*.name, 'ci:+cmls')
         }}
       fabricatorref: ${{ github.ref }}
       fabricmode: spine-leaf
@@ -307,6 +309,7 @@ jobs:
       gateway: ${{ !!matrix.gateway }}
       gatewaydriver: ${{ matrix.gateway }}
       includeonie: ${{ !!matrix.includeonie }}
+      nos: ${{ matrix.nos || '' }}
       buildmode: ${{ matrix.buildmode || 'iso' }}
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *' }}
@@ -331,6 +334,10 @@ jobs:
           # other build modes
           - { vpcmode: l2vni,                buildmode: manual }
           - { vpcmode: l2vni, gateway: dpdk, buildmode: usb, includeonie: true }
+
+          # other NOSes
+          # TODO run by default once fabric with Cumulus VPCs (githedgehog/fabric#1799) is bumped
+          - { nos: cmls, vpcmode: l2vni, gateway: kernel }
 
           # hlab
           - { hybrid: true, vpcmode: l2vni, gateway: kernel }

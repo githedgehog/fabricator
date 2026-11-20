@@ -47,6 +47,11 @@ on:
         type: boolean
         required: false
         default: false
+      nos:
+        description: "Switch NOS (empty for Broadcom SONiC or cmls for Cumulus)"
+        type: string
+        required: false
+        default: ""
       buildmode:
         description: "Build mode (e.g. iso, usb, manual)"
         type: string
@@ -113,7 +118,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.numbered && 'num-' || '' }}${{ inputs.gateway && (inputs.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
+  slug: "${{ inputs.nos != '' && format('{0}-', inputs.nos) || '' }}${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.numbered && 'num-' || '' }}${{ inputs.gateway && (inputs.gatewaydriver == 'dpdk' && 'gwd-' || 'gwk-') || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
@@ -142,6 +147,20 @@ jobs:
             exit 1
           fi
 
+      - name: Check NOS
+        env:
+          INPUT_NOS: ${{ inputs.nos }}
+          INPUT_UPGRADE_FROM: ${{ inputs.upgradefrom }}
+        run: |
+          if [[ -n "$INPUT_NOS" && "$INPUT_NOS" != "cmls" ]]; then
+            echo "Unsupported NOS: $INPUT_NOS" >&2
+            exit 1
+          fi
+          if [[ "$INPUT_NOS" == "cmls" && -n "$INPUT_UPGRADE_FROM" ]]; then
+            echo "Upgrades aren't supported for Cumulus" >&2
+            exit 1
+          fi
+
       - name: Docker readiness check
         run: |
           for i in $(seq 1 90); do
@@ -160,6 +179,7 @@ jobs:
           echo "  Mesh: ${{ inputs.mesh }}"
           echo "  Gateway: ${{ inputs.gateway }}"
           echo "  Include ONIE: ${{ inputs.includeonie }}"
+          echo "  NOS: ${{ inputs.nos }}"
           echo "  Build mode: ${{ inputs.buildmode }}"
           echo "  VPC mode: ${{ inputs.vpcmode }}"
           echo "  Hybrid: ${{ inputs.hybrid }}"
@@ -302,17 +322,21 @@ jobs:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_MESH: ${{ inputs.mesh }}
           INPUT_GATEWAY_DRIVER: ${{ inputs.gatewaydriver }}
+          INPUT_NOS: ${{ inputs.nos }}
         if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
         run: |
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
+            ${{ inputs.nos == 'cmls' && '--include-cumulus' || '' }} \
             ${{ inputs.custom_init_args }}
           VLAB_ESLAG_GROUPS=2
           VLAB_ORPHAN_LEAVES=1
           VLAB_MESH_LINKS=0
           VLAB_UNBUNDLED_SERVERS=2
+          VLAB_STATIC_PROXY_EXTERNALS=1
+          VLAB_NOS_GEN_ARGS=()
           if [[ "$INPUT_MESH" == "true" ]]; then
             VLAB_MESH_LINKS=3
           fi
@@ -320,12 +344,18 @@ jobs:
             VLAB_ESLAG_GROUPS=""
             VLAB_ORPHAN_LEAVES=3
           fi
+          if [[ "$INPUT_NOS" == "cmls" ]]; then
+            # Cumulus doesn't support proxy-ARP static externals and unnumbered fabric links yet
+            VLAB_STATIC_PROXY_EXTERNALS=0
+            VLAB_NOS_GEN_ARGS=(--default-switch-profile=cumulus-vx --numbered-links)
+          fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --gateway-workers="$VLAB_GATEWAY_WORKERS" \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
             --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
-            --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \
+            --externals-bgp=1 --externals-static=1 --externals-static-proxy=$VLAB_STATIC_PROXY_EXTERNALS --external-orphan-connections=1 \
             ${INPUT_GATEWAY_DRIVER:+--gateway-driver="$INPUT_GATEWAY_DRIVER"} \
             ${{ inputs.numbered && '--numbered-links' || '' }} \
+            "${VLAB_NOS_GEN_ARGS[@]}" \
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
@@ -345,6 +375,7 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
+            ${{ inputs.nos == 'cmls' && '--include-cumulus' || '' }} \
             ${{ inputs.custom_init_args }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.tmpl.yaml" \
             --set gateway="$GATEWAY"
@@ -380,7 +411,7 @@ jobs:
                 HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
               fi
             fi
-          elif [[ "${{ inputs.hybrid }}" == "true" || -n "${{ inputs.upgradefrom }}" ]]; then
+          elif [[ "${{ inputs.hybrid }}" == "true" || -n "${{ inputs.upgradefrom }}" || "${{ inputs.nos }}" == "cmls" ]]; then
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
           else
             HHFAB_TEST_ARGS+=(--release-test-on-ready-only)
@@ -391,7 +422,7 @@ jobs:
             --vpc-mode="$INPUT_VPC_MODE" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
-            --ready=inspect \
+            ${{ inputs.nos == 'cmls' && '--ready=wait' || '--ready=inspect' }} \
             --ready=inspect-pods \
             "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
