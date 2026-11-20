@@ -295,7 +295,7 @@ outer:
 
 					break outer
 				}
-				if err := changeSwitchPortStatus(ctx, spineSSH, spine.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, spineSSH, spine.Name, nosPortName, profileIsCumulus(profile), false); err != nil {
 					returnErr = fmt.Errorf("setting switch port down: %w", err)
 
 					break outer
@@ -657,7 +657,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	// shut down all spine ports connected to the target gateway
 	for _, sp := range spinePorts {
 		slog.Debug("Shutting down spine port", "spine", sp.spineName, "port", sp.nosPortName)
-		if err := changeSwitchPortStatus(ctx, spinesSSH[sp.spineName], sp.spineName, sp.nosPortName, false); err != nil {
+		if err := changeSwitchPortStatus(ctx, spinesSSH[sp.spineName], sp.spineName, sp.nosPortName, profileIsCumulus(spineProfiles[sp.spineName]), false); err != nil {
 			returnErr = fmt.Errorf("setting switch port down: %w", err)
 
 			break
@@ -791,7 +791,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 				if !ok {
 					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:err113
 				}
-				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, profileIsCumulus(profile), false); err != nil {
 					return false, reverts, fmt.Errorf("setting switch port down: %w", err)
 				}
 			}

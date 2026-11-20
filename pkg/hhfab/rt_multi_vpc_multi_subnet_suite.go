@@ -673,6 +673,13 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 
 	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+inVPC.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
 	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", inVPC.Name, StaticExternalIP, StaticExternalNH)
+	cumulus, err := switchIsCumulus(ctx, testCtx.kube, switchName)
+	if err != nil {
+		return false, reverts, err
+	}
+	if cumulus {
+		wuPingCmd = fmt.Sprintf("sudo ip vrf exec %s ping -I %s %s -c 3 -W 1", switchVRFName(true, inVPC.Name), StaticExternalIP, StaticExternalNH)
+	}
 	switchSSH, err := testCtx.getSSH(ctx, switchName)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting ssh config for switch %s: %w", switchName, err)

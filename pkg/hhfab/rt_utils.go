@@ -224,9 +224,41 @@ func changeAgentStatus(ctx context.Context, ssh *sshutil.Config, swName string, 
 	return nil
 }
 
-// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
-func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, up bool) error {
+// switchIsCumulus reports whether the switch runs Cumulus, from its profile's NOS type.
+func switchIsCumulus(ctx context.Context, kube kclient.Reader, swName string) (bool, error) {
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
+		return false, fmt.Errorf("getting switch %s: %w", swName, err)
+	}
+	profile := &wiringapi.SwitchProfile{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw.Spec.Profile}, profile); err != nil {
+		return false, fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
+	}
+
+	return profileIsCumulus(profile), nil
+}
+
+func profileIsCumulus(profile *wiringapi.SwitchProfile) bool {
+	return slices.Contains(meta.NOSTypesCumulus, profile.Spec.NOSType)
+}
+
+// Change the admin status of a switch port: (no) shutdown in the sonic-cli, or the link state in
+// NVUE on Cumulus. The agent brings a port that is down this way back up when it starts, as its
+// config then differs from the applied one, the same as it does on SONiC.
+func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, cumulus, up bool) error {
 	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
+	if cumulus {
+		cmd := fmt.Sprintf("sudo nv set interface %s link state down", nosPortName)
+		if up {
+			cmd = fmt.Sprintf("sudo nv unset interface %s link state", nosPortName)
+		}
+		cmd += " && sudo nv config apply -y"
+		if _, stderr, err := ssh.Run(ctx, cmd); err != nil {
+			return fmt.Errorf("changing port %s status on switch %s: %w: %s", nosPortName, deviceName, err, stderr)
+		}
+
+		return nil
+	}
 	if up {
 		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "no shutdown"); err != nil {
 			return err
@@ -292,11 +324,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}()
 
 	// set port down
-	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, false); err != nil {
+	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, profileIsCumulus(profile), false); err != nil {
 		return fmt.Errorf("setting switch port down: %w", err)
 	}
 	defer func() {
-		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, true); err != nil {
+		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, profileIsCumulus(profile), true); err != nil {
 			portErr := fmt.Errorf("setting port up on %s: %w", deviceName, err)
 			if returnErr != nil {
 				returnErr = errors.Join(returnErr, portErr)
@@ -467,16 +499,9 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitchVRFs(ctx context.Context,
 			return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
 		}
 		sshs[sw] = ssh
-
-		swObj := &wiringapi.Switch{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw}, swObj); err != nil {
-			return fmt.Errorf("getting switch %s: %w", sw, err)
+		if cumulus[sw], err = switchIsCumulus(ctx, testCtx.kube, sw); err != nil {
+			return err
 		}
-		profile := &wiringapi.SwitchProfile{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swObj.Spec.Profile}, profile); err != nil {
-			return fmt.Errorf("getting switch profile %s: %w", swObj.Spec.Profile, err)
-		}
-		cumulus[sw] = slices.Contains(meta.NOSTypesCumulus, profile.Spec.NOSType)
 	}
 
 	for {
