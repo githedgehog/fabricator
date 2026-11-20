@@ -341,6 +341,7 @@ jobs:
           VLAB_MESH_LINKS=0
           VLAB_UNBUNDLED_SERVERS=2
           VLAB_STATIC_PROXY_EXTERNALS=1
+          VLAB_MULTIHOMED_SERVERS=1
           VLAB_NOS_GEN_ARGS=()
           if [[ "$INPUT_MESH" == "true" ]]; then
             VLAB_MESH_LINKS=3
@@ -350,13 +351,14 @@ jobs:
             VLAB_ORPHAN_LEAVES=3
           fi
           if [[ "$INPUT_NOS" == "cmls" ]]; then
-            # Cumulus doesn't support proxy-ARP static externals yet
+            # Cumulus doesn't support proxy-ARP static externals and host BGP (used by multihomed servers) yet
             VLAB_STATIC_PROXY_EXTERNALS=0
+            VLAB_MULTIHOMED_SERVERS=0
             VLAB_NOS_GEN_ARGS=(--default-switch-profile=cumulus-vx)
           fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --gateway-workers="$VLAB_GATEWAY_WORKERS" \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
-            --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
+            --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=$VLAB_MULTIHOMED_SERVERS \
             --externals-bgp=1 --externals-static=1 --externals-static-proxy=$VLAB_STATIC_PROXY_EXTERNALS --external-orphan-connections=1 \
             ${INPUT_GATEWAY_DRIVER:+--gateway-driver="$INPUT_GATEWAY_DRIVER"} \
             ${{ inputs.numbered && '--numbered-links' || '' }} \
