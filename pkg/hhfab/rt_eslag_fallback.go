@@ -82,6 +82,7 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *
 		netconfCmd, err := GetServerNetconfCmd(conn, ServerNetconfOpts{
 			VLAN:       vlan,
 			HashPolicy: testCtx.setupOpts.HashPolicy,
+			MTU:        testCtx.setupOpts.InterfaceMTU,
 		})
 		if err != nil {
 			return false, reverts, fmt.Errorf("building netconf command for %s: %w", server, err)

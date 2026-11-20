@@ -1389,6 +1389,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			netconfCmd, err := GetServerNetconfCmd(regularVPC.Connection, ServerNetconfOpts{
 				VLAN:       subnet.VLAN,
 				HashPolicy: testCtx.setupOpts.HashPolicy,
+				MTU:        testCtx.setupOpts.InterfaceMTU,
 			})
 			if err != nil {
 				return fmt.Errorf("error getting netconf command for server %s: %w", regularVPC.Server.Name, err)

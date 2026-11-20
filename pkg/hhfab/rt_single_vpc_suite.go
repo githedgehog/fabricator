@@ -989,6 +989,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	netconfCmd, netconfErr := GetServerNetconfCmd(serverInfo.Connection, ServerNetconfOpts{
 		VLAN:       serverInfo.Subnet.VLAN,
 		HashPolicy: testCtx.setupOpts.HashPolicy,
+		MTU:        testCtx.setupOpts.InterfaceMTU,
 	})
 	if netconfErr != nil {
 		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
