@@ -130,7 +130,7 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	} else {
 		allVS := len(switches.Items) > 0
 		for _, sw := range switches.Items {
-			if sw.Spec.Profile != meta.SwitchProfileVS {
+			if !slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
 				allVS = false
 
 				break
@@ -936,7 +936,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	for i, sw := range swList.Items {
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
-			if sw.Spec.Profile == meta.SwitchProfileVS {
+			if slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
 				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
 			}
@@ -967,7 +967,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 			skipFlags.SubInterfaces = true
 		}
 		// exclude virtual switches from RoCE check, they do not implement counters
-		if profile.Spec.Features.RoCE && sw.Spec.Profile != meta.SwitchProfileVS {
+		if profile.Spec.Features.RoCE && !slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
 			roceLeaves = append(roceLeaves, sw.Name)
 		}
 	}
