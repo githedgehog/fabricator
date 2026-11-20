@@ -1501,11 +1501,11 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			if !ok {
 				return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:err113
 			}
-			if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, false); err != nil {
+			if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, testCtx.cumulus, false); err != nil {
 				return false, reverts, fmt.Errorf("shutting down port %s on %s: %w", failoverNOSPort, failoverSwitchName, err)
 			}
 			reverts = append(reverts, func(ctx context.Context) error {
-				return changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, true)
+				return changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, testCtx.cumulus, true)
 			})
 		}
 
