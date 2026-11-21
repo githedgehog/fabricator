@@ -477,16 +477,18 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	// up for the whole run, so BMC nodes can be reinstalled any time
 	var mediaCtx context.Context
+	stopMedia := func() {}
 	if len(bmcNodes) > 0 {
-		var stop func()
-		mediaCtx, stop, err = c.serveNodeISOs(ctx, slices.Collect(maps.Keys(bmcNodes)))
+		mediaCtx, stopMedia, err = c.serveNodeISOs(ctx, slices.Collect(maps.Keys(bmcNodes)))
 		if err != nil {
 			return err
 		}
-		defer stop()
+		defer stopMedia()
 	}
 
 	group, ctx := errgroup.WithContext(ctx)
+	// a failed or exited run may end with os.Exit, which skips the defers, so the root helper would keep port 80
+	context.AfterFunc(ctx, stopMedia)
 	postProcesses := &sync.WaitGroup{}
 	postProcessDone := make(chan struct{})
 
@@ -875,6 +877,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
 						slog.Warn("Immediately exiting b/c running in GHA")
+						stopMedia()
 						os.Exit(0)
 					}
 
