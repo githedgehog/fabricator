@@ -392,27 +392,34 @@ func (c *Config) VLABNodeReinstall(ctx context.Context, vlab *VLAB, opts NodeRei
 	return group.Wait() //nolint:wrapcheck
 }
 
-// clusterFab waits for the existing cluster K8s API, the control node may be still booting
+// clusterFab waits for the cluster K8s API, the control node may be still installing or booting
 func (c *Config) clusterFab(ctx context.Context) (kclient.Client, *fabapi.Fabricator, error) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	for {
-		kube, err := kubeutil.NewClientWithCore(ctx, kubeconfig, fabapi.AddToScheme, agentapi.AddToScheme)
-		if err == nil {
-			f := &fabapi.Fabricator{}
-			if err = kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err == nil {
-				return kube, f, nil
+	for idx := 0; ; idx++ {
+		reason := "no kubeconfig yet"
+		if _, err := os.Stat(kubeconfig); err == nil {
+			kube, err := kubeutil.NewClientWithCore(ctx, kubeconfig, fabapi.AddToScheme, agentapi.AddToScheme)
+			if err == nil {
+				f := &fabapi.Fabricator{}
+				if err = kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err == nil {
+					return kube, f, nil
+				}
 			}
+			// only the message, the kubeutil errors carry a stack trace
+			reason = err.Error()
 		}
 
-		slog.Debug("Waiting for K8s API of the existing cluster", "err", err)
+		if idx%8 == 0 { // every ~2 min
+			slog.Debug("Waiting for K8s API", "reason", reason)
+		}
 
 		select {
 		case <-ctx.Done():
-			return nil, nil, fmt.Errorf("waiting for K8s API: %w: %w", ctx.Err(), err)
+			return nil, nil, fmt.Errorf("waiting for K8s API: %w: %s", ctx.Err(), reason)
 		case <-time.After(15 * time.Second):
 		}
 	}
