@@ -21,6 +21,7 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
@@ -30,6 +31,7 @@ import (
 	coreapi "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -136,8 +138,7 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		})()
 	}
 
-	// the node joins the existing cluster, so the ISO built by this run has to be the same version; the one served by
-	// another process is whatever it built, so it's reinstalled as is
+	// the node joins the existing cluster, so the installer has to be the same version
 	var kube kclient.Client
 	if !vlab.Created {
 		var cluster *fabapi.Fabricator
@@ -145,10 +146,8 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		if err != nil {
 			return err
 		}
-		if mediaCtx != nil {
-			if err := c.checkClusterVersion(cluster); err != nil {
-				return err
-			}
+		if err := c.checkClusterVersion(cluster, name); err != nil {
+			return err
 		}
 	}
 
@@ -429,10 +428,14 @@ func (c *Config) clusterFab(ctx context.Context) (kclient.Client, *fabapi.Fabric
 }
 
 // checkClusterVersion is needed as the node gets the fab CA from the node config agent only if its airgap image is the
-// cluster's one
-func (c *Config) checkClusterVersion(cluster *fabapi.Fabricator) error {
+// cluster's one; it checks the installer in the result dir, as that's what's served, whatever hhfab built it
+func (c *Config) checkClusterVersion(cluster *fabapi.Fabricator, name string) error {
+	installerV, err := c.nodeInstallerVersion(name)
+	if err != nil {
+		return err
+	}
+
 	clusterV := cluster.Status.Versions.Fabricator.NodeConfig
-	installerV := c.Fab.Status.Versions.Fabricator.NodeConfig
 	if clusterV != installerV {
 		slog.Error("Existing cluster and node installer versions differ, upgrade the cluster first or recreate it",
 			"cluster", clusterV, "installer", installerV, "upgrade", "hhfab vlab up --upgrade", "recreate", "hhfab vlab up -f")
@@ -441,6 +444,28 @@ func (c *Config) checkClusterVersion(cluster *fabapi.Fabricator) error {
 	}
 
 	return nil
+}
+
+// nodeInstallerVersion returns the node config version the node installer in the result dir is built with
+func (c *Config) nodeInstallerVersion(name string) (meta.Version, error) {
+	installDir := string(recipe.TypeNode) + recipe.Separator + name + recipe.Separator + recipe.InstallSuffix
+	path := filepath.Join(c.WorkDir, ResultDir, installDir, recipe.FabName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading node installer config: %w", err)
+	}
+
+	// the fabricator is the first document, written with its status
+	doc, _, _ := strings.Cut(string(data), "\n---\n")
+	f := &fabapi.Fabricator{}
+	if err := kyaml.Unmarshal([]byte(doc), f); err != nil {
+		return "", fmt.Errorf("parsing node installer config %s: %w", path, err)
+	}
+	if f.Status.Versions.Fabricator.NodeConfig == "" {
+		return "", fmt.Errorf("no node config version in node installer config %s", path) //nolint:err113
+	}
+
+	return f.Status.Versions.Fabricator.NodeConfig, nil
 }
 
 // deleteK8sNode removes the node and its k3s node password, so it can join again after the reinstall
