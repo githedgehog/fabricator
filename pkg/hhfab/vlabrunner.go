@@ -675,7 +675,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 	for _, name := range plan.upgradeNodes {
 		hwRun("upgrade", name, func() error {
-			return c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts)
+			if err := c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts); err != nil {
+				return err
+			}
+
+			return c.setHWInstalled(name)
 		})
 	}
 

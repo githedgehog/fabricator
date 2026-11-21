@@ -227,8 +227,8 @@ func (c *Config) resetHWInstalled(name string) error {
 	return nil
 }
 
-// hwPlan is what vlab up does with the used hardware, it's decided before the build to fail early; each switch and
-// node is in one list only, so none is power cycled and powered on at the same time
+// hwPlan is what vlab up does with the used hardware, it's decided before the build to fail early; none is reinstalled
+// and powered on at the same time, an upgraded node is powered on as well
 type hwPlan struct {
 	reinstallSwitches []string           // power cycled into the NOS install
 	powerOnSwitches   []wiringapi.Switch // installed before, in case they're off
@@ -397,7 +397,8 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 }
 
 // powerOnUsedHW runs on every vlab up, so the used hardware that isn't reinstalled is on, as it may be off after a
-// previous run. It's marked installed, as after an upgrade it's part of this VLAB without a marker.
+// previous run. It's marked installed, as after an upgrade it's part of this VLAB without a marker, an upgraded node
+// only once its upgrade is done.
 func (c *Config) powerOnUsedHW(ctx context.Context, plan *hwPlan, opts VLABRunOpts) error {
 	group := &errgroup.Group{}
 	for _, sw := range plan.powerOnSwitches {
@@ -413,6 +414,11 @@ func (c *Config) powerOnUsedHW(ctx context.Context, plan *hwPlan, opts VLABRunOp
 		group.Go(func() error {
 			if err := powerNode(ctx, endpoint, pdu.ActionOn, opts.BMC); err != nil {
 				return fmt.Errorf("powering on node %s: %w", name, err)
+			}
+
+			// the upgrade marks it once it's done
+			if opts.AutoUpgrade {
+				return nil
 			}
 
 			return c.setHWInstalled(name)
