@@ -401,16 +401,22 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 }
 
 // powerOnUsedHW runs on every vlab up, so the used hardware that isn't reinstalled is on, as it may be off after a
-// previous run
+// previous run. It's marked installed, as after an upgrade it's part of this VLAB without a marker.
 func (c *Config) powerOnUsedHW(ctx context.Context, plan *hwPlan, opts VLABRunOpts) error {
 	for _, sw := range plan.powerOnSwitches {
 		if err := powerSwitch(ctx, &sw, pdu.ActionOn, opts.PDUUsername, opts.PDUPassword); err != nil {
 			return fmt.Errorf("powering on switch: %w", err)
 		}
+		if err := c.setHWInstalled(sw.Name); err != nil {
+			return err
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(plan.powerOnNodes)) {
 		if err := powerNode(ctx, plan.powerOnNodes[name], pdu.ActionOn, opts.BMC); err != nil {
 			return fmt.Errorf("powering on node %s: %w", name, err)
+		}
+		if err := c.setHWInstalled(name); err != nil {
+			return err
 		}
 	}
 
