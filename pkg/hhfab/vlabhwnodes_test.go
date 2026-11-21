@@ -4,12 +4,18 @@
 package hhfab
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
 func TestBMCNodes(t *testing.T) {
@@ -83,15 +89,28 @@ func TestCheckBMCNodes(t *testing.T) {
 }
 
 func TestCheckClusterVersion(t *testing.T) {
-	c := &Config{}
-	c.Fab.Status.Versions.Fabricator.NodeConfig = "v1.2.3-dirty-Lv2309"
+	c := &Config{WorkDir: t.TempDir()}
+	// what this hhfab would build doesn't matter, only the installer in the result dir does
+	c.Fab.Status.Versions.Fabricator.NodeConfig = "v1.2.4"
 
 	cluster := &fabapi.Fabricator{}
 	cluster.Status.Versions.Fabricator.NodeConfig = "v1.2.3-dirty-Lv2309"
-	require.NoError(t, c.checkClusterVersion(cluster))
+	require.ErrorContains(t, c.checkClusterVersion(cluster, "gateway-bm"), "reading node installer config")
+
+	// written as the node installer build does
+	installer := fabapi.Fabricator{Name: comp.FabName, Namespace: comp.FabNamespace}
+	installer.Status.Versions.Fabricator.NodeConfig = "v1.2.3-dirty-Lv2309"
+	node := fabapi.FabNode{Name: "gateway-bm", Namespace: comp.FabNamespace}
+	installDir := filepath.Join(c.WorkDir, ResultDir, string(recipe.TypeNode)+recipe.Separator+"gateway-bm"+recipe.Separator+recipe.InstallSuffix)
+	require.NoError(t, os.MkdirAll(installDir, 0o700))
+	buf := &bytes.Buffer{}
+	require.NoError(t, apiutil.PrintFab(installer, nil, []fabapi.FabNode{node}, apiutil.NewLoader().GetClient().Scheme(), buf))
+	require.NoError(t, os.WriteFile(filepath.Join(installDir, recipe.FabName), buf.Bytes(), 0o600))
+
+	require.NoError(t, c.checkClusterVersion(cluster, "gateway-bm"))
 
 	cluster.Status.Versions.Fabricator.NodeConfig = "v1.2.3-dirty-Ak2124"
-	require.ErrorContains(t, c.checkClusterVersion(cluster), "Ak2124")
+	require.ErrorContains(t, c.checkClusterVersion(cluster, "gateway-bm"), "Ak2124")
 }
 
 func TestCheckFreshInstall(t *testing.T) {
