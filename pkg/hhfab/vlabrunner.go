@@ -212,12 +212,18 @@ var (
 
 // PrecacheVLABORAS returns a list of ORAS artifacts that are required for building the VLAB
 func PrecacheVLABORAS(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	return comp.OCIArtifacts{
+	arts := comp.OCIArtifacts{
 		vlabcomp.FlatcarRef:       vlabcomp.FlatcarVersion(cfg),
 		vlabcomp.ONIERef:          vlabcomp.ONIEVersion(cfg),
 		flatcar.ToolboxArchiveRef: flatcar.ToolboxVersion(cfg),
 		flatcar.HostBGPArchiveRef: flatcar.HostBGPContainerVersion(cfg),
-	}, nil
+	}
+
+	if cfg.Spec.Config.Fabric.IncludeCumulus {
+		arts[vlabcomp.CumulusVXImgRef] = vlabcomp.CumulusVXImgVersion(cfg)
+	}
+
+	return arts, nil
 }
 
 // PrecacheVLABOCI returns a list of OCI artifacts that are required for building the VLAB
