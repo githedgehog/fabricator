@@ -141,7 +141,6 @@ const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
 	OnReadySetupPeerings    OnReady = "setup-peerings"
-	OnReadySwitchReinstall  OnReady = "switch-reinstall"
 	OnReadyTestConnectivity OnReady = "test-connectivity"
 	OnReadyWait             OnReady = "wait"
 	OnReadyInspect          OnReady = "inspect"
@@ -153,7 +152,6 @@ var AllOnReady = []OnReady{
 	OnReadyExit,
 	OnReadySetupVPCs,
 	OnReadySetupPeerings,
-	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
 	OnReadyWait,
 	OnReadyInspect,
@@ -162,14 +160,13 @@ var AllOnReady = []OnReady{
 }
 
 var fromShortOnReadyMap = map[string]OnReady{
-	"vpcs":      OnReadySetupVPCs,
-	"peers":     OnReadySetupPeerings,
-	"reinstall": OnReadySwitchReinstall,
-	"conns":     OnReadyTestConnectivity,
-	"wait":      OnReadyWait,
-	"inspect":   OnReadyInspect,
-	"pods":      OnReadyInspectPods,
-	"rt":        OnReadyReleaseTest,
+	"vpcs":    OnReadySetupVPCs,
+	"peers":   OnReadySetupPeerings,
+	"conns":   OnReadyTestConnectivity,
+	"wait":    OnReadyWait,
+	"inspect": OnReadyInspect,
+	"pods":    OnReadyInspectPods,
+	"rt":      OnReadyReleaseTest,
 }
 
 func FromShortOnReady(short string) OnReady {
@@ -178,6 +175,21 @@ func FromShortOnReady(short string) OnReady {
 	}
 
 	return OnReady(short)
+}
+
+// ValidateOnReady checks the on-ready commands before vlab up does any work
+func ValidateOnReady(onReady []OnReady) error {
+	for _, cmd := range onReady {
+		// removed, but still in use by older scripts
+		if cmd == "switch-reinstall" || cmd == "reinstall" {
+			return fmt.Errorf("on-ready %s is removed: vlab up installs the hardware itself by default, see --hw, --hw-switches and --hw-nodes (--hw=%s to reinstall all of it)", cmd, HWModeReinstall) //nolint:err113
+		}
+		if !slices.Contains(AllOnReady, cmd) {
+			return fmt.Errorf("unsupported on-ready command %q, expected one of %v", cmd, AllOnReady) //nolint:err113
+		}
+	}
+
+	return nil
 }
 
 var ErrExit = fmt.Errorf("exit")
@@ -229,12 +241,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}()
 
 	start := time.Now()
-
-	for _, cmd := range opts.OnReady {
-		if !slices.Contains(AllOnReady, cmd) {
-			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:err113
-		}
-	}
 
 	if len(opts.OnReady) > 0 && !opts.FailFast {
 		slog.Warn("On-ready commands enables fail-fast")
@@ -810,8 +816,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
 				switch cmd {
-				case OnReadySwitchReinstall:
-					// it's --hw=reinstall and done right away
 				case OnReadySetupVPCs:
 					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,

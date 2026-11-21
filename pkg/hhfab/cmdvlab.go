@@ -73,6 +73,10 @@ type VLABUpOpts struct {
 }
 
 func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string, opts VLABUpOpts) error {
+	if err := ValidateOnReady(opts.OnReady); err != nil {
+		return err
+	}
+
 	if opts.AutoUpgrade {
 		opts.BuildMode = recipe.BuildModeManual
 		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
@@ -83,7 +87,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 	}
 
 	var err error
-	opts.HWSwitches, opts.HWNodes, opts.OnReady, err = resolveHWModes(opts.HWModes, opts.OnReady, opts.AutoUpgrade)
+	opts.HWSwitches, opts.HWNodes, err = resolveHWModes(opts.HWModes, opts.AutoUpgrade)
 	if err != nil {
 		return err
 	}

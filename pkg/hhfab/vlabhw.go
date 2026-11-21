@@ -55,33 +55,21 @@ type HWModeFlags struct {
 
 var ErrPDUCredentials = errors.New("PDU username and password are required to manage hardware switches")
 
-// resolveHWModes returns the switch and node modes and the on-ready commands without switch-reinstall, which is the
-// same as reinstall for all hardware now
-func resolveHWModes(flags HWModeFlags, onReady []OnReady, upgrade bool) (HWMode, HWMode, []OnReady, error) {
+// resolveHWModes returns the switch and node modes
+func resolveHWModes(flags HWModeFlags, upgrade bool) (HWMode, HWMode, error) {
 	for _, mode := range []HWMode{flags.All, flags.Switches, flags.Nodes} {
 		if mode != "" && !slices.Contains(HWModes, mode) {
-			return "", "", nil, fmt.Errorf("invalid hardware mode %q, expected one of %v", mode, HWModes) //nolint:err113
+			return "", "", fmt.Errorf("invalid hardware mode %q, expected one of %v", mode, HWModes) //nolint:err113
 		}
 	}
 
 	if flags.All != "" && (flags.Switches != "" || flags.Nodes != "") {
-		return "", "", nil, fmt.Errorf("--hw can't be combined with --hw-switches or --hw-nodes") //nolint:err113
+		return "", "", fmt.Errorf("--hw can't be combined with --hw-switches or --hw-nodes") //nolint:err113
 	}
 
 	switches, nodes := flags.Switches, flags.Nodes
 	if flags.All != "" {
 		switches, nodes = flags.All, flags.All
-	}
-
-	if slices.Contains(onReady, OnReadySwitchReinstall) {
-		if switches != "" && switches != HWModeReinstall || nodes != "" && nodes != HWModeReinstall {
-			return "", "", nil, fmt.Errorf("on-ready %s is the same as --hw=%s, it can't be combined with other hardware modes", OnReadySwitchReinstall, HWModeReinstall) //nolint:err113
-		}
-
-		slog.Warn("Hardware is reinstalled right away instead of on ready", "onReady", OnReadySwitchReinstall, "hw", HWModeReinstall)
-
-		switches, nodes = HWModeReinstall, HWModeReinstall
-		onReady = slices.DeleteFunc(slices.Clone(onReady), func(cmd OnReady) bool { return cmd == OnReadySwitchReinstall })
 	}
 
 	if switches == "" {
@@ -92,10 +80,10 @@ func resolveHWModes(flags HWModeFlags, onReady []OnReady, upgrade bool) (HWMode,
 	}
 
 	if upgrade && (switches == HWModeReinstall || nodes == HWModeReinstall) {
-		return "", "", nil, fmt.Errorf("--upgrade can't reinstall hardware") //nolint:err113
+		return "", "", fmt.Errorf("--upgrade can't reinstall hardware") //nolint:err113
 	}
 
-	return switches, nodes, onReady, nil
+	return switches, nodes, nil
 }
 
 // UnusedHW is the hardware kept out of VLAB, only to power it off

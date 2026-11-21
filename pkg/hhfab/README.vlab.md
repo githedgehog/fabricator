@@ -35,7 +35,7 @@ hhfab vlab up --hw=reinstall
 hhfab vlab up --hw-nodes=disabled
 ```
 
-`--ready switch-reinstall` (`-r=reinstall`) is replaced by `--hw=reinstall` and still works as an alias for it.
+`--ready switch-reinstall` (`-r=reinstall`) is removed, as it's the default now, and fails with a hint to these flags.
 
 ## How it works
 
