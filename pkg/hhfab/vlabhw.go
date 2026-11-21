@@ -426,6 +426,9 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 	ctx, cancel := context.WithTimeout(ctx, switchInstallTimeout)
 	defer cancel()
 
+	// an existing cluster has the agent status from before the reinstall
+	start := time.Now()
+
 	// the script limits from the discovery to the NOS install would trip while the control node is still booting
 	if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
 		Switches:    names,
@@ -444,7 +447,7 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 	group := &errgroup.Group{}
 	for _, name := range names {
 		group.Go(func() error {
-			if err := waitSwitchAgent(ctx, kube, name); err != nil {
+			if err := waitSwitchAgent(ctx, kube, name, start); err != nil {
 				return err
 			}
 			if err := c.setHWInstalled(name); err != nil {
@@ -460,8 +463,8 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 	return group.Wait() //nolint:wrapcheck
 }
 
-// waitSwitchAgent waits for the agent at the version the cluster expects
-func waitSwitchAgent(ctx context.Context, kube kclient.Reader, name string) error {
+// waitSwitchAgent waits for the agent at the version the cluster expects, with a heartbeat after the since time
+func waitSwitchAgent(ctx context.Context, kube kclient.Reader, name string, since time.Time) error {
 	for {
 		f := &fabapi.Fabricator{}
 		err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f)
@@ -469,7 +472,8 @@ func waitSwitchAgent(ctx context.Context, kube kclient.Reader, name string) erro
 			expected := string(f.Status.Versions.Fabric.Controller)
 			ag := &agentapi.Agent{}
 			err = kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: name}, ag)
-			if err == nil && expected != "" && switchAgentApplied(ag, expected) && ag.Status.Version == expected {
+			if err == nil && expected != "" && switchAgentApplied(ag, expected) && ag.Status.Version == expected &&
+				ag.Status.LastHeartbeat.After(since) {
 				return nil
 			}
 		}
