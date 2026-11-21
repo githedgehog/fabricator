@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	ErrBMCCredentials = errors.New("BMC username and password are required to install hardware nodes over BMC")
+	ErrBMCCredentials = errors.New("BMC username and password are required to manage hardware nodes")
 	ErrMediaServer    = errors.New("media server failed")
 )
 

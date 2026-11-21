@@ -54,7 +54,7 @@ type HWModeFlags struct {
 	Nodes    HWMode
 }
 
-var ErrPDUCredentials = errors.New("PDU username and password are required to reinstall hardware switches")
+var ErrPDUCredentials = errors.New("PDU username and password are required to manage hardware switches")
 
 // resolveHWModes returns the switch and node modes and the on-ready commands without switch-reinstall, which is the
 // same as reinstall for all hardware now
@@ -250,22 +250,23 @@ func (c *Config) resetHWInstalled(name string) error {
 	return nil
 }
 
-// hwPlan is what vlab up does with the hardware, it's decided before the build to fail early
+// hwPlan is what vlab up does with the used hardware, it's decided before the build to fail early; each switch and
+// node is in one list only, so none is power cycled and powered on at the same time
 type hwPlan struct {
-	switches        []string           // to reinstall
-	powerOnSwitches []wiringapi.Switch // installed before, in case they're off
-	nodes           map[string]string  // to install over BMC, by name to BMC endpoint
-	upgradeNodes    []string           // to upgrade same as VMs
-	powerOnNodes    map[string]string  // installed before, in case they're off
-	manualNodes     map[string]bool    // to be installed by the user
+	reinstallSwitches []string           // power cycled into the NOS install
+	powerOnSwitches   []wiringapi.Switch // installed before, in case they're off
+	reinstallNodes    map[string]string  // installed over BMC, by name to BMC endpoint
+	upgradeNodes      []string           // upgraded same as VMs
+	powerOnNodes      map[string]string  // installed before, in case they're off, by name to BMC endpoint
+	manualNodes       map[string]bool    // installed by the user
 }
 
 // planHW has to run after the VLAB is prepared, as recreating it removes the install markers
 func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) {
 	plan := &hwPlan{
-		nodes:        map[string]string{},
-		powerOnNodes: map[string]string{},
-		manualNodes:  map[string]bool{},
+		reinstallNodes: map[string]string{},
+		powerOnNodes:   map[string]string{},
+		manualNodes:    map[string]bool{},
 	}
 
 	switches := &wiringapi.SwitchList{}
@@ -294,12 +295,12 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 
 		switch {
 		case opts.HWSwitches == HWModeReinstall:
-			plan.switches = append(plan.switches, sw.Name)
-		case installed:
+			plan.reinstallSwitches = append(plan.reinstallSwitches, sw.Name)
+		case installed || opts.AutoUpgrade:
 			plan.powerOnSwitches = append(plan.powerOnSwitches, sw)
-		case !opts.AutoUpgrade:
+		default:
 			slog.Info("Hardware switch wasn't installed into this VLAB, reinstalling it", "switch", sw.Name)
-			plan.switches = append(plan.switches, sw.Name)
+			plan.reinstallSwitches = append(plan.reinstallSwitches, sw.Name)
 		}
 	}
 
@@ -319,7 +320,7 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 			plan.manualNodes[node.Name] = true
 		case opts.AutoUpgrade:
 			plan.upgradeNodes = append(plan.upgradeNodes, node.Name)
-			if endpoint != "" && installed {
+			if endpoint != "" {
 				plan.powerOnNodes[node.Name] = endpoint
 			}
 		case endpoint == "":
@@ -328,83 +329,92 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 			}
 			plan.manualNodes[node.Name] = true
 		case opts.HWNodes == HWModeReinstall || !installed:
-			plan.nodes[node.Name] = endpoint
+			plan.reinstallNodes[node.Name] = endpoint
 		default:
 			plan.powerOnNodes[node.Name] = endpoint
 		}
 	}
 
-	if len(plan.switches) > 0 {
-		if opts.PDUUsername == "" || opts.PDUPassword == "" {
-			return nil, ErrPDUCredentials
+	// powering on and off needs the credentials too
+	needPDU := len(plan.reinstallSwitches) > 0 || len(plan.powerOnSwitches) > 0
+	needBMC := len(plan.reinstallNodes) > 0 || len(plan.powerOnNodes) > 0
+	if opts.HWPowerOffUnused {
+		for _, sw := range c.UnusedHW.Switches {
+			needPDU = needPDU || len(hhfctl.GetPowerInfo(&sw)) > 0
 		}
+		for _, node := range c.UnusedHW.Nodes {
+			endpoint, _ := getBMCEndpoint(&node) // validated when dropped
+			needBMC = needBMC || endpoint != ""
+		}
+	}
+	if needPDU && (opts.PDUUsername == "" || opts.PDUPassword == "") {
+		return nil, ErrPDUCredentials
+	}
+	if needBMC && (opts.BMC.Username == "" || opts.BMC.Password == "") {
+		return nil, ErrBMCCredentials
+	}
+
+	if len(plan.reinstallSwitches) > 0 {
 		if _, err := exec.LookPath(VLABCmdExpect); err != nil {
 			return nil, fmt.Errorf("%q is required to reinstall hardware switches: %w", VLABCmdExpect, err)
 		}
 	}
 
-	if err := checkBMCNodes(ctx, plan.nodes, opts.BMC); err != nil {
+	if err := checkBMCNodes(ctx, plan.reinstallNodes, opts.BMC); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
 }
 
-// powerHW powers off the unused hardware and on the installed one in case it's off, failures are only warnings as
-// the waits for the hardware catch them
-func (c *Config) powerHW(ctx context.Context, plan *hwPlan, opts VLABRunOpts) {
-	pduCreds := opts.PDUUsername != "" && opts.PDUPassword != ""
-	bmcCreds := opts.BMC.Username != "" && opts.BMC.Password != ""
+// powerOffUnusedHW runs on every vlab up, so the unused hardware is never left on
+func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
+	if !opts.HWPowerOffUnused {
+		return nil
+	}
 
-	switchPower := func(sw *wiringapi.Switch, action pdu.Action) {
-		if len(hhfctl.GetPowerInfo(sw)) == 0 {
-			return
+	for _, sw := range c.UnusedHW.Switches {
+		if err := c.resetHWInstalled(sw.Name); err != nil {
+			return err
 		}
-		if !pduCreds {
-			slog.Warn("No PDU credentials to power switch", "switch", sw.Name, "action", action)
-
-			return
+		if len(hhfctl.GetPowerInfo(&sw)) == 0 {
+			continue
 		}
-		if err := powerSwitch(ctx, sw, action, opts.PDUUsername, opts.PDUPassword); err != nil {
-			slog.Warn("Failed to power switch", "switch", sw.Name, "action", action, "err", err)
+		if err := powerSwitch(ctx, &sw, pdu.ActionOff, opts.PDUUsername, opts.PDUPassword); err != nil {
+			return fmt.Errorf("powering off unused switch: %w", err)
 		}
 	}
-	nodePower := func(name, endpoint string, action pdu.Action) {
+	for _, node := range c.UnusedHW.Nodes {
+		if err := c.resetHWInstalled(node.Name); err != nil {
+			return err
+		}
+		endpoint, _ := getBMCEndpoint(&node) // validated when dropped
 		if endpoint == "" {
-			return
+			continue
 		}
-		if !bmcCreds {
-			slog.Warn("No BMC credentials to power node", "node", name, "action", action)
-
-			return
-		}
-		if err := powerNode(ctx, endpoint, action, opts.BMC); err != nil {
-			slog.Warn("Failed to power node", "node", name, "action", action, "err", err)
+		if err := powerNode(ctx, endpoint, pdu.ActionOff, opts.BMC); err != nil {
+			return fmt.Errorf("powering off unused node %s: %w", node.Name, err)
 		}
 	}
 
-	if opts.HWPowerOffUnused {
-		for _, sw := range c.UnusedHW.Switches {
-			if err := c.resetHWInstalled(sw.Name); err != nil {
-				slog.Warn("Failed to remove unused switch install marker", "switch", sw.Name, "err", err)
-			}
-			switchPower(&sw, pdu.ActionOff)
-		}
-		for _, node := range c.UnusedHW.Nodes {
-			if err := c.resetHWInstalled(node.Name); err != nil {
-				slog.Warn("Failed to remove unused node install marker", "node", node.Name, "err", err)
-			}
-			endpoint, _ := getBMCEndpoint(&node) // validated when dropped
-			nodePower(node.Name, endpoint, pdu.ActionOff)
-		}
-	}
+	return nil
+}
 
+// powerOnUsedHW runs on every vlab up, so the used hardware that isn't reinstalled is on, as it may be off after a
+// previous run
+func (c *Config) powerOnUsedHW(ctx context.Context, plan *hwPlan, opts VLABRunOpts) error {
 	for _, sw := range plan.powerOnSwitches {
-		switchPower(&sw, pdu.ActionOn)
+		if err := powerSwitch(ctx, &sw, pdu.ActionOn, opts.PDUUsername, opts.PDUPassword); err != nil {
+			return fmt.Errorf("powering on switch: %w", err)
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(plan.powerOnNodes)) {
-		nodePower(name, plan.powerOnNodes[name], pdu.ActionOn)
+		if err := powerNode(ctx, plan.powerOnNodes[name], pdu.ActionOn, opts.BMC); err != nil {
+			return fmt.Errorf("powering on node %s: %w", name, err)
+		}
 	}
+
+	return nil
 }
 
 // switchInstallTimeout is from the PDU cycle to all agents ready

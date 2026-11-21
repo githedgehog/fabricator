@@ -464,8 +464,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		return fmt.Errorf("no hardware plan") //nolint:err113
 	}
 
-	c.powerHW(ctx, plan, opts)
-
 	bmcNodes, err := c.bmcNodes()
 	if err != nil {
 		return err
@@ -628,7 +626,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	// hardware runs along with the VMs and counts as their post-processing
-	hwRun := func(kind, name string, run func() error) {
+	hwRun := func(action, name string, run func() error) {
 		postProcesses.Add(1)
 		group.Go(func() error {
 			if err := run(); err != nil {
@@ -636,12 +634,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return nil
 				}
 
-				slog.Warn("Failed to install or upgrade hardware "+kind, kind, name, "err", err)
+				slog.Warn("Failed to "+action+" hardware", "hardware", name, "err", err)
 
 				c.CollectVLABDebug(ctx, vlab, opts, true)
 
 				if opts.FailFast {
-					return fmt.Errorf("installing or upgrading hardware %s %s: %w", kind, name, err)
+					return fmt.Errorf("%s hardware %s: %w", action, name, err)
 				}
 			}
 
@@ -652,18 +650,25 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		})
 	}
 
-	if len(plan.switches) > 0 {
-		hwRun("switch", strings.Join(plan.switches, ","), func() error {
-			return c.hwSwitchesInstall(ctx, plan.switches, opts)
+	// in parallel with the VMs, so the control node isn't delayed by the PDU and BMC waits
+	hwRun("power off", "unused", func() error {
+		return c.powerOffUnusedHW(ctx, opts)
+	})
+	hwRun("power on", "used", func() error {
+		return c.powerOnUsedHW(ctx, plan, opts)
+	})
+	if len(plan.reinstallSwitches) > 0 {
+		hwRun("install", strings.Join(plan.reinstallSwitches, ","), func() error {
+			return c.hwSwitchesInstall(ctx, plan.reinstallSwitches, opts)
 		})
 	}
-	for name, endpoint := range plan.nodes {
-		hwRun("node", name, func() error {
+	for name, endpoint := range plan.reinstallNodes {
+		hwRun("install", name, func() error {
 			return c.hwNodeInstall(ctx, mediaCtx, vlab, d, name, endpoint, opts)
 		})
 	}
 	for _, name := range plan.upgradeNodes {
-		hwRun("node", name, func() error {
+		hwRun("upgrade", name, func() error {
 			return c.vmPostProcess(ctx, vlab, d, VM{Name: name, Type: VMTypeGateway}, opts)
 		})
 	}

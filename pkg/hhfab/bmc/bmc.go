@@ -19,7 +19,10 @@ import (
 	"github.com/stmcginnis/gofish/schemas"
 )
 
-const pollInterval = 5 * time.Second
+const (
+	pollInterval      = 5 * time.Second
+	powerStateTimeout = 2 * time.Minute
+)
 
 var (
 	ErrNoSystem       = errors.New("no computer system found")
@@ -304,7 +307,11 @@ func (c *Client) PowerOn(ctx context.Context) error {
 		return nil
 	}
 
-	return c.reset(ctx, system, schemas.OnResetType)
+	if err := c.reset(ctx, system, schemas.OnResetType); err != nil {
+		return err
+	}
+
+	return c.waitPowerState(ctx, schemas.OnPowerState)
 }
 
 func (c *Client) PowerOff(ctx context.Context) error {
@@ -318,7 +325,32 @@ func (c *Client) PowerOff(ctx context.Context) error {
 		return nil
 	}
 
-	return c.reset(ctx, system, schemas.ForceOffResetType)
+	if err := c.reset(ctx, system, schemas.ForceOffResetType); err != nil {
+		return err
+	}
+
+	return c.waitPowerState(ctx, schemas.OffPowerState)
+}
+
+// waitPowerState waits for the system to report the state, the reset task may finish before it does
+func (c *Client) waitPowerState(ctx context.Context, state schemas.PowerState) error {
+	ctx, cancel := context.WithTimeout(ctx, powerStateTimeout)
+	defer cancel()
+
+	for {
+		system, err := c.refreshSystem()
+		if err != nil {
+			slog.Debug("Failed to get system while waiting for power state", "bmc", c.endpoint, "err", err)
+		} else if system.PowerState == state {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for power state %s: %w", state, ctx.Err())
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 func (c *Client) refreshSystem() (*schemas.ComputerSystem, error) {
