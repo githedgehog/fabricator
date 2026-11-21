@@ -227,9 +227,9 @@ func TestPlanHW(t *testing.T) {
 
 			t.Skip("no expect")
 		}
-		require.Equal(t, []string{"leaf-1"}, plan.switches)
+		require.Equal(t, []string{"leaf-1"}, plan.reinstallSwitches)
 		require.Equal(t, []string{"leaf-2"}, switchNames(plan.powerOnSwitches))
-		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.nodes)
+		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.reinstallNodes)
 		require.Equal(t, map[string]bool{"gateway-hw": true}, plan.manualNodes)
 	})
 
@@ -241,15 +241,49 @@ func TestPlanHW(t *testing.T) {
 			require.NoError(t, c.resetHWInstalled("gateway-bm"))
 		}()
 
-		// nothing to install, so no credentials needed
-		noCreds := opts
-		noCreds.PDUUsername, noCreds.BMC = "", BMCOpts{}
-		plan, err := c.planHW(ctx, noCreds)
+		plan, err := c.planHW(ctx, opts)
 		require.NoError(t, err)
-		require.Empty(t, plan.switches)
+		require.Empty(t, plan.reinstallSwitches)
 		require.ElementsMatch(t, []string{"leaf-1", "leaf-2"}, switchNames(plan.powerOnSwitches))
-		require.Empty(t, plan.nodes)
+		require.Empty(t, plan.reinstallNodes)
 		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.powerOnNodes)
+
+		// powering on needs the credentials too
+		noCreds := opts
+		noCreds.PDUUsername = ""
+		_, err = c.planHW(ctx, noCreds)
+		require.ErrorIs(t, err, ErrPDUCredentials)
+		noCreds = opts
+		noCreds.BMC = BMCOpts{}
+		_, err = c.planHW(ctx, noCreds)
+		require.ErrorIs(t, err, ErrBMCCredentials)
+	})
+
+	t.Run("unused", func(t *testing.T) {
+		c.UnusedHW = UnusedHW{
+			Switches: []wiringapi.Switch{*hwSwitch("spine-1", nil, "")},
+			Nodes:    []fabapi.FabNode{hwNode("gateway-off", map[string]string{HHFabCfgBMC: "https://127.0.0.2"})},
+		}
+		defer func() { c.UnusedHW = UnusedHW{} }()
+
+		disabled := opts
+		disabled.HWSwitches, disabled.HWNodes = HWModeDisabled, HWModeDisabled
+		disabled.HWPowerOffUnused = true
+		disabled.PDUPassword = ""
+		_, err := c.planHW(ctx, disabled)
+		require.ErrorIs(t, err, ErrPDUCredentials)
+
+		disabled = opts
+		disabled.HWSwitches, disabled.HWNodes = HWModeDisabled, HWModeDisabled
+		disabled.HWPowerOffUnused = true
+		disabled.BMC = BMCOpts{}
+		_, err = c.planHW(ctx, disabled)
+		require.ErrorIs(t, err, ErrBMCCredentials)
+
+		// not powered off, so no credentials needed
+		disabled.PDUUsername, disabled.HWPowerOffUnused = "", false
+		_, err = c.planHW(ctx, disabled)
+		require.NoError(t, err)
 	})
 
 	t.Run("no-credentials", func(t *testing.T) {
@@ -271,9 +305,9 @@ func TestPlanHW(t *testing.T) {
 		disabled.HWSwitches, disabled.HWNodes = HWModeDisabled, HWModeDisabled
 		plan, err := c.planHW(ctx, disabled)
 		require.NoError(t, err)
-		require.Empty(t, plan.switches)
+		require.Empty(t, plan.reinstallSwitches)
 		require.Empty(t, plan.powerOnSwitches)
-		require.Empty(t, plan.nodes)
+		require.Empty(t, plan.reinstallNodes)
 		require.Equal(t, map[string]bool{"gateway-bm": true, "gateway-hw": true}, plan.manualNodes)
 	})
 
@@ -289,9 +323,11 @@ func TestPlanHW(t *testing.T) {
 		upgrade.AutoUpgrade = true
 		plan, err := c.planHW(ctx, upgrade)
 		require.NoError(t, err)
-		require.Empty(t, plan.switches)
-		require.Equal(t, []string{"leaf-2"}, switchNames(plan.powerOnSwitches))
-		require.Empty(t, plan.nodes)
+		require.Empty(t, plan.reinstallSwitches)
+		// installed or not, as a VLAB from an older version has no markers
+		require.ElementsMatch(t, []string{"leaf-1", "leaf-2"}, switchNames(plan.powerOnSwitches))
+		require.Empty(t, plan.reinstallNodes)
 		require.ElementsMatch(t, []string{"gateway-bm", "gateway-hw"}, plan.upgradeNodes)
+		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.powerOnNodes)
 	})
 }

@@ -36,10 +36,10 @@ type AgentResponse struct {
 	Agent Agent `json:"Agent"`
 }
 
-func GetStatus(pduIP, username, password string) (*Response, error) {
+func GetStatus(ctx context.Context, pduIP, username, password string) (*Response, error) {
 	url := fmt.Sprintf("http://%s/netio.json", pduIP)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -117,6 +117,33 @@ func ControlOutlet(ctx context.Context, pduIP, username, password string, outlet
 	}
 
 	return nil
+}
+
+const outletWaitTimeout = 30 * time.Second
+
+// WaitOutlet waits for the outlet to report the state the on or off action sets
+func WaitOutlet(ctx context.Context, pduIP, username, password string, outletID int, action Action) error {
+	ctx, cancel := context.WithTimeout(ctx, outletWaitTimeout)
+	defer cancel()
+
+	for {
+		resp, err := GetStatus(ctx, pduIP, username, password)
+		if err != nil {
+			slog.Debug("Failed to get PDU status while waiting for outlet", "pdu", pduIP, "err", err)
+		} else {
+			for _, outlet := range resp.Outputs {
+				if outlet.ID == outletID && outlet.State == ActionMap[action] {
+					return nil
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for outlet %d to be %s: %w", outletID, action, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // GetPDUName queries the PDU for its name.

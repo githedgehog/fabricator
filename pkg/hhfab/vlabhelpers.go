@@ -1091,6 +1091,12 @@ func powerSwitch(ctx context.Context, sw *wiringapi.Switch, action pdu.Action, u
 		if err := pdu.ControlOutlet(ctx, pduIP, username, password, outletID, action); err != nil {
 			return fmt.Errorf("failed to power %s switch %s %s: %w", action, sw.Name, psuName, err)
 		}
+		if action == pdu.ActionCycle {
+			continue
+		}
+		if err := pdu.WaitOutlet(ctx, pduIP, username, password, outletID, action); err != nil {
+			return fmt.Errorf("checking switch %s %s is powered %s: %w", sw.Name, psuName, action, err)
+		}
 	}
 
 	return nil

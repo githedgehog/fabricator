@@ -39,20 +39,21 @@ hhfab vlab up --hw-nodes=disabled
 
 ## How it works
 
-- **Before the build** `vlab up` decides what to do with each switch and node and fails early on missing credentials,
-  PDU/BMC info or the `expect` tool.
+- **Before the build** `vlab up` decides what to do with each switch and node and fails early on missing PDU/BMC info,
+  the `expect` tool or the credentials for anything it has to install or power on or off.
 - **Installed hardware** is tracked by markers in `vlab/hw/<name>.installed`, so `-f` (which wipes `vlab/`)
   reinstalls everything into the new VLAB. `vlab switch reinstall` and `vlab node reinstall` update them too.
-- **Power:** unused hardware is powered off whatever the modes (disable with `--hw-power-off-unused=false`) and the
-  installed hardware is powered on before the VMs start.
+- **Power:** on every `vlab up`, along with the VMs, unused hardware is powered off whatever the modes (disable with
+  `--hw-power-off-unused=false`) and the used hardware that isn't reinstalled is powered on. Both wait for the PDU or
+  BMC to report the new state and fail `vlab up` otherwise.
 - **Switches** are reinstalled while the VMs boot: power cycle, ONIE install mode over the console, then `vlab up`
   waits up to 30 min for the agent at the fabric version.
 - **Nodes** are built as ISO (override with `--mode-override <name>=<mode>`). `vlab up` serves the ISO on port 80 of the
   host IP in the BMC's subnet, mounts it as virtual media, boots once from it and waits for the install. On an existing
   cluster it removes the old k3s Node first.
 - **Failures** stop `vlab up` (fail-fast) and collect the VLAB debug info.
-- **Upgrade** (`--upgrade`): installed hardware is powered on and nodes are upgraded over SSH like the gateway VMs;
-  `reinstall` isn't allowed.
+- **Upgrade** (`--upgrade`): all the used hardware is powered on, with or without a marker, and nodes are upgraded over
+  SSH like the gateway VMs; `reinstall` isn't allowed.
 
 ## Helpers for a running VLAB
 
