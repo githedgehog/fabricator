@@ -33,8 +33,10 @@ func localAddrFor(ctx context.Context, endpoint string, prefixes func() ([]netip
 	}
 
 	host := u.Hostname()
-	bmc, err := netip.ParseAddr(host)
-	if err != nil {
+	bmcs := []netip.Addr{}
+	if bmc, err := netip.ParseAddr(host); err == nil {
+		bmcs = append(bmcs, bmc)
+	} else {
 		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		if err != nil {
 			return netip.Addr{}, fmt.Errorf("resolving BMC host %q: %w", host, err)
@@ -42,24 +44,25 @@ func localAddrFor(ctx context.Context, endpoint string, prefixes func() ([]netip
 		if len(addrs) == 0 {
 			return netip.Addr{}, fmt.Errorf("resolving BMC host %q: no addresses", host) //nolint:err113
 		}
-		bmc = addrs[0]
+		bmcs = addrs
 	}
-	bmc = bmc.Unmap()
 
 	local, err := prefixes()
 	if err != nil {
 		return netip.Addr{}, err
 	}
 
-	// the most specific subnet wins
+	// any of the BMC addresses, the most specific subnet wins
 	var found netip.Prefix
-	for _, prefix := range local {
-		if prefix.Contains(bmc) && (!found.IsValid() || prefix.Bits() > found.Bits()) {
-			found = prefix
+	for _, bmc := range bmcs {
+		for _, prefix := range local {
+			if prefix.Contains(bmc.Unmap()) && (!found.IsValid() || prefix.Bits() > found.Bits()) {
+				found = prefix
+			}
 		}
 	}
 	if !found.IsValid() {
-		return netip.Addr{}, fmt.Errorf("%s: %w", bmc, ErrNoLocalAddr)
+		return netip.Addr{}, fmt.Errorf("%s: %w", host, ErrNoLocalAddr)
 	}
 
 	return found.Addr(), nil

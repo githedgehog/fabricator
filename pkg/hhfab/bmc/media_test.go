@@ -39,6 +39,8 @@ func TestLocalAddrFor(t *testing.T) {
 		{endpoint: "https://10.1.0.1", want: "10.1.0.10"},
 		{endpoint: "https://[::ffff:192.168.88.10]", want: "192.168.88.147"},
 		{endpoint: "https://[fd00::1]", want: "fd00::10"},
+		// resolves to ::1 as well on most hosts, which has no subnet here
+		{endpoint: "https://localhost", want: "127.0.0.1"},
 		{endpoint: "https://192.0.2.1", err: true},
 		{endpoint: "https://[fd01::1]", err: true},
 		{endpoint: "://bad", err: true},
