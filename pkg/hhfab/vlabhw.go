@@ -443,9 +443,6 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 	ctx, cancel := context.WithTimeout(ctx, switchInstallTimeout)
 	defer cancel()
 
-	// an existing cluster has the agent status from before the reinstall
-	start := time.Now()
-
 	// the script limits from the discovery to the NOS install would trip while the control node is still booting
 	if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
 		Switches:    names,
@@ -455,6 +452,9 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 	}); err != nil {
 		return err
 	}
+
+	// an existing cluster has the agent status from before the reinstall, the switches are in the NOS install by now
+	start := time.Now()
 
 	kube, _, err := c.clusterFab(ctx)
 	if err != nil {
