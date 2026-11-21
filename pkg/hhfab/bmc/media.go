@@ -163,11 +163,12 @@ func CheckMedia(ctx context.Context, mediaURL string) error {
 	return nil
 }
 
-// Serve serves only the files (URL path to local path) on all addresses until stopped; the returned context is done
-// when the server stops, with the error as its cause if it failed
+// Serve serves only the files (URL path to local path) on all IPv4 addresses until stopped; the returned context is
+// done when the server stops, with the error as its cause if it failed
 func Serve(ctx context.Context, port uint16, id string, files map[string]string) (uint16, context.Context, func(), error) {
 	addr := netip.AddrPortFrom(netip.IPv4Unspecified(), port)
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr.String())
+	// tcp would listen on IPv6 too, where the switches' ONIE probes the neighbors for its installer
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", addr.String())
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("listening on %s: %w", addr, err)
 	}
