@@ -32,7 +32,7 @@ Only difference is to enable Cumulus support, use Cumulus VX switch profiles and
 hhfab init --dev --include-cumulus -f
 
 # 2 spines, an ESLAG leaf pair and an orphan leaf with the default set of servers
-hhfab vlab gen --sp=cumulus-vx --numbered-links --eslag-leaf-groups=2 --orphan-leafs-count=1
+hhfab vlab gen --sp=cumulus-vx --eslag-leaf-groups=2 --orphan-leafs-count=1
 
 # starting VLAB as usual
 hhfab vlab up
