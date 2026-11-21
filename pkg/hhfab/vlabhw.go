@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,6 +372,7 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 		return nil
 	}
 
+	group := &errgroup.Group{}
 	for _, sw := range c.UnusedHW.Switches {
 		if err := c.resetHWInstalled(sw.Name); err != nil {
 			return err
@@ -380,9 +380,13 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 		if len(hhfctl.GetPowerInfo(&sw)) == 0 {
 			continue
 		}
-		if err := powerSwitch(ctx, &sw, pdu.ActionOff, opts.PDUUsername, opts.PDUPassword); err != nil {
-			return fmt.Errorf("powering off unused switch: %w", err)
-		}
+		group.Go(func() error {
+			if err := powerSwitch(ctx, &sw, pdu.ActionOff, opts.PDUUsername, opts.PDUPassword); err != nil {
+				return fmt.Errorf("powering off unused switch: %w", err)
+			}
+
+			return nil
+		})
 	}
 	for _, node := range c.UnusedHW.Nodes {
 		if err := c.resetHWInstalled(node.Name); err != nil {
@@ -392,35 +396,42 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 		if endpoint == "" {
 			continue
 		}
-		if err := powerNode(ctx, endpoint, pdu.ActionOff, opts.BMC); err != nil {
-			return fmt.Errorf("powering off unused node %s: %w", node.Name, err)
-		}
+		group.Go(func() error {
+			if err := powerNode(ctx, endpoint, pdu.ActionOff, opts.BMC); err != nil {
+				return fmt.Errorf("powering off unused node %s: %w", node.Name, err)
+			}
+
+			return nil
+		})
 	}
 
-	return nil
+	return group.Wait() //nolint:wrapcheck
 }
 
 // powerOnUsedHW runs on every vlab up, so the used hardware that isn't reinstalled is on, as it may be off after a
 // previous run. It's marked installed, as after an upgrade it's part of this VLAB without a marker.
 func (c *Config) powerOnUsedHW(ctx context.Context, plan *hwPlan, opts VLABRunOpts) error {
+	group := &errgroup.Group{}
 	for _, sw := range plan.powerOnSwitches {
-		if err := powerSwitch(ctx, &sw, pdu.ActionOn, opts.PDUUsername, opts.PDUPassword); err != nil {
-			return fmt.Errorf("powering on switch: %w", err)
-		}
-		if err := c.setHWInstalled(sw.Name); err != nil {
-			return err
-		}
+		group.Go(func() error {
+			if err := powerSwitch(ctx, &sw, pdu.ActionOn, opts.PDUUsername, opts.PDUPassword); err != nil {
+				return fmt.Errorf("powering on switch: %w", err)
+			}
+
+			return c.setHWInstalled(sw.Name)
+		})
 	}
-	for _, name := range slices.Sorted(maps.Keys(plan.powerOnNodes)) {
-		if err := powerNode(ctx, plan.powerOnNodes[name], pdu.ActionOn, opts.BMC); err != nil {
-			return fmt.Errorf("powering on node %s: %w", name, err)
-		}
-		if err := c.setHWInstalled(name); err != nil {
-			return err
-		}
+	for name, endpoint := range plan.powerOnNodes {
+		group.Go(func() error {
+			if err := powerNode(ctx, endpoint, pdu.ActionOn, opts.BMC); err != nil {
+				return fmt.Errorf("powering on node %s: %w", name, err)
+			}
+
+			return c.setHWInstalled(name)
+		})
 	}
 
-	return nil
+	return group.Wait() //nolint:wrapcheck
 }
 
 // switchInstallTimeout is from the PDU cycle to all agents ready
