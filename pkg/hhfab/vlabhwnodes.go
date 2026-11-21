@@ -276,7 +276,11 @@ func (c *Config) selectBMCNodes(names []string, withUnused bool) (map[string]str
 	}
 	if withUnused && len(names) > 0 {
 		for _, node := range c.UnusedHW.Nodes {
-			if endpoint, _ := getBMCEndpoint(&node); endpoint != "" { // validated when dropped
+			endpoint, err := getBMCEndpoint(&node)
+			if err != nil {
+				return nil, err
+			}
+			if endpoint != "" {
 				all[node.Name] = endpoint
 			}
 		}

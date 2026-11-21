@@ -61,6 +61,11 @@ func TestSelectBMCNodes(t *testing.T) {
 
 	_, err = (&Config{}).selectBMCNodes(nil, false)
 	require.Error(t, err)
+
+	// an unused node's bad endpoint is reported, not taken as no BMC
+	c.UnusedHW.Nodes = []fabapi.FabNode{{Name: "gateway-off", Annotations: map[string]string{HHFabCfgType: HHFabCfgTypeHW, HHFabCfgBMC: "https://10.0.0.3/redfish/v1"}}}
+	_, err = c.selectBMCNodes([]string{"gateway-off"}, true)
+	require.ErrorContains(t, err, "should have no path")
 }
 
 func TestCheckBMCNodes(t *testing.T) {
