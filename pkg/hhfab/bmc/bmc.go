@@ -23,6 +23,7 @@ const (
 	pollInterval      = 5 * time.Second
 	powerStateTimeout = 2 * time.Minute
 	requestTimeout    = 2 * time.Minute
+	taskTimeout       = 10 * time.Minute
 )
 
 var (
@@ -114,6 +115,10 @@ func (c *Client) waitTask(ctx context.Context, task *schemas.TaskMonitorInfo) er
 	if task == nil || task.TaskMonitor == "" {
 		return nil
 	}
+
+	// some BMCs leave a task running forever
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
 
 	for {
 		select {
