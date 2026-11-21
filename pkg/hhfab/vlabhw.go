@@ -363,13 +363,13 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 
 	group := &errgroup.Group{}
 	for _, sw := range c.UnusedHW.Switches {
-		if err := c.resetHWInstalled(sw.Name); err != nil {
-			return err
-		}
-		if len(hhfctl.GetPowerInfo(&sw)) == 0 {
-			continue
-		}
 		group.Go(func() error {
+			if err := c.resetHWInstalled(sw.Name); err != nil {
+				return err
+			}
+			if len(hhfctl.GetPowerInfo(&sw)) == 0 {
+				return nil
+			}
 			if err := powerSwitch(ctx, &sw, pdu.ActionOff, opts.PDUUsername, opts.PDUPassword); err != nil {
 				return fmt.Errorf("powering off unused switch: %w", err)
 			}
@@ -378,14 +378,14 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 		})
 	}
 	for _, node := range c.UnusedHW.Nodes {
-		if err := c.resetHWInstalled(node.Name); err != nil {
-			return err
-		}
-		endpoint, _ := getBMCEndpoint(&node) // validated when dropped
-		if endpoint == "" {
-			continue
-		}
 		group.Go(func() error {
+			if err := c.resetHWInstalled(node.Name); err != nil {
+				return err
+			}
+			endpoint, _ := getBMCEndpoint(&node) // validated when dropped
+			if endpoint == "" {
+				return nil
+			}
 			if err := powerNode(ctx, endpoint, pdu.ActionOff, opts.BMC); err != nil {
 				return fmt.Errorf("powering off unused node %s: %w", node.Name, err)
 			}
