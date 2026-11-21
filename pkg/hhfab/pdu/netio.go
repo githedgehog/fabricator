@@ -97,6 +97,10 @@ func ControlOutlet(ctx context.Context, pduIP, username, password string, outlet
 	url := fmt.Sprintf("http://%s/netio.json", pduIP)
 	data := fmt.Sprintf(`{"Outputs":[{"ID":%d,"Action":%d}]}`, outletID, ActionMap[action])
 
+	// the caller's context may have no deadline, so a PDU that never answers would block forever otherwise
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
