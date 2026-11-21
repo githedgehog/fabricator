@@ -277,12 +277,13 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 			continue
 		}
 
-		if len(hhfctl.GetPowerInfo(&sw)) == 0 {
+		// the reinstall needs both, the PDU to cycle it and the console to get it into the NOS install
+		if len(hhfctl.GetPowerInfo(&sw)) == 0 || hhfctl.GetSerialInfo(&sw) == "" {
 			if opts.HWSwitches == HWModeReinstall {
-				return nil, fmt.Errorf("hardware switch %s has no PDU info to reinstall it", sw.Name) //nolint:err113
+				return nil, fmt.Errorf("hardware switch %s has no PDU or serial console info to reinstall it", sw.Name) //nolint:err113
 			}
 
-			slog.Warn("Hardware switch without PDU info has to be installed manually", "switch", sw.Name)
+			slog.Warn("Hardware switch without PDU or serial console info has to be installed manually", "switch", sw.Name)
 
 			continue
 		}
