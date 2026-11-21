@@ -49,7 +49,7 @@ hhfab vlab up --hw-nodes=disabled
   BMC to report the new state and fail `vlab up` otherwise.
 - **Switches** are reinstalled while the VMs boot: power cycle, ONIE install mode over the console, then `vlab up`
   waits up to 30 min for the agent at the fabric version.
-- **Nodes** are built as ISO (override with `--mode-override <name>=<mode>`). `vlab up` serves the ISO on port 80 of the
+- **Nodes** are built as ISO, whatever `--build-mode` is for the VMs. `vlab up` serves the ISO on port 80 of the
   host IP in the BMC's subnet, mounts it as virtual media, boots once from it and waits for the install. On an existing
   cluster it removes the old k3s Node first.
 - **Failures** stop `vlab up` (fail-fast) and collect the VLAB debug info.
