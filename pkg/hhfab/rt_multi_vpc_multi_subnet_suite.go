@@ -667,12 +667,19 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return nil
 	})
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+inVPC.Name); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, inVPC.Name); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, inVPC.Name, err)
 	}
 
 	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+inVPC.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
 	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", inVPC.Name, StaticExternalIP, StaticExternalNH)
+	cumulus, err := switchIsCumulus(ctx, testCtx.kube, switchName)
+	if err != nil {
+		return false, reverts, err
+	}
+	if cumulus {
+		wuPingCmd = fmt.Sprintf("sudo ip vrf exec %s ping -I %s %s -c 3 -W 1", switchVRFName(true, inVPC.Name), StaticExternalIP, StaticExternalNH)
+	}
 	switchSSH, err := testCtx.getSSH(ctx, switchName)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting ssh config for switch %s: %w", switchName, err)
@@ -729,7 +736,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, defaultVRFName); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, ""); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
 	}
 
