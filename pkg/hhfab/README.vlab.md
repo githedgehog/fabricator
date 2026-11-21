@@ -7,8 +7,9 @@ and powers the hardware on its own: switches over the PDU and the serial console
 
 - **Switches** need the PDU annotations (`power.hhfab.githedgehog.com/<psu>`) and the serial console, same as for
   `hhfab vlab switch reinstall`.
-- **Nodes** need `bmc.hhfab.githedgehog.com: https://<bmc>` on the FabNode. Nodes without it are installed manually,
-  and `vlab up` reminds you about them while it waits for readiness.
+- **Nodes** need `bmc.hhfab.githedgehog.com: https://<bmc>` on the FabNode.
+- Hardware without them is an error unless its mode is `disabled` (or `--hw-power-off-unused=false` for the unused
+  one). With `--hw-nodes=disabled`, `vlab up` reminds you to install the nodes while it waits for readiness.
 - **Unused hardware:** set `unused.hhfab.githedgehog.com: "true"` on a switch or node to keep it out of the VLAB. It's
   dropped from the wiring, so no connection may use it. A hardware switch with the description `unused` is treated
   the same unless the annotation says `"false"`. The annotation is removed from the switches and nodes that stay.
@@ -25,7 +26,7 @@ and powers the hardware on its own: switches over the PDU and the serial console
 `--hw-switches` and `--hw-nodes` (or `--hw` for both, env `HHFAB_VLAB_HW*`) take:
 
 - `auto` (default): install what wasn't installed into this VLAB yet, power on the rest.
-- `reinstall`: install all of it. Hardware without PDU or BMC info is an error.
+- `reinstall`: install all of it.
 - `disabled`: don't touch it.
 
 ```bash

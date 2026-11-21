@@ -208,7 +208,6 @@ func TestPlanHW(t *testing.T) {
 		Client:  l.GetClient(),
 		Nodes: []fabapi.FabNode{
 			hwNode("gateway-bm", map[string]string{HHFabCfgBMC: "https://127.0.0.1"}),
-			hwNode("gateway-hw", nil),
 			{Name: "gateway-1"},
 		},
 	}
@@ -232,7 +231,7 @@ func TestPlanHW(t *testing.T) {
 		require.Equal(t, []string{"leaf-1"}, plan.reinstallSwitches)
 		require.Equal(t, []string{"leaf-2"}, switchNames(plan.powerOnSwitches))
 		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.reinstallNodes)
-		require.Equal(t, map[string]bool{"gateway-hw": true}, plan.manualNodes)
+		require.Empty(t, plan.manualNodes)
 	})
 
 	t.Run("auto-installed", func(t *testing.T) {
@@ -286,6 +285,17 @@ func TestPlanHW(t *testing.T) {
 		disabled.PDUUsername, disabled.HWPowerOffUnused = "", false
 		_, err = c.planHW(ctx, disabled)
 		require.NoError(t, err)
+
+		// powering off needs the PDU and BMC info
+		noPDU := hwSwitch("spine-1", nil, "")
+		delete(noPDU.Annotations, hhfctl.HHFabCfgPower+"/psu1")
+		c.UnusedHW.Switches = []wiringapi.Switch{*noPDU}
+		disabled.PDUUsername, disabled.HWPowerOffUnused = "admin", true
+		_, err = c.planHW(ctx, disabled)
+		require.ErrorContains(t, err, "--hw-power-off-unused=false")
+		c.UnusedHW = UnusedHW{Nodes: []fabapi.FabNode{hwNode("gateway-off", nil)}}
+		_, err = c.planHW(ctx, disabled)
+		require.ErrorContains(t, err, "--hw-power-off-unused=false")
 	})
 
 	t.Run("no-credentials", func(t *testing.T) {
@@ -310,33 +320,47 @@ func TestPlanHW(t *testing.T) {
 		require.Empty(t, plan.reinstallSwitches)
 		require.Empty(t, plan.powerOnSwitches)
 		require.Empty(t, plan.reinstallNodes)
-		require.Equal(t, map[string]bool{"gateway-bm": true, "gateway-hw": true}, plan.manualNodes)
+		require.Equal(t, map[string]bool{"gateway-bm": true}, plan.manualNodes)
 	})
 
-	t.Run("reinstall-no-bmc", func(t *testing.T) {
+	// any managed hardware needs its PDU and serial console or BMC, whatever the mode
+	t.Run("missing-info", func(t *testing.T) {
+		upgrade := opts
+		upgrade.AutoUpgrade = true
 		reinstall := opts
-		reinstall.HWSwitches, reinstall.HWNodes = HWModeDisabled, HWModeReinstall
-		_, err := c.planHW(ctx, reinstall)
-		require.ErrorContains(t, err, "gateway-hw")
-	})
+		reinstall.HWSwitches, reinstall.HWNodes = HWModeReinstall, HWModeReinstall
 
-	t.Run("no-serial", func(t *testing.T) {
-		sw := hwSwitch("leaf-4", nil, "")
-		delete(sw.Annotations, hhfctl.HHFabCfgSerial)
-		l := apiutil.NewLoader()
-		require.NoError(t, l.Add(ctx, sw))
-		c := &Config{WorkDir: t.TempDir(), Client: l.GetClient()}
+		noSerial := hwSwitch("leaf-4", nil, "")
+		delete(noSerial.Annotations, hhfctl.HHFabCfgSerial)
+		noPDU := hwSwitch("leaf-5", nil, "")
+		delete(noPDU.Annotations, hhfctl.HHFabCfgPower+"/psu1")
+		for _, sw := range []*wiringapi.Switch{noSerial, noPDU} {
+			l := apiutil.NewLoader()
+			require.NoError(t, l.Add(ctx, sw))
+			c := &Config{WorkDir: t.TempDir(), Client: l.GetClient()}
+			require.NoError(t, c.setHWInstalled(sw.Name))
 
-		reinstall := opts
-		reinstall.HWSwitches = HWModeReinstall
-		_, err := c.planHW(ctx, reinstall)
-		require.ErrorContains(t, err, "serial console")
+			for _, o := range []VLABRunOpts{opts, reinstall, upgrade} {
+				_, err := c.planHW(ctx, o)
+				require.ErrorContains(t, err, "--hw-switches=disabled", sw.Name)
+			}
 
-		// installed manually in auto
-		plan, err := c.planHW(ctx, opts)
+			disabled := opts
+			disabled.HWSwitches = HWModeDisabled
+			_, err := c.planHW(ctx, disabled)
+			require.NoError(t, err, sw.Name)
+		}
+
+		c := &Config{WorkDir: t.TempDir(), Client: apiutil.NewLoader().GetClient(), Nodes: []fabapi.FabNode{hwNode("gateway-hw", nil)}}
+		for _, o := range []VLABRunOpts{opts, reinstall, upgrade} {
+			_, err := c.planHW(ctx, o)
+			require.ErrorContains(t, err, "--hw-nodes=disabled")
+		}
+		disabled := opts
+		disabled.HWNodes = HWModeDisabled
+		plan, err := c.planHW(ctx, disabled)
 		require.NoError(t, err)
-		require.Empty(t, plan.reinstallSwitches)
-		require.Empty(t, plan.powerOnSwitches)
+		require.Equal(t, map[string]bool{"gateway-hw": true}, plan.manualNodes)
 	})
 
 	t.Run("upgrade", func(t *testing.T) {
@@ -348,7 +372,7 @@ func TestPlanHW(t *testing.T) {
 		// installed or not, as a VLAB from an older version has no markers
 		require.ElementsMatch(t, []string{"leaf-1", "leaf-2"}, switchNames(plan.powerOnSwitches))
 		require.Empty(t, plan.reinstallNodes)
-		require.ElementsMatch(t, []string{"gateway-bm", "gateway-hw"}, plan.upgradeNodes)
+		require.Equal(t, []string{"gateway-bm"}, plan.upgradeNodes)
 		require.Equal(t, map[string]string{"gateway-bm": "https://127.0.0.1"}, plan.powerOnNodes)
 	})
 }
