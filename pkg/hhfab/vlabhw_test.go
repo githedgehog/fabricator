@@ -20,12 +20,9 @@ import (
 )
 
 func TestResolveHWModes(t *testing.T) {
-	reinstall := []OnReady{OnReadySwitchReinstall, OnReadyInspect}
-
 	for _, tt := range []struct {
 		name     string
 		flags    HWModeFlags
-		onReady  []OnReady
 		upgrade  bool
 		switches HWMode
 		nodes    HWMode
@@ -36,15 +33,11 @@ func TestResolveHWModes(t *testing.T) {
 		{name: "all", flags: HWModeFlags{All: HWModeReinstall}, switches: HWModeReinstall, nodes: HWModeReinstall},
 		{name: "all-and-separate", flags: HWModeFlags{All: HWModeAuto, Nodes: HWModeAuto}, err: true},
 		{name: "invalid", flags: HWModeFlags{Nodes: "force"}, err: true},
-		{name: "on-ready", onReady: reinstall, switches: HWModeReinstall, nodes: HWModeReinstall},
-		{name: "on-ready-same", flags: HWModeFlags{All: HWModeReinstall}, onReady: reinstall, switches: HWModeReinstall, nodes: HWModeReinstall},
-		{name: "on-ready-conflict", flags: HWModeFlags{Nodes: HWModeDisabled}, onReady: reinstall, err: true},
 		{name: "upgrade", upgrade: true, switches: HWModeAuto, nodes: HWModeAuto},
 		{name: "upgrade-reinstall", flags: HWModeFlags{Switches: HWModeReinstall}, upgrade: true, err: true},
-		{name: "upgrade-on-ready", onReady: reinstall, upgrade: true, err: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			switches, nodes, onReady, err := resolveHWModes(tt.flags, tt.onReady, tt.upgrade)
+			switches, nodes, err := resolveHWModes(tt.flags, tt.upgrade)
 			if tt.err {
 				require.Error(t, err)
 
@@ -54,11 +47,19 @@ func TestResolveHWModes(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.switches, switches)
 			require.Equal(t, tt.nodes, nodes)
-			require.NotContains(t, onReady, OnReadySwitchReinstall)
-			if tt.onReady != nil {
-				require.Equal(t, []OnReady{OnReadyInspect}, onReady)
-			}
 		})
+	}
+}
+
+func TestValidateOnReady(t *testing.T) {
+	require.NoError(t, ValidateOnReady(nil))
+	require.NoError(t, ValidateOnReady([]OnReady{OnReadyInspect, FromShortOnReady("vpcs")}))
+	require.ErrorContains(t, ValidateOnReady([]OnReady{"unknown"}), "unsupported")
+
+	for _, cmd := range []string{"switch-reinstall", "reinstall"} {
+		err := ValidateOnReady([]OnReady{OnReadyInspect, FromShortOnReady(cmd)})
+		require.ErrorContains(t, err, "default", cmd)
+		require.ErrorContains(t, err, "--hw-switches", cmd)
 	}
 }
 

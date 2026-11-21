@@ -1374,9 +1374,8 @@ func Run(ctx context.Context) error {
 								EnvVars: []string{hhfab.VLABEnvHWNodes},
 							},
 							&cli.StringFlag{
-								Name: FlagNameHW,
-								Usage: fmt.Sprintf("sets both --%s and --%s, --%s=%s is the same as %s",
-									FlagNameHWSwitches, FlagNameHWNodes, FlagNameReady, hhfab.OnReadySwitchReinstall, hhfab.HWModeReinstall),
+								Name:    FlagNameHW,
+								Usage:   fmt.Sprintf("sets both --%s and --%s", FlagNameHWSwitches, FlagNameHWNodes),
 								EnvVars: []string{hhfab.VLABEnvHW},
 							},
 							&cli.BoolFlag{
@@ -1505,14 +1504,10 @@ func Run(ctx context.Context) error {
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
-							onReady := []hhfab.OnReady{}
+							// vlab up validates them before any work
+							onReady := make([]hhfab.OnReady, 0, len(c.StringSlice(FlagNameReady)))
 							for _, readyRaw := range c.StringSlice(FlagNameReady) {
-								ready := hhfab.FromShortOnReady(readyRaw)
-								if !slices.Contains(hhfab.AllOnReady, ready) {
-									return fmt.Errorf("invalid on-ready command: %s", readyRaw) //nolint:err113
-								}
-
-								onReady = append(onReady, ready)
+								onReady = append(onReady, hhfab.FromShortOnReady(readyRaw))
 							}
 
 							ifMTU, err := parseInterfaceMTU(c)
