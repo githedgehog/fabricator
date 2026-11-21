@@ -349,6 +349,9 @@ jobs:
             # Cumulus doesn't support proxy-ARP static externals and host BGP (used by multihomed servers) yet
             VLAB_STATIC_PROXY_EXTERNALS=0
             VLAB_MULTIHOMED_SERVERS=0
+            # TODO enable ESLAG for Cumulus once it works
+            VLAB_ESLAG_GROUPS=""
+            VLAB_ORPHAN_LEAVES=3
             VLAB_NOS_GEN_ARGS=(--default-switch-profile=cumulus-vx)
           fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --gateway-workers="$VLAB_GATEWAY_WORKERS" \
