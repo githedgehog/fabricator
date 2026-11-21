@@ -11,7 +11,7 @@ and powers the hardware on its own: switches over the PDU and the serial console
   and `vlab up` reminds you about them while it waits for readiness.
 - **Unused hardware:** set `unused.hhfab.githedgehog.com: "true"` on a switch or node to keep it out of the VLAB. It's
   dropped from the wiring, so no connection may use it. A hardware switch with the description `unused` is treated
-  the same unless the annotation says `"false"`.
+  the same unless the annotation says `"false"`. The annotation is removed from the switches and nodes that stay.
 
 ## Credentials
 

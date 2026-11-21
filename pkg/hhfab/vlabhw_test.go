@@ -138,13 +138,16 @@ func TestDropUnusedHW(t *testing.T) {
 		return c
 	}
 
+	used := map[string]string{vlabcomp.UnusedAnnotation: "false"}
 	bmNode := hwNode("gateway-bm", map[string]string{vlabcomp.UnusedAnnotation: "true", HHFabCfgBMC: "https://192.0.2.20"})
+	usedNode := hwNode("gateway-1", used)
 	c := newConfig(t,
 		hwSwitch("leaf-1", nil, ""),
 		hwSwitch("spine-1", unused, ""),
 		hwSwitch("spine-2", nil, vlabcomp.UnusedDescription),
-		hwSwitch("spine-3", map[string]string{vlabcomp.UnusedAnnotation: "false"}, vlabcomp.UnusedDescription),
+		hwSwitch("spine-3", used, vlabcomp.UnusedDescription),
 		&bmNode,
+		&usedNode,
 	)
 	require.NoError(t, c.dropUnusedHW(ctx))
 
@@ -152,7 +155,11 @@ func TestDropUnusedHW(t *testing.T) {
 	require.NoError(t, c.Client.List(ctx, switches))
 	require.ElementsMatch(t, []string{"leaf-1", "spine-3"}, switchNames(switches.Items))
 	require.ElementsMatch(t, []string{"spine-1", "spine-2"}, switchNames(c.UnusedHW.Switches))
-	require.Empty(t, c.Nodes)
+	spine3 := &wiringapi.Switch{}
+	require.NoError(t, c.Client.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "spine-3"}, spine3))
+	require.NotContains(t, spine3.Annotations, vlabcomp.UnusedAnnotation)
+	require.Len(t, c.Nodes, 1)
+	require.NotContains(t, c.Nodes[0].Annotations, vlabcomp.UnusedAnnotation)
 	require.Len(t, c.UnusedHW.Nodes, 1)
 	require.Error(t, c.Client.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: "gateway-bm"}, &fabapi.FabNode{}))
 

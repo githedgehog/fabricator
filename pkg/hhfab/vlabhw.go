@@ -134,10 +134,18 @@ func (c *Config) dropUnusedHW(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("switch %s: %w", sw.Name, err)
 		}
+		_, annotated := sw.Annotations[vlabcomp.UnusedAnnotation]
 		if !unused {
+			// the annotation is for hhfab only, keep it out of the cluster
+			if annotated {
+				delete(sw.Annotations, vlabcomp.UnusedAnnotation)
+				if err := c.Client.Update(ctx, &sw); err != nil {
+					return fmt.Errorf("updating switch %s: %w", sw.Name, err)
+				}
+			}
+
 			continue
 		}
-		_, annotated := sw.Annotations[vlabcomp.UnusedAnnotation]
 		if !isHardware(&sw) {
 			// the description fallback is only for the VLAB hardware
 			if !annotated {
@@ -170,6 +178,7 @@ func (c *Config) dropUnusedHW(ctx context.Context) error {
 			return fmt.Errorf("node %s: %w", node.Name, err)
 		}
 		if !unused {
+			delete(node.Annotations, vlabcomp.UnusedAnnotation)
 			nodes = append(nodes, node)
 
 			continue
