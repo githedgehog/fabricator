@@ -25,6 +25,11 @@ func TestBMCNodes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"gateway-bm": "https://10.0.0.2"}, nodes)
 
+	c.Nodes[1].Annotations[HHFabCfgBMC] = "https://10.0.0.2/"
+	nodes, err = c.bmcNodes()
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"gateway-bm": "https://10.0.0.2"}, nodes)
+
 	for _, endpoint := range []string{"10.0.0.2", "ftp://10.0.0.2", "https://", "://bad", "https://10.0.0.2/redfish/v1", "https://10.0.0.2?x=1"} {
 		c.Nodes[1].Annotations[HHFabCfgBMC] = endpoint
 		_, err := c.bmcNodes()
