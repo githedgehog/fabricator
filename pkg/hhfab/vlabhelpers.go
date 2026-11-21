@@ -602,6 +602,10 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 			PDUUsername: opts.PDUUsername,
 			PDUPassword: opts.PDUPassword,
 		}); err != nil {
+			// the expect script is removed on return, so don't leave the switch goroutines running
+			cancel()
+			wg.Wait()
+
 			return fmt.Errorf("executing hard-reset on switches: %w", err)
 		}
 		slog.Info("Switches power cycled")
