@@ -107,7 +107,8 @@ if ! command -v sonic-cli >/dev/null 2>&1 && command -v nv >/dev/null 2>&1; then
 
         cl_cmd "Platform" "nv show platform"
         cl_cmd "Platform" "nv show platform environment"
-        cl_cmd "Platform" "nv show interface --view=pluggables"
+        cl_cmd "Platform" "nv show platform transceiver"
+        cl_cmd "Platform" "nv show interface --view=dom"
 
         # Kernel MAC/neighbor state and datapath counters, as on SONiC.
         cl_tail "Kernel" "bridge fdb show"

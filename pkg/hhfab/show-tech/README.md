@@ -93,7 +93,8 @@ commands past it print "Skipped".
 - **Interfaces and L2**: status, LLDP neighbors, counters, bridge VLANs, VXLAN
   devices, MAC table, bond state from `/proc/net/bonding`
 - **BGP, EVPN, BFD and routes**: the FRR views SONiC collects, for all VRFs
-- **Platform**: `nv show platform`, environment, transceivers
+- **Platform**: `nv show platform`, environment, transceivers, optic DOM
+  readings
 - **Kernel**: bridge FDB, neighbors, interface, qdisc, softnet and socket
   statistics, `nstat`, `ethtool -S` per port, top processes
 - **Logs and agent**: FRR, nvued and switchd journals, syslog tail,
