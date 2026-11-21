@@ -455,45 +455,49 @@ func (c *Config) hwSwitchesInstall(ctx context.Context, names []string, opts VLA
 		return err
 	}
 
-	group := &errgroup.Group{}
-	for _, name := range names {
-		group.Go(func() error {
-			if err := waitSwitchAgent(ctx, kube, name, start); err != nil {
-				return err
+	return c.waitSwitchAgents(ctx, kube, names, start)
+}
+
+// waitSwitchAgents waits for the agents at the version the cluster expects, with a heartbeat after the since time, and
+// marks each switch installed once it's ready
+func (c *Config) waitSwitchAgents(ctx context.Context, kube kclient.Reader, names []string, since time.Time) error {
+	pending := slices.Clone(names)
+	for idx := 0; ; idx++ {
+		expected := ""
+		f := &fabapi.Fabricator{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err == nil {
+			expected = string(f.Status.Versions.Fabric.Controller)
+		}
+
+		notReady := []string{}
+		for _, name := range pending {
+			ag := &agentapi.Agent{}
+			err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: name}, ag)
+			if err != nil || expected == "" || !switchAgentApplied(ag, expected) || ag.Status.Version != expected ||
+				!ag.Status.LastHeartbeat.After(since) {
+				notReady = append(notReady, name)
+
+				continue
 			}
+
 			if err := c.setHWInstalled(name); err != nil {
 				return err
 			}
-
 			slog.Info("Hardware switch installed", "switch", name)
-
-			return nil
-		})
-	}
-
-	return group.Wait() //nolint:wrapcheck
-}
-
-// waitSwitchAgent waits for the agent at the version the cluster expects, with a heartbeat after the since time
-func waitSwitchAgent(ctx context.Context, kube kclient.Reader, name string, since time.Time) error {
-	for {
-		f := &fabapi.Fabricator{}
-		err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f)
-		if err == nil {
-			expected := string(f.Status.Versions.Fabric.Controller)
-			ag := &agentapi.Agent{}
-			err = kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: name}, ag)
-			if err == nil && expected != "" && switchAgentApplied(ag, expected) && ag.Status.Version == expected &&
-				ag.Status.LastHeartbeat.After(since) {
-				return nil
-			}
 		}
 
-		slog.Debug("Waiting for switch agent", "switch", name, "err", err)
+		pending = notReady
+		if len(pending) == 0 {
+			return nil
+		}
+
+		if idx%8 == 0 { // every ~2 min
+			slog.Info("Waiting for hardware switch agents", "switches", pending, "agent", expected, "waiting", time.Since(since).Round(time.Second))
+		}
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for switch %s agent: %w", name, ctx.Err())
+			return fmt.Errorf("waiting for hardware switch agents %v: %w", pending, ctx.Err())
 		case <-time.After(15 * time.Second):
 		}
 	}
