@@ -147,9 +147,6 @@ func (c *Config) dropUnusedHW(ctx context.Context) error {
 		if !annotated {
 			slog.Debug("Switch is unused by its description", "switch", sw.Name)
 		}
-		if len(hhfctl.GetPowerInfo(&sw)) == 0 {
-			slog.Warn("Unused switch has no PDU info, it can't be powered off", "switch", sw.Name)
-		}
 
 		if err := c.Client.Delete(ctx, &sw); err != nil {
 			return fmt.Errorf("removing unused switch %s: %w", sw.Name, err)
@@ -177,13 +174,6 @@ func (c *Config) dropUnusedHW(ctx context.Context) error {
 			return fmt.Errorf("node %s is unused, but gateway %s uses it", node.Name, node.Name) //nolint:err113
 		} else if !kapierrors.IsNotFound(err) {
 			return fmt.Errorf("getting gateway %s: %w", node.Name, err)
-		}
-		endpoint, err := getBMCEndpoint(&node)
-		if err != nil {
-			return err
-		}
-		if endpoint == "" {
-			slog.Warn("Unused node has no BMC, it can't be powered off", "node", node.Name, "annotation", HHFabCfgBMC)
 		}
 
 		if err := c.Client.Delete(ctx, &node); kclient.IgnoreNotFound(err) != nil {
@@ -264,16 +254,8 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 		if !isHardware(&sw) || opts.HWSwitches == HWModeDisabled {
 			continue
 		}
-
-		// the reinstall needs both, the PDU to cycle it and the console to get it into the NOS install
-		if len(hhfctl.GetPowerInfo(&sw)) == 0 || hhfctl.GetSerialInfo(&sw) == "" {
-			if opts.HWSwitches == HWModeReinstall {
-				return nil, fmt.Errorf("hardware switch %s has no PDU or serial console info to reinstall it", sw.Name) //nolint:err113
-			}
-
-			slog.Warn("Hardware switch without PDU or serial console info has to be installed manually", "switch", sw.Name)
-
-			continue
+		if err := checkHWSwitch(&sw, "--hw-switches="+string(HWModeDisabled)); err != nil {
+			return nil, err
 		}
 
 		installed, err := c.isHWInstalled(sw.Name)
@@ -292,30 +274,26 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 		}
 	}
 
-	bmcNodes, err := c.bmcNodes()
-	if err != nil {
-		return nil, err
-	}
 	for _, node := range c.hardwareNodes() {
-		endpoint := bmcNodes[node.Name]
+		if opts.HWNodes == HWModeDisabled {
+			plan.manualNodes[node.Name] = true
+
+			continue
+		}
+		endpoint, err := checkHWNode(&node, "--hw-nodes="+string(HWModeDisabled))
+		if err != nil {
+			return nil, err
+		}
+
 		installed, err := c.isHWInstalled(node.Name)
 		if err != nil {
 			return nil, err
 		}
 
 		switch {
-		case opts.HWNodes == HWModeDisabled:
-			plan.manualNodes[node.Name] = true
 		case opts.AutoUpgrade:
 			plan.upgradeNodes = append(plan.upgradeNodes, node.Name)
-			if endpoint != "" {
-				plan.powerOnNodes[node.Name] = endpoint
-			}
-		case endpoint == "":
-			if opts.HWNodes == HWModeReinstall {
-				return nil, fmt.Errorf("hardware node %s has no %s annotation to reinstall it", node.Name, HHFabCfgBMC) //nolint:err113
-			}
-			plan.manualNodes[node.Name] = true
+			plan.powerOnNodes[node.Name] = endpoint
 		case opts.HWNodes == HWModeReinstall || !installed:
 			plan.reinstallNodes[node.Name] = endpoint
 		default:
@@ -323,16 +301,21 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 		}
 	}
 
-	// powering on and off needs the credentials too
 	needPDU := len(plan.reinstallSwitches) > 0 || len(plan.powerOnSwitches) > 0
 	needBMC := len(plan.reinstallNodes) > 0 || len(plan.powerOnNodes) > 0
 	if opts.HWPowerOffUnused {
+		hint := "--hw-power-off-unused=false"
 		for _, sw := range c.UnusedHW.Switches {
-			needPDU = needPDU || len(hhfctl.GetPowerInfo(&sw)) > 0
+			if err := checkHWSwitch(&sw, hint); err != nil {
+				return nil, err
+			}
+			needPDU = true
 		}
 		for _, node := range c.UnusedHW.Nodes {
-			endpoint, _ := getBMCEndpoint(&node) // validated when dropped
-			needBMC = needBMC || endpoint != ""
+			if _, err := checkHWNode(&node, hint); err != nil {
+				return nil, err
+			}
+			needBMC = true
 		}
 	}
 	if needPDU && (opts.PDUUsername == "" || opts.PDUPassword == "") {
@@ -355,6 +338,28 @@ func (c *Config) planHW(ctx context.Context, opts VLABRunOpts) (*hwPlan, error) 
 	return plan, nil
 }
 
+// checkHWSwitch errors unless the hardware switch has the PDU to power it and the serial console to reinstall it
+func checkHWSwitch(sw *wiringapi.Switch, disableHint string) error {
+	if len(hhfctl.GetPowerInfo(sw)) == 0 || hhfctl.GetSerialInfo(sw) == "" {
+		return fmt.Errorf("hardware switch %s needs PDU and serial console info for vlab up to manage it, or use %s", sw.Name, disableHint) //nolint:err113
+	}
+
+	return nil
+}
+
+// checkHWNode returns the BMC endpoint of the hardware node, it errors if there is none
+func checkHWNode(node *fabapi.FabNode, disableHint string) (string, error) {
+	endpoint, err := getBMCEndpoint(node)
+	if err != nil {
+		return "", err
+	}
+	if endpoint == "" {
+		return "", fmt.Errorf("hardware node %s needs the %s annotation for vlab up to manage it, or use %s", node.Name, HHFabCfgBMC, disableHint) //nolint:err113
+	}
+
+	return endpoint, nil
+}
+
 // powerOffUnusedHW runs on every vlab up, so the unused hardware is never left on
 func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 	if !opts.HWPowerOffUnused {
@@ -366,9 +371,6 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 		group.Go(func() error {
 			if err := c.resetHWInstalled(sw.Name); err != nil {
 				return err
-			}
-			if len(hhfctl.GetPowerInfo(&sw)) == 0 {
-				return nil
 			}
 			if err := powerSwitch(ctx, &sw, pdu.ActionOff, opts.PDUUsername, opts.PDUPassword); err != nil {
 				return fmt.Errorf("powering off unused switch: %w", err)
@@ -382,10 +384,7 @@ func (c *Config) powerOffUnusedHW(ctx context.Context, opts VLABRunOpts) error {
 			if err := c.resetHWInstalled(node.Name); err != nil {
 				return err
 			}
-			endpoint, _ := getBMCEndpoint(&node) // validated when dropped
-			if endpoint == "" {
-				return nil
-			}
+			endpoint, _ := getBMCEndpoint(&node) // checked by planHW
 			if err := powerNode(ctx, endpoint, pdu.ActionOff, opts.BMC); err != nil {
 				return fmt.Errorf("powering off unused node %s: %w", node.Name, err)
 			}
