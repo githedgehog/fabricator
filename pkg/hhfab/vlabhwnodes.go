@@ -437,10 +437,10 @@ func (c *Config) checkClusterVersion(cluster *fabapi.Fabricator, name string) er
 
 	clusterV := cluster.Status.Versions.Fabricator.NodeConfig
 	if clusterV != installerV {
-		slog.Error("Existing cluster and node installer versions differ, upgrade the cluster first or recreate it",
-			"cluster", clusterV, "installer", installerV, "upgrade", "hhfab vlab up --upgrade", "recreate", "hhfab vlab up -f")
+		slog.Error("Node installer in the result dir is built by another hhfab version than the cluster, the node wouldn't join it",
+			"node", name, "installer", installerV, "cluster", clusterV)
 
-		return fmt.Errorf("existing cluster is at %s, node installer at %s", clusterV, installerV) //nolint:err113
+		return fmt.Errorf("node %s installer is built by hhfab %s, but the cluster is at %s", name, installerV, clusterV) //nolint:err113
 	}
 
 	return nil
