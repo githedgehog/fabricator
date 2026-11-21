@@ -52,8 +52,8 @@ hhfab vlab up --hw-nodes=disabled
   host IP in the BMC's subnet, mounts it as virtual media, boots once from it and waits for the install. On an existing
   cluster it removes the old k3s Node first.
 - **Failures** stop `vlab up` (fail-fast) and collect the VLAB debug info.
-- **Upgrade** (`--upgrade`): all the used hardware is powered on and marked installed, with or without a marker, and
-  nodes are upgraded over SSH like the gateway VMs; `reinstall` isn't allowed.
+- **Upgrade** (`--upgrade`): used hardware that isn't `disabled` is powered on and marked installed, with or without a
+  marker, and nodes are upgraded over SSH like the gateway VMs; `reinstall` isn't allowed.
 
 ## Helpers for a running VLAB
 
