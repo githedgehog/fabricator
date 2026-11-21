@@ -450,11 +450,26 @@ func GetDeploymentStatus(name, container, image string) KubeStatus {
 			}
 		}
 
-		if upToDate && obj.Status.UpdatedReplicas >= 1 {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == DeploymentProgressing && cond.Status == ConditionTrue {
-					return fabapi.CompStatusReady, nil
-				}
+		if !upToDate || obj.Status.ObservedGeneration < obj.Generation {
+			return fabapi.CompStatusPending, nil
+		}
+
+		// Same checks as "kubectl rollout status": a Deployment stays Progressing=True while it
+		// replaces pods (e.g. after Reloader restarts it), so wait until only updated pods remain
+		// and all of them are available
+		replicas := int32(1)
+		if obj.Spec.Replicas != nil {
+			replicas = *obj.Spec.Replicas
+		}
+		if obj.Status.UpdatedReplicas < max(replicas, 1) ||
+			obj.Status.Replicas > obj.Status.UpdatedReplicas ||
+			obj.Status.AvailableReplicas < obj.Status.UpdatedReplicas {
+			return fabapi.CompStatusPending, nil
+		}
+
+		for _, cond := range obj.Status.Conditions {
+			if cond.Type == DeploymentProgressing && cond.Status == ConditionTrue {
+				return fabapi.CompStatusReady, nil
 			}
 		}
 
