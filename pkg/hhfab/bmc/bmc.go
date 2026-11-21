@@ -272,7 +272,13 @@ func (c *Client) InsertCD(ctx context.Context, url string) error {
 }
 
 func (c *Client) BootOnceFromCD() error {
-	if err := c.system.SetBoot(&schemas.Boot{
+	// gofish sends the system's ETag as If-Match, the one from connecting may be stale after the media changes
+	system, err := c.refreshSystem()
+	if err != nil {
+		return err
+	}
+
+	if err := system.SetBoot(&schemas.Boot{
 		BootSourceOverrideEnabled: schemas.OnceBootSourceOverrideEnabled,
 		BootSourceOverrideTarget:  schemas.CdBootSource,
 		BootSourceOverrideMode:    schemas.UEFIBootSourceOverrideMode,
