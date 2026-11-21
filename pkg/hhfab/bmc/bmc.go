@@ -136,6 +136,12 @@ func (c *Client) waitTask(ctx context.Context, task *schemas.TaskMonitorInfo) er
 func (c *Client) taskRunning(monitor string) (bool, error) {
 	resp, err := c.api.Get(monitor)
 	if err != nil {
+		// the monitor may be removed once the task is done
+		var redfishErr *schemas.Error
+		if errors.As(err, &redfishErr) && slices.Contains([]int{http.StatusNotFound, http.StatusGone}, redfishErr.HTTPReturnedStatusCode) {
+			return false, nil
+		}
+
 		return false, err //nolint:wrapcheck
 	}
 	defer resp.Body.Close()
