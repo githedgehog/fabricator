@@ -686,7 +686,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		hwNodes[node.Name] = true
 		if plan.manualNodes[node.Name] {
 			_, withBMC := bmcNodes[node.Name]
-			warnHardwareNodeInstall(node.Name, withBMC)
+			warnHardwareNodeInstall(node.Name, withBMC, opts.AutoUpgrade)
 		}
 	}
 
@@ -791,7 +791,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Waiting for hardware nodes to be installed and ready in K8s", "nodes", pending, "waiting", time.Since(waitStart).Round(time.Second))
 						for _, name := range pending {
 							_, withBMC := bmcNodes[name]
-							warnHardwareNodeInstall(name, withBMC)
+							warnHardwareNodeInstall(name, withBMC, opts.AutoUpgrade)
 						}
 					}
 				}
@@ -1113,7 +1113,13 @@ func orasUploadAndInstall(ctx context.Context, d *artificer.Downloader, ssh *ssh
 	return nil
 }
 
-func warnHardwareNodeInstall(name string, withBMC bool) {
+func warnHardwareNodeInstall(name string, withBMC, upgrade bool) {
+	if upgrade {
+		slog.Warn("Hardware node has to be upgraded manually using the installer from the result dir", "node", name, "dir", ResultDir)
+
+		return
+	}
+
 	if withBMC {
 		slog.Warn("Hardware node has to be installed, it can be done over BMC from another terminal", "node", name,
 			"cmd", "hhfab vlab node reinstall -n "+name)
