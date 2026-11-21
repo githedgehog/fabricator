@@ -22,6 +22,7 @@ import (
 const (
 	pollInterval      = 5 * time.Second
 	powerStateTimeout = 2 * time.Minute
+	requestTimeout    = 2 * time.Minute
 )
 
 var (
@@ -48,6 +49,8 @@ func Connect(ctx context.Context, endpoint, username, password string) (*Client,
 		BasicAuth: true,
 		// it's a new connection for each request otherwise
 		ReuseConnections: true,
+		// the context deadlines are only checked between the polls, so a hung BMC would block forever otherwise
+		HTTPClient: &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), Timeout: requestTimeout},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting to %s: %w", endpoint, err)
