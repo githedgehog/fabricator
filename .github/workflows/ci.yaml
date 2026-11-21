@@ -335,8 +335,7 @@ jobs:
           - { vpcmode: l2vni,                buildmode: manual }
           - { vpcmode: l2vni, gateway: dpdk, buildmode: usb, includeonie: true }
 
-          # other NOSes
-          # TODO run by default once fabric with Cumulus VPCs (githedgehog/fabric#1799) is bumped
+          - { nos: cmls, vpcmode: l2vni,                 gateway: kernel }
           - { nos: cmls, vpcmode: l2vni, numbered: true, gateway: kernel }
 
           # hlab
