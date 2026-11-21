@@ -5,6 +5,7 @@ package bmc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -142,9 +143,12 @@ func TestServe(t *testing.T) {
 	require.NotZero(t, port)
 	base := "http://" + netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), port).String()
 
+	// no require inside, as Eventually runs it in another goroutine
 	get := func() error {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/node.iso", nil)
-		require.NoError(t, err)
+		if err != nil {
+			return err //nolint:wrapcheck
+		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -153,8 +157,12 @@ func TestServe(t *testing.T) {
 		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.Equal(t, "iso", string(body))
+		if err != nil {
+			return err //nolint:wrapcheck
+		}
+		if string(body) != "iso" {
+			return fmt.Errorf("unexpected body %q", body) //nolint:err113
+		}
 
 		return nil
 	}
