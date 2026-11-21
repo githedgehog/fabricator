@@ -95,6 +95,7 @@ func hwSwitch(name string, annotations map[string]string, description string) *w
 	sw := &wiringapi.Switch{Name: name, Namespace: kmetav1.NamespaceDefault, Annotations: map[string]string{
 		HHFabCfgType:                   HHFabCfgTypeHW,
 		hhfctl.HHFabCfgPower + "/psu1": "http://192.0.2.10/outlet/1",
+		hhfctl.HHFabCfgSerial:          hhfctl.HHFabCfgSerialSchemeSSH + "192.0.2.11:22",
 	}}
 	maps.Copy(sw.Annotations, annotations)
 	sw.Spec.Description = description
@@ -316,6 +317,25 @@ func TestPlanHW(t *testing.T) {
 		reinstall.HWSwitches, reinstall.HWNodes = HWModeDisabled, HWModeReinstall
 		_, err := c.planHW(ctx, reinstall)
 		require.ErrorContains(t, err, "gateway-hw")
+	})
+
+	t.Run("no-serial", func(t *testing.T) {
+		sw := hwSwitch("leaf-4", nil, "")
+		delete(sw.Annotations, hhfctl.HHFabCfgSerial)
+		l := apiutil.NewLoader()
+		require.NoError(t, l.Add(ctx, sw))
+		c := &Config{WorkDir: t.TempDir(), Client: l.GetClient()}
+
+		reinstall := opts
+		reinstall.HWSwitches = HWModeReinstall
+		_, err := c.planHW(ctx, reinstall)
+		require.ErrorContains(t, err, "serial console")
+
+		// installed manually in auto
+		plan, err := c.planHW(ctx, opts)
+		require.NoError(t, err)
+		require.Empty(t, plan.reinstallSwitches)
+		require.Empty(t, plan.powerOnSwitches)
 	})
 
 	t.Run("upgrade", func(t *testing.T) {
