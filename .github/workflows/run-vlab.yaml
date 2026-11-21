@@ -457,6 +457,11 @@ jobs:
         id: test-after
         if: ${{ inputs.upgradefrom != '' }}
         run: |
+          if [[ "${{ inputs.hybrid }}" == "true" ]]; then
+            # shellcheck source=/dev/null
+            source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          fi
+
           HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           export HHFAB_JOIN_TOKEN
           bin/hhfab vlab up -v \
