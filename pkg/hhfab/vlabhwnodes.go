@@ -136,7 +136,8 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		})()
 	}
 
-	// the node joins the existing cluster, so it has to be the same version
+	// the node joins the existing cluster, so the ISO built by this run has to be the same version; the one served by
+	// another process is whatever it built, so it's reinstalled as is
 	var kube kclient.Client
 	if !vlab.Created {
 		var cluster *fabapi.Fabricator
@@ -144,8 +145,10 @@ func (c *Config) hwNodeInstall(ctx, mediaCtx context.Context, vlab *VLAB, d *art
 		if err != nil {
 			return err
 		}
-		if err := c.checkClusterVersion(cluster); err != nil {
-			return err
+		if mediaCtx != nil {
+			if err := c.checkClusterVersion(cluster); err != nil {
+				return err
+			}
 		}
 	}
 
