@@ -1549,7 +1549,8 @@ func getBMCEndpoint(node *fabapi.FabNode) (string, error) {
 		return "", fmt.Errorf("node %s BMC endpoint %q should have no path, e.g. https://10.0.0.5", node.Name, endpoint) //nolint:err113
 	}
 
-	return endpoint, nil
+	// gofish would request //redfish/v1/ otherwise
+	return strings.TrimSuffix(endpoint, "/"), nil
 }
 
 // bmcNodes returns the BMC endpoints by node name
