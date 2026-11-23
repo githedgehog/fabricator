@@ -346,9 +346,8 @@ jobs:
             VLAB_ORPHAN_LEAVES=3
           fi
           if [[ "$INPUT_NOS" == "cmls" ]]; then
-            # Cumulus doesn't support proxy-ARP static externals and host BGP (used by multihomed servers) yet
+            # Cumulus doesn't support proxy-ARP static externals yet
             VLAB_STATIC_PROXY_EXTERNALS=0
-            VLAB_MULTIHOMED_SERVERS=0
             # TODO enable ESLAG for Cumulus once it works
             VLAB_ESLAG_GROUPS=""
             VLAB_ORPHAN_LEAVES=3
