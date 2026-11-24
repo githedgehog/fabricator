@@ -426,7 +426,7 @@ jobs:
             --build-mode="$INPUT_BUILD_MODE" \
             --vpc-mode="$INPUT_VPC_MODE" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
-            ${{ inputs.nos == 'cmls' && '--ready=wait' || '--ready=inspect' }} \
+            --ready=inspect \
             --ready=inspect-pods \
             "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
