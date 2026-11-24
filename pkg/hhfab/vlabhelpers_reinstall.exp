@@ -8,6 +8,7 @@ set timeout -1
 # Initialize variables
 set WAIT_READY 0
 set VERBOSE 0
+set CUMULUS 0
 set remaining_args {}
 
 # Parse arguments
@@ -19,6 +20,9 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         }
         "-v" {
             set VERBOSE 1
+        }
+        "--cumulus" {
+            set CUMULUS 1
         }
         default {
             lappend remaining_args $arg
@@ -44,7 +48,7 @@ if {[llength $argv] == 1} {
 	lassign $argv SW_NAME USER PASSWORD
 	set POWER_RESET 0
 } else {
-	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\] \[-v\]"
+	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\] \[--cumulus\] \[-v\]"
 	exit 1
 }
 
@@ -53,6 +57,7 @@ set KEY_DOWN "\033\[B"
 set KEY_HOME "\033\[H"
 set KEY_PGUP "\033\[5~"
 set ONIE_HIGHLIGHT "*ONIE"
+set KEY_ESC  "\033"
 
 set ERROR_CONSOLE 1
 set ERROR_LOGIN 2
@@ -157,13 +162,24 @@ if { ! $POWER_RESET} {
 		send "$USER\r"
 		exp_continue
 	}
+	# Cumulus keeps its default hostname
+	-ex "cumulus login:" {
+		log_message "EXP-DBG" "Sending username"
+		send "$USER\r"
+		exp_continue
+	}
 	-ex "Password:" {
 		log_message "EXP-DBG" "Sending password"
-		send "$PASSWORD\r"
+		send -- "$PASSWORD\r"
 		exp_continue
 	}
 	# reboot in case we are at the prompt - eventually this will be done via PDU
 	-ex "admin@$SW_NAME:~$" {
+		log_message "EXP-DBG" "At prompt, initiating reboot"
+		send "sudo reboot\r"
+	}
+	# Cumulus prompt with the VRF, e.g. admin@cumulus:mgmt:~$
+	-re "$USER@(cumulus|$SW_NAME):\[^\r\n\]*\\$ $" {
 		log_message "EXP-DBG" "At prompt, initiating reboot"
 		send "sudo reboot\r"
 	}
@@ -188,100 +204,241 @@ if { ! $POWER_RESET} {
 	}
 }
 
-expect -timeout 300 -ex "GNU GRUB" {
-	log_message "EXP-DBG" "GRUB Menu detected"
-	# Select the ONIE option, and finally the Install OS option
+# Cumulus GRUB shows a 5 second countdown instead of the menu: Esc on it shows the menu with Cumulus, its advanced
+# options and ONIE, and ONIE then shows its own menu with "ONIE: Rescue" selected and a 5 second countdown
+proc cumulus_select_onie_install {} {
+	global KEY_ESC KEY_DOWN KEY_HOME ERROR_CONSOLE ERROR_INSTALL POWER_RESET PASSWORD
 
-	# Wait for menu to be fully rendered
-	expect -timeout 10 -ex "Press enter to boot the selected OS" {
-		log_message "EXP-DBG" "GRUB menu fully rendered"
-		sleep 1
-
-		# Check if spawn ID is still valid
-		if {[catch {send -- "$KEY_HOME"} err]} {
-			log_message "EXP-ERR" "Lost connection while sending KEY_HOME: $err"
+	set timeout 300
+	expect {
+		-ex "\[sudo\] password for" {
+			if {$POWER_RESET} {
+				log_message "EXP-ERR" "Unexpected sudo password prompt"
+				exit $ERROR_INSTALL
+			}
+			log_message "EXP-DBG" "Sending sudo password"
+			send -- "$PASSWORD\r"
+			exp_continue
+		}
+		# "GRUB loading." on some BIOSes, e.g. SN2700
+		-re "Welcome to GRUB!|GRUB loading\\." {
+			log_message "EXP-DBG" "GRUB detected"
+		}
+		timeout {
+			log_message "EXP-ERR" "Failed to reset. GRUB not detected"
+			exit $ERROR_INSTALL
+		}
+		eof {
+			log_message "EXP-ERR" "Connection lost waiting for GRUB"
 			exit $ERROR_CONSOLE
 		}
+	}
 
-		set timeout 1
+	# a switch whose install died after wiping the NOS boots straight into the ONIE menu
+	set onie_menu 0
+
+	# each digit of the countdown is drawn right after a color or cursor position escape sequence, which differ between
+	# BIOSes (e.g. ESC[1;37;40m, ESC[1;1H or ESC[4;1H), and padded with spaces
+	set timeout 30
+	expect {
+		-re "\033\\\[\[0-9;\]*\[mH\]\[0-9\]    " {
+			log_message "EXP-DBG" "GRUB countdown detected, showing the menu"
+			send -- "$KEY_ESC"
+		}
+		-ex "ONIE: Install OS" {
+			log_message "EXP-DBG" "ONIE GRUB menu detected, no NOS installed"
+			set onie_menu 1
+		}
+		timeout {
+			log_message "EXP-ERR" "GRUB countdown not detected"
+			exit $ERROR_INSTALL
+		}
+		eof {
+			log_message "EXP-ERR" "Connection lost waiting for the GRUB countdown"
+			exit $ERROR_CONSOLE
+		}
+	}
+
+	if {!$onie_menu} {
+		set timeout 15
 		expect {
-			-ex $ONIE_HIGHLIGHT {
-				log_message "EXP-DBG" "ONIE option found"
-				set timeout -1
-
-				# Check connection before sending return
-				if {[catch {send "\r"} err]} {
-					log_message "EXP-ERR" "Lost connection while sending return: $err"
-					exit $ERROR_CONSOLE
-				}
-
-				# Second GRUB menu: ONIE selection
-				expect -timeout 10 -ex "Press enter to boot the selected OS" {
-					log_message "EXP-DBG" "Second GRUB menu fully rendered"
-					sleep 1
-
-					# Select "ONIE: Install OS" which is the top option
-					if {[catch {send -- "$KEY_HOME"} err]} {
-						log_message "EXP-ERR" "Lost connection while sending second KEY_HOME: $err"
-						exit $ERROR_CONSOLE
-					}
-					sleep 1
-
-					if {[catch {send "\r"} err]} {
-						log_message "EXP-ERR" "Lost connection while sending final return: $err"
-						exit $ERROR_CONSOLE
-					}
-				} timeout {
-					log_message "EXP-ERR" "Timeout waiting for second GRUB menu to be ready"
-					exit $ERROR_CONSOLE
-				} eof {
-					log_message "EXP-ERR" "Connection lost waiting for second GRUB menu"
-					exit $ERROR_CONSOLE
-				}
-
-				expect {
-					"ONIE: OS Install Mode ..." {
-						log_message "EXP-DBG" "Entering OS Install Mode"
-					}
-					eof {
-						log_message "EXP-ERR" "Connection lost before confirming ONIE install mode"
-						exit $ERROR_CONSOLE
-					}
-					timeout {
-						log_message "EXP-DBG" "Sending extra return"
-						if {[catch {send "\r"} err]} {
-							log_message "EXP-ERR" "Lost connection while sending extra return: $err"
-							exit $ERROR_CONSOLE
-						}
-					}
-				}
+			-ex "Advanced options for Cumulus" {
+				log_message "EXP-DBG" "Cumulus GRUB menu detected"
 			}
 			timeout {
-				log_message "EXP-DBG" "ONIE not found, moving down menu"
-				if {[catch {send -- "$KEY_DOWN"} err]} {
-					log_message "EXP-ERR" "Lost connection while sending KEY_DOWN: $err"
-					exit $ERROR_CONSOLE
-				}
-				exp_continue
+				log_message "EXP-ERR" "Cumulus GRUB menu not detected"
+				exit $ERROR_INSTALL
 			}
 			eof {
-				log_message "EXP-ERR" "Connection lost after seeing the GRUB menu"
+				log_message "EXP-ERR" "Connection lost waiting for the Cumulus GRUB menu"
 				exit $ERROR_CONSOLE
 			}
 		}
-	} timeout {
-		log_message "EXP-ERR" "Timeout waiting for GRUB menu to be ready"
-		exit $ERROR_CONSOLE
-	} eof {
-		log_message "EXP-ERR" "Connection lost waiting for GRUB menu to be fully rendered"
-		exit $ERROR_CONSOLE
+
+		# ONIE is the third entry, Home in case the default entry is another one
+		sleep 1
+		send -- "$KEY_HOME"
+		sleep 0.3
+		send -- "$KEY_DOWN"
+		sleep 0.3
+		send -- "$KEY_DOWN"
+		sleep 0.3
+		send "\r"
+
+		# not "*ONIE", which the Cumulus menu redraw matches too
+		set timeout 30
+		expect {
+			-ex "ONIE: Install OS" {
+				log_message "EXP-DBG" "ONIE GRUB menu detected"
+			}
+			timeout {
+				log_message "EXP-ERR" "ONIE GRUB menu not detected"
+				exit $ERROR_INSTALL
+			}
+			eof {
+				log_message "EXP-ERR" "Connection lost waiting for the ONIE GRUB menu"
+				exit $ERROR_CONSOLE
+			}
+		}
 	}
-} eof {
-	log_message "EXP-ERR" "Connection lost during GRUB menu expect"
-	exit $ERROR_CONSOLE
-} timeout {
-	log_message "EXP-ERR" "Failed to reset. GRUB not detected"
-	exit $ERROR_INSTALL
+
+	# keys sent before the countdown starts are lost
+	set timeout 10
+	expect {
+		-ex "executed automatically in" {
+			log_message "EXP-DBG" "ONIE GRUB countdown detected, selecting ONIE: Install OS"
+			send -- "$KEY_HOME"
+		}
+		timeout {
+			log_message "EXP-ERR" "ONIE GRUB countdown not detected"
+			exit $ERROR_INSTALL
+		}
+		eof {
+			log_message "EXP-ERR" "Connection lost waiting for the ONIE GRUB countdown"
+			exit $ERROR_CONSOLE
+		}
+	}
+	sleep 0.7
+	send "\r"
+
+	set timeout 60
+	expect {
+		-ex "ONIE: OS Install Mode ..." {
+			log_message "EXP-DBG" "Entering OS Install Mode"
+		}
+		-ex "ONIE: Rescue Mode ..." {
+			log_message "EXP-ERR" "ONIE booted into rescue mode"
+			exit $ERROR_INSTALL
+		}
+		timeout {
+			log_message "EXP-ERR" "ONIE install mode not detected"
+			exit $ERROR_INSTALL
+		}
+		eof {
+			log_message "EXP-ERR" "Connection lost waiting for ONIE install mode"
+			exit $ERROR_CONSOLE
+		}
+	}
+}
+
+if {$CUMULUS} {
+	cumulus_select_onie_install
+} else {
+	expect -timeout 300 -ex "GNU GRUB" {
+		log_message "EXP-DBG" "GRUB Menu detected"
+		# Select the ONIE option, and finally the Install OS option
+
+		# Wait for menu to be fully rendered
+		expect -timeout 10 -ex "Press enter to boot the selected OS" {
+			log_message "EXP-DBG" "GRUB menu fully rendered"
+			sleep 1
+
+			# Check if spawn ID is still valid
+			if {[catch {send -- "$KEY_HOME"} err]} {
+				log_message "EXP-ERR" "Lost connection while sending KEY_HOME: $err"
+				exit $ERROR_CONSOLE
+			}
+
+			set timeout 1
+			expect {
+				-ex $ONIE_HIGHLIGHT {
+					log_message "EXP-DBG" "ONIE option found"
+					set timeout -1
+
+					# Check connection before sending return
+					if {[catch {send "\r"} err]} {
+						log_message "EXP-ERR" "Lost connection while sending return: $err"
+						exit $ERROR_CONSOLE
+					}
+
+					# Second GRUB menu: ONIE selection
+					expect -timeout 10 -ex "Press enter to boot the selected OS" {
+						log_message "EXP-DBG" "Second GRUB menu fully rendered"
+						sleep 1
+
+						# Select "ONIE: Install OS" which is the top option
+						if {[catch {send -- "$KEY_HOME"} err]} {
+							log_message "EXP-ERR" "Lost connection while sending second KEY_HOME: $err"
+							exit $ERROR_CONSOLE
+						}
+						sleep 1
+
+						if {[catch {send "\r"} err]} {
+							log_message "EXP-ERR" "Lost connection while sending final return: $err"
+							exit $ERROR_CONSOLE
+						}
+					} timeout {
+						log_message "EXP-ERR" "Timeout waiting for second GRUB menu to be ready"
+						exit $ERROR_CONSOLE
+					} eof {
+						log_message "EXP-ERR" "Connection lost waiting for second GRUB menu"
+						exit $ERROR_CONSOLE
+					}
+
+					expect {
+						"ONIE: OS Install Mode ..." {
+							log_message "EXP-DBG" "Entering OS Install Mode"
+						}
+						eof {
+							log_message "EXP-ERR" "Connection lost before confirming ONIE install mode"
+							exit $ERROR_CONSOLE
+						}
+						timeout {
+							log_message "EXP-DBG" "Sending extra return"
+							if {[catch {send "\r"} err]} {
+								log_message "EXP-ERR" "Lost connection while sending extra return: $err"
+								exit $ERROR_CONSOLE
+							}
+						}
+					}
+				}
+				timeout {
+					log_message "EXP-DBG" "ONIE not found, moving down menu"
+					if {[catch {send -- "$KEY_DOWN"} err]} {
+						log_message "EXP-ERR" "Lost connection while sending KEY_DOWN: $err"
+						exit $ERROR_CONSOLE
+					}
+					exp_continue
+				}
+				eof {
+					log_message "EXP-ERR" "Connection lost after seeing the GRUB menu"
+					exit $ERROR_CONSOLE
+				}
+			}
+		} timeout {
+			log_message "EXP-ERR" "Timeout waiting for GRUB menu to be ready"
+			exit $ERROR_CONSOLE
+		} eof {
+			log_message "EXP-ERR" "Connection lost waiting for GRUB menu to be fully rendered"
+			exit $ERROR_CONSOLE
+		}
+	} eof {
+		log_message "EXP-ERR" "Connection lost during GRUB menu expect"
+		exit $ERROR_CONSOLE
+	} timeout {
+		log_message "EXP-ERR" "Failed to reset. GRUB not detected"
+		exit $ERROR_INSTALL
+	}
 }
 
 if {$WAIT_READY} {
@@ -311,6 +468,21 @@ if {$WAIT_READY} {
 	if {$install_success == 0} {
 		log_message "EXP-ERR" "Installation failed"
 		exit $ERROR_INSTALL
+	}
+
+	# Cumulus boots the installer, then its first boot reboots once more, and it prints no "System is ready": hhfab
+	# waits for the agent instead
+	if {$CUMULUS} {
+		expect -timeout 1200 -re "(cumulus|$SW_NAME) login:" {
+			log_message "EXP-DBG" "Cumulus login prompt detected"
+			exit 0
+		} timeout {
+			log_message "EXP-ERR" "Login prompt not detected within 20 minutes"
+			exit $ERROR_INSTALL
+		} eof {
+			log_message "EXP-ERR" "Connection lost while waiting for login prompt"
+			exit $ERROR_CONSOLE
+		}
 	}
 
 	# Wait for the login prompt
