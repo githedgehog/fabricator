@@ -428,6 +428,7 @@ jobs:
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             --ready=inspect \
             --ready=inspect-pods \
+            --inspect-pods-strict \
             "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
