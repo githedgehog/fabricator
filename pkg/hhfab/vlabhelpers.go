@@ -25,6 +25,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/samber/lo"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -455,12 +456,32 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		}
 	}
 
-	// an interrupted reinstall must not leave the switch marked as installed
+	selected := []string{}
+	cumulus := map[string]bool{}
 	for _, sw := range switches.Items {
 		if len(opts.Switches) > 0 && !slices.Contains(opts.Switches, sw.Name) {
 			continue
 		}
-		if err := c.resetHWInstalled(sw.Name); err != nil {
+		selected = append(selected, sw.Name)
+
+		sp := &wiringapi.SwitchProfile{}
+		if err := c.Client.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
+			return fmt.Errorf("getting switch profile %q of %s: %w", sw.Spec.Profile, sw.Name, err)
+		}
+		cumulus[sw.Name] = slices.Contains(meta.NOSTypesCumulus, sp.Spec.NOSType)
+	}
+
+	// the agents are in the cluster, not in the wiring
+	var kube kclient.Reader
+	if opts.WaitReady && slices.Contains(lo.Values(cumulus), true) {
+		if kube, _, err = c.clusterFab(ctx); err != nil {
+			return err
+		}
+	}
+
+	// an interrupted reinstall must not leave the switch marked as installed
+	for _, name := range selected {
+		if err := c.resetHWInstalled(name); err != nil {
 			return err
 		}
 	}
@@ -512,6 +533,9 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 					}
 					if opts.WaitReady {
 						args = append(args, "--wait-ready")
+					}
+					if cumulus[sw.Name] {
+						args = append(args, "--cumulus")
 					}
 					args = append(args, "-v")
 
@@ -573,6 +597,15 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 
 				if lastErr == nil {
 					break
+				}
+			}
+
+			// Cumulus prints no "System is ready", so the script returns at the login prompt and the agent is the readiness
+			// signal
+			if lastErr == nil && opts.WaitReady && cumulus[sw.Name] {
+				slog.Info("Waiting for the Cumulus switch agent", "name", sw.Name)
+				if err := c.waitSwitchAgents(ctx, kube, []string{sw.Name}, time.Now()); err != nil {
+					lastErr = fmt.Errorf("%s: %w", sw.Name, err)
 				}
 			}
 
