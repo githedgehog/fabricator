@@ -102,15 +102,26 @@ if {[info exists env(HHFAB_SWITCH_USERNAME)] && [info exists env(HHFAB_SWITCH_PA
     log_message "EXP-DBG" "Attempting login with provided credentials"
     set max_login_attempts 3
     set login_attempts 0
+    # a stale prompt on the screen and each failed attempt add one, so allow more than the attempts
+    set max_login_prompts 6
+    set login_prompts 0
     set login_done 0
     while {!$login_done} {
         expect {
             -re "(?i)login:" {
                 # the Cumulus banner has "Last login:", answering it types the user into the shell
-                if {![string match -nocase "*last login:" $expect_out(buffer)]} {
-                    send "$env(HHFAB_SWITCH_USERNAME)\r"
+                if {[string match -nocase "*last login:" $expect_out(buffer)]} {
+                    exp_continue
                 }
-                exp_continue
+                # each match restarts the timeout, so a console repeating the prompt must not loop forever
+                incr login_prompts
+                if {$login_prompts > $max_login_prompts} {
+                    log_message "EXP-ERR" "Login failed: login prompt repeated $login_prompts times"
+                    set login_done 1
+                } else {
+                    send "$env(HHFAB_SWITCH_USERNAME)\r"
+                    exp_continue
+                }
             }
             -re "Password:" {
                 if {$login_attempts >= $max_login_attempts} {
