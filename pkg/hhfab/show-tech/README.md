@@ -105,6 +105,12 @@ that kind are skipped, so a hung nvued or FRR leaves the budget to the other.
 Not collected on Cumulus: QoS/PFC counters, the err-disable timeline and
 Broadcom SDK tables, which have no Cumulus counterpart yet.
 
+When SSH fails, the console fallback (`switch-console.exp`) detects Cumulus the
+same way and checks management in the `mgmt` VRF, where Cumulus keeps eth0:
+its routes, `ssh@mgmt`, a ping to the control node through `mgmt`, plus nvued
+status and the recent `nv config history`, since a bad apply is a common way to
+lose management.
+
 ### switch.sh - SONiC switch
 
 Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
