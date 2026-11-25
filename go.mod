@@ -24,7 +24,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/insomniacslk/dhcp v0.0.0-20231206064809-8c70d406f6d2
-	github.com/k3s-io/helm-controller v0.17.9
+	github.com/k3s-io/helm-controller v0.17.11
 	github.com/lmittmann/tint v1.2.1
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.24
