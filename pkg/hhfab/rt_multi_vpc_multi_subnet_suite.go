@@ -39,15 +39,17 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			Name: "Multi-Subnets isolation",
 			F:    multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Multi-Subnets with filtering",
 			F:    multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
+				SonicVS:       true,
+				CumulusVX:     true,
 				SubInterfaces: true,
 				NoServers:     true,
 			},
@@ -56,8 +58,8 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			Name: "StaticExternal",
 			F:    staticExternalTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 	}
