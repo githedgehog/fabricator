@@ -390,33 +390,73 @@ func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, ro
 	return false, nil
 }
 
-// waitForNATPoolInLeaves waits until the gateway-originated NAT pool CIDR appears in the FIB of
-// the leaves attached to the given VPC, in the VPC's VRF. WaitReady only confirms the gateway and
-// switches are programmed; this verifies the route has actually propagated through the fabric so
-// subsequent NAT-pool traffic has a valid forwarding path. Replaces blind iperf3/curl retry loops
-// with a precise reachability gate.
-func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vpc *vpcapi.VPC, poolCIDR string) error {
-	leaves, err := getSwitchesForVPC(ctx, testCtx.kube, vpc.Name)
+// waitForNATPoolInVPC waits until poolCIDR, the NAT pool a gateway peering exposes to peerVPC,
+// is installed in peerVPC's VRF on the leaves attached to it: the path peerVPC's servers use to
+// reply to the pool and to reach a port forwarded on it. WaitReady only confirms the gateway and
+// switches are programmed, not that the route has propagated through the fabric.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInVPC(ctx context.Context, peerVPC *vpcapi.VPC, poolCIDR string) error {
+	leaves, err := getSwitchesForVPC(ctx, testCtx.kube, peerVPC.Name)
 	if err != nil {
-		return fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
+		return fmt.Errorf("getting switches for vpc %s: %w", peerVPC.Name, err)
 	}
 	if len(leaves) == 0 {
 		return nil
 	}
-	vrfVPC := vpc.Name
-	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
+	vrfVPC := peerVPC.Name
+	if peerVPC.Spec.Mode == vpcapi.VPCModeL3Flat {
 		vrfVPC = ""
 	}
-	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrfVPC", vrfVPC)
+	slog.Info("Waiting for NAT pool route on peer VPC leaves", "vpc", peerVPC.Name, "leaves", leaves, "pool", poolCIDR)
 
 	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfVPC)
+}
+
+// waitForNATPoolInExternal waits until poolCIDR, the NAT pool a gateway peering exposes to
+// extName, is installed in the external's VRF on the switches attached to it, which is the path
+// the external's traffic to the pool takes.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInExternal(ctx context.Context, extName, poolCIDR string) error {
+	attaches := &vpcapi.ExternalAttachmentList{}
+	if err := testCtx.kube.List(ctx, attaches, kclient.MatchingLabels{vpcapi.LabelExternal: extName}); err != nil {
+		return fmt.Errorf("listing attachments for external %s: %w", extName, err)
+	}
+	switches := map[string]bool{}
+	for _, attach := range attaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: attach.Spec.Connection}, conn); err != nil {
+			return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
+		}
+		sws, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return fmt.Errorf("getting endpoints of connection %s: %w", attach.Spec.Connection, err)
+		}
+		for _, sw := range sws {
+			switches[sw] = true
+		}
+	}
+	if len(switches) == 0 {
+		return fmt.Errorf("no switches attached to external %s", extName) //nolint:err113
+	}
+	slog.Info("Waiting for NAT pool route on external switches", "external", extName, "switches", switches, "pool", poolCIDR)
+
+	vrfName := "VrfE" + extName
+	if testCtx.cumulus {
+		vrfName = "ext-" + extName
+	}
+
+	return testCtx.waitForRoutesInSwitchVRFs(ctx, switches, []string{poolCIDR}, vrfName)
 }
 
 // wait until all switches in a set have a bunch of routes installed in the VRF of vpcName (the
 // default VRF if empty), or error out after 3 minutes
 func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vpcName string) error {
+	return testCtx.waitForRoutesInSwitchVRFs(ctx, switches, routes, switchVRFName(testCtx.cumulus, vpcName))
+}
+
+// wait until all switches in a set have a bunch of routes installed in vrfName, or error out after
+// 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitchVRFs(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
 	const timeout = 3 * time.Minute
-	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vpc", vpcName, "timeout", timeout)
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
@@ -427,7 +467,6 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 		}
 		sshs[sw] = ssh
 	}
-	vrfName := switchVRFName(testCtx.cumulus, vpcName)
 
 	for {
 		allFound := true
