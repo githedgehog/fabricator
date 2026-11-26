@@ -42,6 +42,7 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			F:    singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				CumulusVX:     true,
 				NoServers:     true,
 			},
 		},
@@ -87,6 +88,7 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			F:    bundledFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				CumulusVX:     true,
 				NoServers:     true,
 			},
 		},

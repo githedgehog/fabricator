@@ -40,6 +40,7 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			F:    multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				CumulusVX:     true,
 				NoServers:     true,
 			},
 		},
@@ -48,6 +49,7 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			F:    multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				CumulusVX:     true,
 				SubInterfaces: true,
 				NoServers:     true,
 			},

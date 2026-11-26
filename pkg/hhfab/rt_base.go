@@ -285,7 +285,8 @@ type JUnitTestSuite struct {
 }
 
 type SkipFlags struct {
-	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch other than Cumulus VX in the vlab
+	CumulusVX         bool `xml:"-"` // skip if there's any Cumulus VX switch in the vlab
 	NoBGPExternals    bool `xml:"-"` // skip if there are no viable BGP externals
 	NoStaticExternals bool `xml:"-"` // skip if there are no viable static externals
 	ExtendedOnly      bool `xml:"-"` // skip if extended tests are not enabled
@@ -308,6 +309,9 @@ func (sf *SkipFlags) PrettyPrint() string {
 	var parts []string
 	if sf.VirtualSwitch {
 		parts = append(parts, "VS")
+	}
+	if sf.CumulusVX {
+		parts = append(parts, "CmlsVX")
 	}
 	if sf.NoBGPExternals {
 		parts = append(parts, "NoBGPExt")
@@ -677,6 +681,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.CumulusVX && skipFlags.CumulusVX {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are Cumulus VX switches",
+			}
+			suite.Skipped++
+
+			continue
+		}
 		if test.SkipFlags.NoBGPExternals && skipFlags.NoBGPExternals {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are no viable externals",
@@ -935,11 +947,15 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	roceLeaves := make([]string, 0)
 	for i, sw := range swList.Items {
 		// check for virtual switches
-		if !skipFlags.VirtualSwitch {
-			if slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
-				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
-				skipFlags.VirtualSwitch = true
+		// Cumulus VX runs more of the tests than the other virtual switches, so it has its own flag
+		if sw.Spec.Profile == meta.SwitchProfileCmlsVX {
+			if !skipFlags.CumulusVX {
+				slog.Warn("Cumulus VX switch found, some tests will be skipped", "switch", sw.Name)
+				skipFlags.CumulusVX = true
 			}
+		} else if !skipFlags.VirtualSwitch && slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
+			slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
+			skipFlags.VirtualSwitch = true
 		}
 		profile := &wiringapi.SwitchProfile{}
 		// did we already check this profile for another switch?

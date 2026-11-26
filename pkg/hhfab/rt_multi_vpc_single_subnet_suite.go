@@ -122,6 +122,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoGateway:      true,
 				NoServers:      true,
 				VirtualSwitch:  true,
+				CumulusVX:      true,
 			},
 		},
 		{
