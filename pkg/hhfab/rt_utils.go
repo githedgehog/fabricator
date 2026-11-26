@@ -766,7 +766,7 @@ func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, ap
 }
 
 // set port breakout mode on a portof a switch
-func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, waitCompleted bool) error {
+func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, cumulus, waitCompleted bool) error {
 	slog.Debug("Setting breakout mode", "switch", swName, "port", port, "mode", targetMode)
 	sw := &wiringapi.Switch{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
@@ -814,7 +814,8 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 			if bkStatus.Mode != targetMode {
 				return fmt.Errorf("breakout mode %s for port %s on switch %s not applied, expected %s but got %s", targetMode, port, swName, targetMode, bkStatus.Mode) //nolint:err113
 			}
-			if bkStatus.Status == "Completed" {
+			// the Cumulus agent reports the breakout mode NVUE applied, but no status
+			if bkStatus.Status == "Completed" || cumulus && bkStatus.Status == "" {
 				slog.Debug("Breakout mode applied successfully", "switch", swName, "port", port, "mode", targetMode)
 
 				return nil
