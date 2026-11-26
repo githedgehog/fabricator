@@ -1,7 +1,7 @@
 module go.githedgehog.com/fabricator
 
 // Always use a full Go version (e.g. 1.27.3, not 1.27) as just uses it as GOTOOLCHAIN.
-go 1.27.3
+go 1.27.4
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
@@ -70,7 +70,7 @@ require (
 	github.com/ScaleFT/sshkeys v1.4.0 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
-	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.42.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
