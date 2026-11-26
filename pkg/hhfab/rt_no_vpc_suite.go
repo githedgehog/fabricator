@@ -214,10 +214,10 @@ func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivi
 			// we had a bug where the breakout mode could only be set the first time, so we need to check if the current mode is different from the default
 			if currMode == defaultBreakouts[unusedPort] {
 				slog.Debug("Unused port is in default breakout mode, setting it to target mode", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "targetMode", targetMode)
-				if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, true); err != nil {
+				if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, testCtx.cumulus, true); err != nil {
 					// revert change anyway
 					slog.Debug("Setting breakout mode failed, reverting to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort])
-					_ = setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], false)
+					_ = setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], testCtx.cumulus, false)
 
 					return fmt.Errorf("setting breakout mode for port %s on switch %s: %w", unusedPort, agent.Name, err)
 				}
@@ -225,7 +225,7 @@ func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivi
 			}
 			// now set it to default mode again
 			slog.Debug("Setting breakout mode back to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "currentMode", currMode)
-			if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], true); err != nil {
+			if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], testCtx.cumulus, true); err != nil {
 				return fmt.Errorf("setting breakout mode back to default for port %s on switch %s: %w", unusedPort, agent.Name, err)
 			}
 			slog.Debug("Breakout test passed for switch", "switch", agent.Name, "port", unusedPort, "mode", targetMode)
