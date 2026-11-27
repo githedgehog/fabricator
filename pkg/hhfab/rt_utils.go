@@ -238,8 +238,52 @@ func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName
 	return nil
 }
 
-// disable agent, shutdown port on switch, test connectivity, enable agent, set port up
-func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink, matrix *ConnectivityMatrix) (returnErr error) {
+// check the server's other links are up, disable agent, shutdown port on switch, test connectivity,
+// enable agent, set port up
+func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink, others []wiringapi.ServerToSwitchLink, matrix *ConnectivityMatrix) (returnErr error) {
+	// with another link already down, taking this one down cuts the server off and reads as a failover bug
+	if len(others) > 0 {
+		server := link.Server.DeviceName()
+		serverSSH, err := testCtx.getSSH(ctx, server)
+		if err != nil {
+			return fmt.Errorf("getting ssh config for server %s: %w", server, err)
+		}
+		files := make([]string, 0, len(others))
+		for _, other := range others {
+			files = append(files, other.Server.LocalPortName()+"/operstate")
+		}
+		// prints <nic>/operstate:<state> for each link
+		cmd := "cd /sys/class/net && grep -H . " + strings.Join(files, " ")
+		// a link brought back up by the previous round may still be coming up
+		deadline := time.Now().Add(time.Minute)
+		var down []string
+		for {
+			stdout, stderr, err := serverSSH.Run(ctx, cmd)
+			if err != nil {
+				return fmt.Errorf("reading link state on server %s: %w: %s", server, err, stderr)
+			}
+			state := map[string]string{}
+			for line := range strings.SplitSeq(stdout, "\n") {
+				if nic, st, ok := strings.Cut(strings.TrimSpace(line), "/operstate:"); ok {
+					state[nic] = st
+				}
+			}
+			down = down[:0]
+			for _, other := range others {
+				if state[other.Server.LocalPortName()] != "up" {
+					down = append(down, fmt.Sprintf("%s (%s)", other.Server.LocalPortName(), other.Switch.Port))
+				}
+			}
+			if len(down) == 0 || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+		if len(down) > 0 {
+			return fmt.Errorf("server %s has links down before taking %s (%s) down: %s", server, link.Server.LocalPortName(), link.Switch.Port, strings.Join(down, ", ")) //nolint:err113
+		}
+	}
+
 	switchPort := link.Switch
 	deviceName := switchPort.DeviceName()
 	// get switch profile to find the port name in sonic-cli

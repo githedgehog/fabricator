@@ -173,8 +173,9 @@ func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Connecti
 		if len(conn.Spec.ESLAG.Links) != 2 {
 			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:err113
 		}
-		for _, link := range conn.Spec.ESLAG.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
+		for i, link := range conn.Spec.ESLAG.Links {
+			others := slices.Concat(conn.Spec.ESLAG.Links[:i], conn.Spec.ESLAG.Links[i+1:])
+			if err := shutDownLinkAndTest(ctx, testCtx, link, others, matrix); err != nil {
 				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
@@ -208,8 +209,9 @@ func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 		if len(conn.Spec.Bundled.Links) < 2 {
 			return false, nil, fmt.Errorf("bundled connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:err113
 		}
-		for _, link := range conn.Spec.Bundled.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
+		for i, link := range conn.Spec.Bundled.Links {
+			others := slices.Concat(conn.Spec.Bundled.Links[:i], conn.Spec.Bundled.Links[i+1:])
+			if err := shutDownLinkAndTest(ctx, testCtx, link, others, matrix); err != nil {
 				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
