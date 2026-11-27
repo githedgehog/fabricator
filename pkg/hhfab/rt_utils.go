@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -222,9 +223,31 @@ func changeAgentStatus(ctx context.Context, ssh *sshutil.Config, swName string, 
 	return nil
 }
 
-// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
-func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, up bool) error {
+// Change the admin status of a switch port: (no) shutdown in the sonic-cli, or the link state in
+// NVUE on Cumulus. The agent brings a port that is down this way back up when it starts, as its
+// config then differs from the applied one, the same as it does on SONiC.
+//
+// On Cumulus, NVUE keeps one pending revision for every nv command on the switch. If the agent was
+// stopped in the middle of its config replace, that revision is partial, and applying it on top of
+// the port change removes the rest of the switch config, management included. Detaching first
+// starts the port change from the applied revision instead.
+func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, cumulus, up bool) error {
 	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
+	if cumulus {
+		state := "down"
+		if up {
+			state = "up" // as the agent sets it, so its next apply finds nothing to change
+		}
+		cmd := fmt.Sprintf("sudo -n nv config detach && sudo -n nv set interface %s link state %s && sudo -n nv config apply -y", nosPortName, state)
+		// an apply that cuts the switch off would otherwise leave the command waiting forever
+		runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if _, stderr, err := ssh.Run(runCtx, cmd); err != nil {
+			return fmt.Errorf("changing port %s status on switch %s: %w: %s", nosPortName, deviceName, err, stderr)
+		}
+
+		return nil
+	}
 	if up {
 		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "no shutdown"); err != nil {
 			return err
@@ -290,11 +313,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}()
 
 	// set port down
-	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, false); err != nil {
+	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, testCtx.cumulus, false); err != nil {
 		return fmt.Errorf("setting switch port down: %w", err)
 	}
 	defer func() {
-		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, true); err != nil {
+		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, testCtx.cumulus, true); err != nil {
 			portErr := fmt.Errorf("setting port up on %s: %w", deviceName, err)
 			if returnErr != nil {
 				returnErr = errors.Join(returnErr, portErr)
@@ -341,43 +364,137 @@ func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string)
 	return switches, nil
 }
 
-// check that a route is present in a switch (by checking in the sonic-cli)
+// switchVRFName returns the VRF a switch uses for vpcName, or its default VRF if vpcName is empty.
+func switchVRFName(cumulus bool, vpcName string) string {
+	switch {
+	case vpcName == "":
+		return defaultVRFName
+	case cumulus:
+		return "vpc-" + vpcName
+	default:
+		return "VrfV" + vpcName
+	}
+}
+
+// checkRouteInSwitch reports whether FRR on the switch has route installed in vrfName. A CIDR
+// matches only a route with exactly that prefix: a /25 or a /16 doesn't satisfy a /24. An address
+// matches the longest prefix covering it, so a connected subnet satisfies it as soon as the
+// interface has its IP. Routes whose next hops are all unreachable don't count: the unreachable
+// default in every Cumulus VPC VRF, and blackhole or reject routes.
+// SONiC's vtysh on the host runs it in the bgp container.
 func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
-	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
+	cmd := fmt.Sprintf("sudo -n vtysh -c 'show ip route vrf %s %s json'", vrfName, route)
 	stdout, stderr, err := ssh.Run(ctx, cmd)
 	if err != nil {
 		return false, fmt.Errorf("executing '%s' on switch %s: %w: %s", cmd, switchName, err, stderr)
 	}
 
-	return stdout != "", nil
+	// a VRF that doesn't exist yet gives "% VRF <name> not found" or {"warning": "..."}
+	out := strings.TrimSpace(stdout)
+	if !strings.HasPrefix(out, "{") {
+		slog.Debug("No routes from switch yet", "switch", switchName, "vrf", vrfName, "output", out)
+
+		return false, nil
+	}
+	prefixes := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(out), &prefixes); err != nil {
+		return false, fmt.Errorf("parsing routes from switch %s: %w: %s", switchName, err, out)
+	}
+	for prefix, raw := range prefixes {
+		if prefix == "warning" {
+			continue
+		}
+		entries := []struct {
+			Installed bool `json:"installed"`
+			Nexthops  []struct {
+				Unreachable bool `json:"unreachable"`
+			} `json:"nexthops"`
+		}{}
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return false, fmt.Errorf("parsing route %s from switch %s: %w", prefix, switchName, err)
+		}
+		for _, e := range entries {
+			if !e.Installed {
+				continue
+			}
+			for _, nh := range e.Nexthops {
+				if !nh.Unreachable {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
 
-// waitForNATPoolInLeaves waits until the gateway-originated NAT pool CIDR appears in the FIB of
-// the leaves attached to the given VPC, in the VPC's VRF. WaitReady only confirms the gateway and
-// switches are programmed; this verifies the route has actually propagated through the fabric so
-// subsequent NAT-pool traffic has a valid forwarding path. Replaces blind iperf3/curl retry loops
-// with a precise reachability gate.
-func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vpc *vpcapi.VPC, poolCIDR string) error {
-	leaves, err := getSwitchesForVPC(ctx, testCtx.kube, vpc.Name)
+// waitForNATPoolInVPC waits until poolCIDR, the NAT pool a gateway peering exposes to peerVPC,
+// is installed in peerVPC's VRF on the leaves attached to it: the path peerVPC's servers use to
+// reply to the pool and to reach a port forwarded on it. WaitReady only confirms the gateway and
+// switches are programmed, not that the route has propagated through the fabric.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInVPC(ctx context.Context, peerVPC *vpcapi.VPC, poolCIDR string) error {
+	leaves, err := getSwitchesForVPC(ctx, testCtx.kube, peerVPC.Name)
 	if err != nil {
-		return fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
+		return fmt.Errorf("getting switches for vpc %s: %w", peerVPC.Name, err)
 	}
 	if len(leaves) == 0 {
 		return nil
 	}
-	vrfName := "VrfV" + vpc.Name
-	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-		vrfName = defaultVRFName
+	vrfVPC := peerVPC.Name
+	if peerVPC.Spec.Mode == vpcapi.VPCModeL3Flat {
+		vrfVPC = ""
 	}
-	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
+	slog.Info("Waiting for NAT pool route on peer VPC leaves", "vpc", peerVPC.Name, "leaves", leaves, "pool", poolCIDR)
 
-	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
+	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfVPC)
 }
 
-// wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
+// waitForNATPoolInExternal waits until poolCIDR, the NAT pool a gateway peering exposes to
+// extName, is installed in the external's VRF on the switches attached to it, which is the path
+// the external's traffic to the pool takes.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInExternal(ctx context.Context, extName, poolCIDR string) error {
+	attaches := &vpcapi.ExternalAttachmentList{}
+	if err := testCtx.kube.List(ctx, attaches, kclient.MatchingLabels{vpcapi.LabelExternal: extName}); err != nil {
+		return fmt.Errorf("listing attachments for external %s: %w", extName, err)
+	}
+	switches := map[string]bool{}
+	for _, attach := range attaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: attach.Spec.Connection}, conn); err != nil {
+			return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
+		}
+		sws, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return fmt.Errorf("getting endpoints of connection %s: %w", attach.Spec.Connection, err)
+		}
+		for _, sw := range sws {
+			switches[sw] = true
+		}
+	}
+	if len(switches) == 0 {
+		return fmt.Errorf("no switches attached to external %s", extName) //nolint:err113
+	}
+	slog.Info("Waiting for NAT pool route on external switches", "external", extName, "switches", switches, "pool", poolCIDR)
+
+	vrfName := "VrfE" + extName
+	if testCtx.cumulus {
+		vrfName = "ext-" + extName
+	}
+
+	return testCtx.waitForRoutesInSwitchVRFs(ctx, switches, []string{poolCIDR}, vrfName)
+}
+
+// wait until all switches in a set have a bunch of routes installed in the VRF of vpcName (the
+// default VRF if empty), or error out after 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vpcName string) error {
+	return testCtx.waitForRoutesInSwitchVRFs(ctx, switches, routes, switchVRFName(testCtx.cumulus, vpcName))
+}
+
+// wait until all switches in a set have a bunch of routes installed in vrfName, or error out after
+// 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitchVRFs(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
 	const timeout = 3 * time.Minute
-	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
@@ -649,7 +766,7 @@ func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, ap
 }
 
 // set port breakout mode on a portof a switch
-func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, waitCompleted bool) error {
+func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, cumulus, waitCompleted bool) error {
 	slog.Debug("Setting breakout mode", "switch", swName, "port", port, "mode", targetMode)
 	sw := &wiringapi.Switch{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
@@ -697,7 +814,8 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 			if bkStatus.Mode != targetMode {
 				return fmt.Errorf("breakout mode %s for port %s on switch %s not applied, expected %s but got %s", targetMode, port, swName, targetMode, bkStatus.Mode) //nolint:err113
 			}
-			if bkStatus.Status == "Completed" {
+			// the Cumulus agent reports the breakout mode NVUE applied, but no status
+			if bkStatus.Status == "Completed" || cumulus && bkStatus.Status == "" {
 				slog.Debug("Breakout mode applied successfully", "switch", swName, "port", port, "mode", targetMode)
 
 				return nil
