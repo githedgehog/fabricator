@@ -41,8 +41,9 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			Name: "Single VPC with restrictions",
 			F:    singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
@@ -70,42 +71,43 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			Name: "ESLAG Failover",
 			F:    eslagTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "ESLAG Fallback",
 			F:    eslagFallbackTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Bundled Failover",
 			F:    bundledFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Spine Failover",
 			F:    spineFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoFabricLink:  true,
-				NoServers:     true,
+				SonicVS:      true,
+				NoFabricLink: true,
+				NoServers:    true,
 			},
 		},
 		{
 			Name: "Mesh Failover",
 			F:    meshFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoMeshLink:    true,
-				NoServers:     true,
+				SonicVS:    true,
+				NoMeshLink: true,
+				NoServers:  true,
 			},
 		},
 		{
@@ -295,7 +297,7 @@ outer:
 
 					break outer
 				}
-				if err := changeSwitchPortStatus(ctx, spineSSH, spine.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, spineSSH, spine.Name, nosPortName, testCtx.cumulus, false); err != nil {
 					returnErr = fmt.Errorf("setting switch port down: %w", err)
 
 					break outer
@@ -527,11 +529,10 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 				continue
 			}
 
-			vrfName := "VrfV" + vpc.Name
 			slog.Info("Waiting for gateway routes on leaves after spine recovery",
-				"vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
+				"vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes)
 			if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
-				vrfName); err != nil {
+				vpc.Name); err != nil {
 				return fmt.Errorf("waiting for gateway routes after spine recovery in vpc %s: %w", vpc.Name, err)
 			}
 		}
@@ -658,7 +659,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	// shut down all spine ports connected to the target gateway
 	for _, sp := range spinePorts {
 		slog.Debug("Shutting down spine port", "spine", sp.spineName, "port", sp.nosPortName)
-		if err := changeSwitchPortStatus(ctx, spinesSSH[sp.spineName], sp.spineName, sp.nosPortName, false); err != nil {
+		if err := changeSwitchPortStatus(ctx, spinesSSH[sp.spineName], sp.spineName, sp.nosPortName, testCtx.cumulus, false); err != nil {
 			returnErr = fmt.Errorf("setting switch port down: %w", err)
 
 			break
@@ -792,7 +793,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 				if !ok {
 					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:err113
 				}
-				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, testCtx.cumulus, false); err != nil {
 					return false, reverts, fmt.Errorf("setting switch port down: %w", err)
 				}
 			}
@@ -1609,9 +1610,24 @@ outer:
 	dscpOpts := testCtx.tcOpts
 	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
 
-	slog.Debug("Clearing queue counters on switch", "switch", swName)
-	if err := execConfigCmd(ctx, swSSH, swName, "clear queue counters"); err != nil {
-		return false, nil, fmt.Errorf("clearing queue counters on switch %s: %w", swName, err)
+	// NVUE has no command that clears the queue counters, so on Cumulus the traffic is counted
+	// from what they read before it
+	uc3Before := map[string]agentapi.SwitchStateInterfaceCountersQueue{}
+	if testCtx.cumulus {
+		agent := &agentapi.Agent{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent); err != nil {
+			return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
+		}
+		for iface, ifaceStats := range agent.Status.State.Interfaces {
+			if ifaceStats.Counters != nil {
+				uc3Before[iface] = ifaceStats.Counters.Queues["UC3"]
+			}
+		}
+	} else {
+		slog.Debug("Clearing queue counters on switch", "switch", swName)
+		if err := execConfigCmd(ctx, swSSH, swName, "clear queue counters"); err != nil {
+			return false, nil, fmt.Errorf("clearing queue counters on switch %s: %w", swName, err)
+		}
 	}
 
 	slog.Debug("Testing connectivity with DSCP options", "dscpOpts", dscpOpts)
@@ -1649,10 +1665,17 @@ outer:
 
 				continue
 			}
-			if uc3.TransmitBits > minTransmitBits {
+			before, ok := uc3Before[iface]
+			if testCtx.cumulus && !ok {
+				// its counters may hold UC3 traffic from before the test
+				slog.Debug("No UC3 queue counters before the test for interface", "switch", swName, "interface", iface)
+
+				continue
+			}
+			if uc3.TransmitBits > before.TransmitBits+minTransmitBits {
 				slog.Debug("Found UC3 transmit bits on interface", "switch", swName, "interface", iface, "uc3TransmitBits", uc3.TransmitBits)
 				uc3Map[iface] = true
-			} else if uc3.TransmitPkts > minTransmitPkts {
+			} else if uc3.TransmitPkts > before.TransmitPkts+minTransmitPkts {
 				slog.Debug("Found UC3 transmit packets but no bits on interface", "switch", swName, "interface", iface, "uc3TransmitPackets", uc3.TransmitPkts)
 				uc3Map[iface] = true
 			}

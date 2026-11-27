@@ -2,7 +2,7 @@
 # Copyright 2024 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-# show-tech.sh: Collect diagnostics from a SONiC switch.
+# show-tech.sh: Collect diagnostics from a SONiC or Cumulus switch.
 # Commands run in parallel (up to MAX_PARALLEL) to reduce collection time.
 set +e
 
@@ -12,10 +12,150 @@ MAX_PARALLEL=6
 
 : > "$OUTPUT_FILE"
 rm -rf "$PARTS_DIR"
-mkdir -p "$PARTS_DIR"
 
 # Counter for ordering output parts
 PART_IDX=0
+
+# ---------------------------
+# Cumulus Linux
+# ---------------------------
+# Cumulus has no sonic-cli or bgp container. NVUE state comes from nv, FRR state
+# from vtysh, which needs root, so it runs through passwordless sudo (enabled by
+# the agent on Cumulus). Sections SONiC collects that have no Cumulus
+# counterpart (QoS/PFC counters, err-disable timeline, Broadcom SDK) are left
+# out.
+#
+# hhfab gives a switch 10 minutes in total, including the log download, so the
+# nv and vtysh commands share a 6-minute budget. The first nv or vtysh command
+# that times out skips the rest of its kind, so a hung nvued doesn't use up the
+# budget the FRR state needs, or the other way round. The kernel, log and agent
+# sections run after it and must all finish by 8 minutes, leaving 2 for the
+# download. Commands past either deadline are skipped.
+if ! command -v sonic-cli >/dev/null 2>&1 && command -v nv >/dev/null 2>&1; then
+    CL_DEADLINE=$((SECONDS + 360))
+    CL_END=$((SECONDS + 480))
+    CL_HUNG=""
+    export PATH="$PATH:/sbin:/usr/sbin"
+
+    # cl_cmd LABEL CMD: run CMD with what is left of the budget, at most 120s.
+    cl_cmd() {
+        echo -e "\n=== [$1] Executing: $2 ==="
+        local kind=""
+        case "$2" in
+            "nv "*) kind=nv ;;
+            "sudo -n vtysh "*) kind=vtysh ;;
+        esac
+        if [ -n "$kind" ] && [[ " $CL_HUNG " == *" $kind "* ]]; then
+            echo "Skipped: an earlier $kind command timed out"
+            return
+        fi
+        local t=$((CL_DEADLINE - SECONDS))
+        [ "$t" -gt 120 ] && t=120
+        if [ "$t" -le 0 ]; then
+            echo "Skipped: show-tech time budget exhausted"
+            return
+        fi
+        timeout "$t" bash -c "$2" 2>&1
+        if [ $? -eq 124 ] && [ -n "$kind" ]; then
+            echo "Timed out after ${t}s, skipping the remaining $kind commands"
+            CL_HUNG="$CL_HUNG $kind"
+        fi
+    }
+
+    # cl_tail LABEL CMD: run CMD with what is left until CL_END, at most 30s.
+    cl_tail() {
+        echo -e "\n=== [$1] Executing: $2 ==="
+        local t=$((CL_END - SECONDS))
+        [ "$t" -gt 30 ] && t=30
+        if [ "$t" -le 0 ]; then
+            echo "Skipped: show-tech time budget exhausted"
+            return
+        fi
+        timeout "$t" bash -c "$2" 2>&1
+    }
+
+    vtysh_cmd() {
+        cl_cmd "$1" "sudo -n vtysh -c '$2'"
+    }
+
+    {
+        cl_cmd "System" "nv show system"
+        cl_cmd "System" "grep -E '^(PRETTY_NAME|VERSION)=' /etc/os-release"
+        cl_cmd "System" "uptime"
+        cl_cmd "System" "nv show system health"
+
+        # Applied config, its revision history and what the agent last pushed.
+        # The agent keeps the last diff of each apply as files; empty means the
+        # apply changed nothing.
+        cl_cmd "Config" "nv config show -r applied"
+        cl_cmd "Config" "nv config history"
+        cl_cmd "Config" "nv config revision"
+        cl_cmd "Config" "nv config diff"
+        for f in /etc/hedgehog/last-diff.yaml /etc/hedgehog/last-diff-applied.yaml; do
+            cl_cmd "Config" "echo '--- $f'; cat $f"
+        done
+        vtysh_cmd "Config" "show running-config"
+
+        cl_cmd "Interface" "nv show interface"
+        cl_cmd "Interface" "nv show interface --view=lldp"
+        cl_cmd "Interface" "nv show interface --view=counters"
+
+        cl_cmd "VLAN/VXLAN" "nv show bridge domain br_default vlan"
+        cl_cmd "VLAN/VXLAN" "nv show nve vxlan"
+        cl_cmd "VLAN/VXLAN" "bridge -d vlan show"
+        cl_cmd "VLAN/VXLAN" "ip -d link show type vxlan"
+
+        cl_cmd "L2" "nv show bridge domain br_default mac-table"
+        cl_cmd "L2" "for b in /proc/net/bonding/*; do [ -e \"\$b\" ] || continue; echo \"--- \$b\"; cat \"\$b\"; done"
+
+        vtysh_cmd "BGP/EVPN" "show bgp vrf all summary"
+        vtysh_cmd "BGP/EVPN" "show bgp l2vpn evpn summary"
+        vtysh_cmd "BGP/EVPN" "show bgp vrf all neighbors"
+        vtysh_cmd "BGP/EVPN" "show bgp l2vpn evpn"
+        vtysh_cmd "BGP/EVPN" "show bgp l2vpn evpn route"
+        vtysh_cmd "BGP/EVPN" "show route-map"
+        vtysh_cmd "BFD" "show bfd peers"
+        vtysh_cmd "BFD" "show bfd peers counters"
+        vtysh_cmd "EVPN" "show evpn"
+        vtysh_cmd "EVPN" "show evpn vni detail"
+        vtysh_cmd "EVPN" "show evpn mac vni all detail"
+        vtysh_cmd "EVPN" "show evpn es detail"
+        vtysh_cmd "EVPN" "show evpn arp-cache vni all"
+
+        vtysh_cmd "Routes" "show vrf vni"
+        vtysh_cmd "Routes" "show ip route vrf all"
+        vtysh_cmd "Routes" "show bgp vrf all ipv4 unicast"
+
+        cl_cmd "Platform" "nv show platform"
+        cl_cmd "Platform" "nv show platform environment"
+        cl_cmd "Platform" "nv show platform transceiver"
+        cl_cmd "Platform" "nv show interface --view=dom"
+
+        # Kernel MAC/neighbor state and datapath counters, as on SONiC.
+        cl_tail "Kernel" "bridge fdb show"
+        cl_tail "Kernel" "ip neigh show"
+        cl_tail "Kernel" "ip -s -s link show"
+        cl_tail "Kernel" "tc -s qdisc show"
+        cl_tail "Kernel" "cat /proc/net/softnet_stat"
+        cl_tail "Kernel" "sudo -n ss -0 -a -e -m -p"
+        cl_tail "Kernel" "nstat -as"
+        cl_tail "Kernel" "for p in /sys/class/net/swp*; do [ -e \"\$p\" ] || continue; echo \"--- \${p##*/}\"; ethtool -S \"\${p##*/}\"; done"
+        cl_tail "Kernel" "top -b -n 1 -w 200 | head -40"
+
+        cl_tail "Agent" "systemctl status hedgehog-agent"
+        cl_tail "Agent" "cat /var/log/agent.log"
+
+        cl_tail "Logs" "sudo -n journalctl --no-pager -n 300 -u frr"
+        cl_tail "Logs" "sudo -n journalctl --no-pager -n 300 -u nvued"
+        cl_tail "Logs" "sudo -n journalctl --no-pager -n 300 -u switchd"
+        cl_tail "Logs" "sudo -n tail -n 500 /var/log/syslog"
+    } >> "$OUTPUT_FILE" 2>&1
+
+    echo "Diagnostics collected to $OUTPUT_FILE"
+    exit 0
+fi
+
+mkdir -p "$PARTS_DIR"
 
 # Queue a sonic-cli command to run in parallel.
 # Output is captured to a numbered part file for ordered concatenation.

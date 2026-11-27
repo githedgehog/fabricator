@@ -102,12 +102,26 @@ if {[info exists env(HHFAB_SWITCH_USERNAME)] && [info exists env(HHFAB_SWITCH_PA
     log_message "EXP-DBG" "Attempting login with provided credentials"
     set max_login_attempts 3
     set login_attempts 0
+    # a stale prompt on the screen and each failed attempt add one, so allow more than the attempts
+    set max_login_prompts 6
+    set login_prompts 0
     set login_done 0
     while {!$login_done} {
         expect {
             -re "(?i)login:" {
-                send "$env(HHFAB_SWITCH_USERNAME)\r"
-                exp_continue
+                # the Cumulus banner has "Last login:", answering it types the user into the shell
+                if {[string match -nocase "*last login:" $expect_out(buffer)]} {
+                    exp_continue
+                }
+                # each match restarts the timeout, so a console repeating the prompt must not loop forever
+                incr login_prompts
+                if {$login_prompts > $max_login_prompts} {
+                    log_message "EXP-ERR" "Login failed: login prompt repeated $login_prompts times"
+                    set login_done 1
+                } else {
+                    send "$env(HHFAB_SWITCH_USERNAME)\r"
+                    exp_continue
+                }
             }
             -re "Password:" {
                 if {$login_attempts >= $max_login_attempts} {
@@ -177,21 +191,53 @@ proc run_cmd {cmd prompt prompt_timeout} {
 }
 
 if {$logged_in} {
-    run_cmd "ip addr show eth0" $prompt_re $prompt_timeout
-    run_cmd "ip link show eth0" $prompt_re $prompt_timeout
-    run_cmd "ip route show" $prompt_re $prompt_timeout
-    run_cmd "ip neigh | grep eth0" $prompt_re $prompt_timeout
-    run_cmd "systemctl status sshd --no-pager" $prompt_re $prompt_timeout
-    run_cmd "ss -tulnp | grep ':22'" $prompt_re $prompt_timeout
-    run_cmd "systemctl status hedgehog-agent --no-pager" $prompt_re $prompt_timeout
-    run_cmd "tail -n 100 /var/log/agent.log" $prompt_re $prompt_timeout
-    run_cmd "systemctl status hedgehog-alloy --no-pager" $prompt_re $prompt_timeout
-    run_cmd "tail -n 100 /var/log/syslog" $prompt_re $prompt_timeout
-
+    set control_ip "172.30.0.1"
     if {[info exists env(CONTROL_PLANE_IP)]} {
-        run_cmd "ping -c 3 $env(CONTROL_PLANE_IP)" $prompt_re $prompt_timeout
+        set control_ip $env(CONTROL_PLANE_IP)
+    }
+
+    # Cumulus has nv and no sonic-cli; the split markers keep the echoed command from matching, and
+    # waiting for the answer rather than a prompt keeps a leftover prompt from deciding it
+    set cumulus 0
+    send -- "if command -v nv >/dev/null && ! command -v sonic-cli >/dev/null; then echo NOS=cum''ulus; else echo NOS=oth''er; fi\r"
+    expect -timeout $prompt_timeout -ex "NOS=cumulus" {
+        set cumulus 1
+    } -ex "NOS=other" {
+    } timeout {
+        log_message "EXP-ERR" "NOS check timed out; running the SONiC commands"
+    }
+    expect -timeout $prompt_timeout -re $prompt_re
+
+    if {$cumulus} {
+        # eth0 is in the mgmt VRF and sshd runs in it as ssh@mgmt; nvued applies the config that
+        # sets them up, so its state and recent revisions show whether an apply broke management
+        log_message "EXP-DBG" "Cumulus detected"
+        run_cmd "ip addr show eth0" $prompt_re $prompt_timeout
+        run_cmd "ip link show eth0" $prompt_re $prompt_timeout
+        run_cmd "ip route show vrf mgmt" $prompt_re $prompt_timeout
+        run_cmd "ip neigh show dev eth0" $prompt_re $prompt_timeout
+        run_cmd "systemctl status ssh@mgmt --no-pager" $prompt_re $prompt_timeout
+        run_cmd "ss -tlnp | grep ':22'" $prompt_re $prompt_timeout
+        run_cmd "systemctl status nvued --no-pager" $prompt_re $prompt_timeout
+        run_cmd "systemctl status hedgehog-agent --no-pager" $prompt_re $prompt_timeout
+        run_cmd "tail -n 100 /var/log/agent.log" $prompt_re $prompt_timeout
+        run_cmd "systemctl status hedgehog-alloy --no-pager" $prompt_re $prompt_timeout
+        run_cmd "sudo -n tail -n 100 /var/log/syslog" $prompt_re $prompt_timeout
+        run_cmd "ping -c 3 -I mgmt $control_ip" $prompt_re $prompt_timeout
+        # last, as nv can hang
+        run_cmd "nv config history | head -40" $prompt_re $prompt_timeout
     } else {
-        run_cmd "ping -c 3 172.30.0.1" $prompt_re $prompt_timeout
+        run_cmd "ip addr show eth0" $prompt_re $prompt_timeout
+        run_cmd "ip link show eth0" $prompt_re $prompt_timeout
+        run_cmd "ip route show" $prompt_re $prompt_timeout
+        run_cmd "ip neigh | grep eth0" $prompt_re $prompt_timeout
+        run_cmd "systemctl status sshd --no-pager" $prompt_re $prompt_timeout
+        run_cmd "ss -tulnp | grep ':22'" $prompt_re $prompt_timeout
+        run_cmd "systemctl status hedgehog-agent --no-pager" $prompt_re $prompt_timeout
+        run_cmd "tail -n 100 /var/log/agent.log" $prompt_re $prompt_timeout
+        run_cmd "systemctl status hedgehog-alloy --no-pager" $prompt_re $prompt_timeout
+        run_cmd "tail -n 100 /var/log/syslog" $prompt_re $prompt_timeout
+        run_cmd "ping -c 3 $control_ip" $prompt_re $prompt_timeout
     }
 } else {
     log_message "EXP-DBG" "Not logged in; skipping console commands"
