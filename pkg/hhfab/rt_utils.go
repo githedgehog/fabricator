@@ -376,9 +376,11 @@ func switchVRFName(cumulus bool, vpcName string) string {
 	}
 }
 
-// checkRouteInSwitch reports whether FRR on the switch has route installed in vrfName. FRR
-// matches a CIDR exactly and an address by its longest prefix, other than the default route, as
-// every Cumulus VRF has an unreachable one.
+// checkRouteInSwitch reports whether FRR on the switch has route installed in vrfName. A CIDR
+// matches only a route with exactly that prefix: a /25 or a /16 doesn't satisfy a /24. An address
+// matches the longest prefix covering it, so a connected subnet satisfies it as soon as the
+// interface has its IP. Routes whose next hops are all unreachable don't count: the unreachable
+// default in every Cumulus VPC VRF, and blackhole or reject routes.
 // SONiC's vtysh on the host runs it in the bgp container.
 func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
 	cmd := fmt.Sprintf("sudo -n vtysh -c 'show ip route vrf %s %s json'", vrfName, route)
@@ -387,24 +389,38 @@ func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, ro
 		return false, fmt.Errorf("executing '%s' on switch %s: %w: %s", cmd, switchName, err, stderr)
 	}
 
-	// a VRF that does not exist yet gives {"warning": "..."}
+	// a VRF that doesn't exist yet gives "% VRF <name> not found" or {"warning": "..."}
+	out := strings.TrimSpace(stdout)
+	if !strings.HasPrefix(out, "{") {
+		slog.Debug("No routes from switch yet", "switch", switchName, "vrf", vrfName, "output", out)
+
+		return false, nil
+	}
 	prefixes := map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(stdout), &prefixes); err != nil {
-		return false, fmt.Errorf("parsing routes from switch %s: %w: %s", switchName, err, stdout)
+	if err := json.Unmarshal([]byte(out), &prefixes); err != nil {
+		return false, fmt.Errorf("parsing routes from switch %s: %w: %s", switchName, err, out)
 	}
 	for prefix, raw := range prefixes {
-		if prefix == "warning" || prefix == "0.0.0.0/0" {
+		if prefix == "warning" {
 			continue
 		}
 		entries := []struct {
 			Installed bool `json:"installed"`
+			Nexthops  []struct {
+				Unreachable bool `json:"unreachable"`
+			} `json:"nexthops"`
 		}{}
 		if err := json.Unmarshal(raw, &entries); err != nil {
 			return false, fmt.Errorf("parsing route %s from switch %s: %w", prefix, switchName, err)
 		}
 		for _, e := range entries {
-			if e.Installed {
-				return true, nil
+			if !e.Installed {
+				continue
+			}
+			for _, nh := range e.Nexthops {
+				if !nh.Unreachable {
+					return true, nil
+				}
 			}
 		}
 	}

@@ -41,9 +41,9 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			Name: "Single VPC with restrictions",
 			F:    singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				CumulusVX:     true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
@@ -71,43 +71,43 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			Name: "ESLAG Failover",
 			F:    eslagTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "ESLAG Fallback",
 			F:    eslagFallbackTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Bundled Failover",
 			F:    bundledFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				CumulusVX:     true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Spine Failover",
 			F:    spineFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoFabricLink:  true,
-				NoServers:     true,
+				SonicVS:      true,
+				NoFabricLink: true,
+				NoServers:    true,
 			},
 		},
 		{
 			Name: "Mesh Failover",
 			F:    meshFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoMeshLink:    true,
-				NoServers:     true,
+				SonicVS:    true,
+				NoMeshLink: true,
+				NoServers:  true,
 			},
 		},
 		{

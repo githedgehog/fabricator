@@ -27,7 +27,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
 			},
 		},
 		{
@@ -37,7 +37,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
 			},
 		},
 		{
@@ -54,7 +54,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
-				VirtualSwitch: true,
+				SonicVS:       true,
 			},
 		},
 		{
@@ -121,7 +121,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				NoGateway:      true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
 				CumulusVX:      true,
 			},
 		},

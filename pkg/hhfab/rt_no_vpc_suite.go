@@ -56,7 +56,7 @@ func makeNoVpcsSuite() *JUnitTestSuite {
 			Name: "Breakout ports",
 			F:    breakoutTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
+				SonicVS: true,
 			},
 		},
 		{
