@@ -36,6 +36,9 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: |
+          # setup-go's problem matcher turns every call-trace line (file.go:1:2: ...)
+          # into a red error annotation, which buries the vulnerability list.
+          echo "::remove-matcher owner=go::"
           govulncheck -tags containers_image_openpgp,containers_image_storage_stub -show verbose ./...
 
       - name: Generate SARIF file
