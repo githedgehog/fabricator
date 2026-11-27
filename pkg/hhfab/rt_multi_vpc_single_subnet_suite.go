@@ -27,7 +27,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
 			},
 		},
 		{
@@ -37,7 +37,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
 			},
 		},
 		{
@@ -54,7 +54,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
-				VirtualSwitch: true,
+				SonicVS:       true,
 			},
 		},
 		{
@@ -121,7 +121,8 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 				NoBGPExternals: true,
 				NoGateway:      true,
 				NoServers:      true,
-				VirtualSwitch:  true,
+				SonicVS:        true,
+				CumulusVX:      true,
 			},
 		},
 		{
@@ -552,14 +553,14 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 			continue
 		}
 
-		vrfName := "VrfV" + vpc.Name
+		vrfVPC := vpc.Name
 		if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-			vrfName = defaultVRFName
+			vrfVPC = ""
 		}
 
-		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
+		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrfVPC", vrfVPC)
 		if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
-			vrfName); err != nil {
+			vrfVPC); err != nil {
 			return false, nil, fmt.Errorf("waiting for gateway routes in vpc %s: %w", vpc.Name, err)
 		}
 	}

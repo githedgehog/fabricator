@@ -39,15 +39,17 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			Name: "Multi-Subnets isolation",
 			F:    multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				CumulusVX: true,
+				NoServers: true,
 			},
 		},
 		{
 			Name: "Multi-Subnets with filtering",
 			F:    multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
+				SonicVS:       true,
+				CumulusVX:     true,
 				SubInterfaces: true,
 				NoServers:     true,
 			},
@@ -56,8 +58,8 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 			Name: "StaticExternal",
 			F:    staticExternalTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
+				SonicVS:   true,
+				NoServers: true,
 			},
 		},
 	}
@@ -666,13 +668,17 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 
 		return nil
 	})
+	vrfName := switchVRFName(testCtx.cumulus, inVPC.Name)
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+inVPC.Name); err != nil {
-		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, inVPC.Name, err)
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, inVPC.Name); err != nil {
+		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf %s: %w", switchName, vrfName, err)
 	}
 
-	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+inVPC.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
-	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", inVPC.Name, StaticExternalIP, StaticExternalNH)
+	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", vrfName, "source-ip", StaticExternalIP, "target", StaticExternalNH)
+	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf %s -I %s %s -c 3 -W 1\"", vrfName, StaticExternalIP, StaticExternalNH)
+	if testCtx.cumulus {
+		wuPingCmd = fmt.Sprintf("sudo -n ip vrf exec %s ping -I %s %s -c 3 -W 1", vrfName, StaticExternalIP, StaticExternalNH)
+	}
 	switchSSH, err := testCtx.getSSH(ctx, switchName)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting ssh config for switch %s: %w", switchName, err)
@@ -729,7 +735,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, defaultVRFName); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, ""); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
 	}
 

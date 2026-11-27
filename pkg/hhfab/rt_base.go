@@ -67,6 +67,7 @@ type VPCPeeringTestCtx struct {
 	noSetup          bool
 	showTechDump     bool
 	skipFlags        SkipFlags
+	cumulus          bool // the switches run Cumulus, not SONiC
 }
 
 // Test function types
@@ -129,7 +130,7 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	} else {
 		allVS := len(switches.Items) > 0
 		for _, sw := range switches.Items {
-			if sw.Spec.Profile != meta.SwitchProfileVS {
+			if !slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
 				allVS = false
 
 				break
@@ -284,7 +285,8 @@ type JUnitTestSuite struct {
 }
 
 type SkipFlags struct {
-	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	SonicVS           bool `xml:"-"` // skip if there's any SONiC virtual switch (vs or vs-clsp profile) in the vlab
+	CumulusVX         bool `xml:"-"` // skip if there's any Cumulus VX switch in the vlab
 	NoBGPExternals    bool `xml:"-"` // skip if there are no viable BGP externals
 	NoStaticExternals bool `xml:"-"` // skip if there are no viable static externals
 	ExtendedOnly      bool `xml:"-"` // skip if extended tests are not enabled
@@ -305,8 +307,11 @@ type SkipFlags struct {
 
 func (sf *SkipFlags) PrettyPrint() string {
 	var parts []string
-	if sf.VirtualSwitch {
-		parts = append(parts, "VS")
+	if sf.SonicVS {
+		parts = append(parts, "SonicVS")
+	}
+	if sf.CumulusVX {
+		parts = append(parts, "CmlsVX")
 	}
 	if sf.NoBGPExternals {
 		parts = append(parts, "NoBGPExt")
@@ -668,9 +673,17 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.VirtualSwitch && skipFlags.VirtualSwitch {
+		if test.SkipFlags.SonicVS && skipFlags.SonicVS {
 			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are virtual switches",
+				Message: "There are SONiC virtual switches",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.CumulusVX && skipFlags.CumulusVX {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are Cumulus VX switches",
 			}
 			suite.Skipped++
 
@@ -932,20 +945,22 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	}
 	profileMap := make(map[string]wiringapi.SwitchProfile, 0)
 	roceLeaves := make([]string, 0)
-	for _, sw := range swList.Items {
-		// check for virtual switches
-		if !skipFlags.VirtualSwitch {
-			if sw.Spec.Profile == meta.SwitchProfileVS {
-				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
-				skipFlags.VirtualSwitch = true
+	for i, sw := range swList.Items {
+		// check for virtual switches, SONiC VS and Cumulus VX fail different tests
+		switch sw.Spec.Profile {
+		case meta.SwitchProfileVS, meta.SwitchProfileVSCLSP:
+			if !skipFlags.SonicVS {
+				slog.Warn("SONiC virtual switch found, some tests will be skipped", "switch", sw.Name)
+				skipFlags.SonicVS = true
+			}
+		case meta.SwitchProfileCmlsVX:
+			if !skipFlags.CumulusVX {
+				slog.Warn("Cumulus VX switch found, some tests will be skipped", "switch", sw.Name)
+				skipFlags.CumulusVX = true
 			}
 		}
-		// check for leaf switches supporting subinterfaces and/or RoCE
-		if !sw.Spec.Role.IsLeaf() {
-			continue
-		}
 		profile := &wiringapi.SwitchProfile{}
-		// did we already check this profile for another leaf?
+		// did we already check this profile for another switch?
 		if p, ok := profileMap[sw.Spec.Profile]; ok {
 			profile = &p
 		} else {
@@ -954,12 +969,23 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 			}
 			profileMap[sw.Spec.Profile] = *profile
 		}
+		// the tests pick their switch commands once for the whole fabric
+		cumulus := slices.Contains(meta.NOSTypesCumulus, profile.Spec.NOSType)
+		if i == 0 {
+			testCtx.cumulus = cumulus
+		} else if cumulus != testCtx.cumulus {
+			return fmt.Errorf("switches %s and %s run different NOSes, release tests need one NOS for all switches", swList.Items[0].Name, sw.Name) //nolint:err113
+		}
+		// check for leaf switches supporting subinterfaces and/or RoCE
+		if !sw.Spec.Role.IsLeaf() {
+			continue
+		}
 		if !profile.Spec.Features.Subinterfaces && !skipFlags.SubInterfaces {
 			slog.Warn("Subinterfaces not supported on leaf switch, some tests will be skipped", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
 			skipFlags.SubInterfaces = true
 		}
 		// exclude virtual switches from RoCE check, they do not implement counters
-		if profile.Spec.Features.RoCE && sw.Spec.Profile != meta.SwitchProfileVS {
+		if profile.Spec.Features.RoCE && !slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
 			roceLeaves = append(roceLeaves, sw.Name)
 		}
 	}
